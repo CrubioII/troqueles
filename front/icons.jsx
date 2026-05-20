@@ -1,0 +1,16 @@
+// Small inline icons
+const Icon = {
+  Chev: (props) => <svg width="14" height="14" viewBox="0 0 16 16" fill="none" {...props}><path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+  Check: (props) => <svg width="12" height="12" viewBox="0 0 16 16" fill="none" {...props}><path d="M3 8.5L6.5 12L13 4.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+  Pencil: (props) => <svg width="11" height="11" viewBox="0 0 16 16" fill="none" {...props}><path d="M11 2l3 3-9 9H2v-3l9-9z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/></svg>,
+  Calc: (props) => <svg width="12" height="12" viewBox="0 0 16 16" fill="none" {...props}><rect x="2.5" y="2" width="11" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.3"/><rect x="4.5" y="4" width="7" height="2" fill="currentColor"/><circle cx="5.5" cy="9" r="0.8" fill="currentColor"/><circle cx="8" cy="9" r="0.8" fill="currentColor"/><circle cx="10.5" cy="9" r="0.8" fill="currentColor"/><circle cx="5.5" cy="11.5" r="0.8" fill="currentColor"/><circle cx="8" cy="11.5" r="0.8" fill="currentColor"/><circle cx="10.5" cy="11.5" r="0.8" fill="currentColor"/></svg>,
+  Info: (props) => <svg width="14" height="14" viewBox="0 0 16 16" fill="none" {...props}><circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="1.3"/><path d="M8 7.5v3.5M8 5v0.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>,
+  Plus: (props) => <svg width="12" height="12" viewBox="0 0 16 16" fill="none" {...props}><path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>,
+  Duplicate: (props) => <svg width="12" height="12" viewBox="0 0 16 16" fill="none" {...props}><rect x="2" y="4" width="9" height="10" rx="1.2" stroke="currentColor" strokeWidth="1.3"/><path d="M5 4V3a1 1 0 011-1h7a1 1 0 011 1v8a1 1 0 01-1 1h-1" stroke="currentColor" strokeWidth="1.3"/></svg>,
+  Save: (props) => <svg width="12" height="12" viewBox="0 0 16 16" fill="none" {...props}><path d="M3 3v10a1 1 0 001 1h8a1 1 0 001-1V5l-2-2H4a1 1 0 00-1 1z" stroke="currentColor" strokeWidth="1.3"/><path d="M5 3v3h5V3M5 10h6" stroke="currentColor" strokeWidth="1.3"/></svg>,
+  Send: (props) => <svg width="12" height="12" viewBox="0 0 16 16" fill="none" {...props}><path d="M14 2L2 7.5l5 1.5L14 2zm0 0L9 14l-1.5-5L14 2z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/></svg>,
+  Lock: (props) => <svg width="11" height="11" viewBox="0 0 16 16" fill="none" {...props}><rect x="3" y="7" width="10" height="7" rx="1" stroke="currentColor" strokeWidth="1.3"/><path d="M5 7V5a3 3 0 016 0v2" stroke="currentColor" strokeWidth="1.3"/></svg>,
+  More: (props) => <svg width="12" height="12" viewBox="0 0 16 16" fill="none" {...props}><circle cx="3.5" cy="8" r="1" fill="currentColor"/><circle cx="8" cy="8" r="1" fill="currentColor"/><circle cx="12.5" cy="8" r="1" fill="currentColor"/></svg>,
+};
+
+window.Icon = Icon;
