@@ -1,0 +1,8 @@
+[
+  {"model": "cotizaciones.papel", "pk": 1, "fields": {"nombre": "Propalcote", "gramaje": 240, "material": "C2S brillante", "precio": "1850.00", "activo": true}},
+  {"model": "cotizaciones.papel", "pk": 2, "fields": {"nombre": "Propalcote", "gramaje": 300, "material": "C2S brillante", "precio": "2480.00", "activo": true}},
+  {"model": "cotizaciones.papel", "pk": 3, "fields": {"nombre": "Earth Pact", "gramaje": 240, "material": "Reciclado natural", "precio": "2100.00", "activo": true}},
+  {"model": "cotizaciones.papel", "pk": 4, "fields": {"nombre": "Kimberly Linen", "gramaje": 220, "material": "Texturizado", "precio": "3650.00", "activo": true}},
+  {"model": "cotizaciones.papel", "pk": 5, "fields": {"nombre": "Bond", "gramaje": 90, "material": "Offset", "precio": "420.00", "activo": true}},
+  {"model": "cotizaciones.papel", "pk": 6, "fields": {"nombre": "Cartulina Bristol", "gramaje": 280, "material": "Mate", "precio": "2150.00", "activo": true}}
+]

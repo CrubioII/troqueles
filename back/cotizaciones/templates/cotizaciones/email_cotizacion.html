@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Cotización {{ cot.numero }} — Troqueles INK</title>
+</head>
+<body style="margin:0;padding:0;background:#FAF7F1;font-family:Arial,sans-serif;color:#1B1816;">
+
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#FAF7F1;padding:32px 0;">
+  <tr><td align="center">
+    <table width="600" cellpadding="0" cellspacing="0" style="background:#FFFFFF;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+
+      <!-- Header -->
+      <tr>
+        <td style="background:#1B1816;padding:20px 32px;">
+          <table width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td>
+                <span style="display:inline-block;background:#B8541C;color:#fff;font-weight:700;font-size:13px;padding:4px 10px;border-radius:4px;letter-spacing:.05em;">TI</span>
+                <span style="color:#fff;font-weight:700;font-size:15px;margin-left:10px;">Troqueles INK</span>
+              </td>
+              <td align="right">
+                <span style="color:#807A6E;font-size:12px;">{{ cot.fecha }}</span>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+
+      <!-- Cotización number -->
+      <tr>
+        <td style="background:#B8541C;padding:12px 32px;">
+          <span style="color:#fff;font-size:18px;font-weight:700;letter-spacing:.02em;">Cotización {{ cot.numero }}</span>
+          <span style="background:rgba(255,255,255,0.2);color:#fff;font-size:11px;padding:2px 8px;border-radius:12px;margin-left:10px;">Enviada</span>
+        </td>
+      </tr>
+
+      <!-- Body -->
+      <tr>
+        <td style="padding:28px 32px;">
+
+          <!-- Client info -->
+          <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;border:1px solid #E8E1D2;border-radius:6px;overflow:hidden;">
+            <tr><td style="background:#F4EFE4;padding:8px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#807A6E;">Cliente</td></tr>
+            <tr>
+              <td style="padding:12px 16px;">
+                <div style="font-weight:600;font-size:15px;color:#1B1816;">{{ cot.cliente.nombre }}</div>
+                <div style="font-size:12px;color:#807A6E;margin-top:2px;">
+                  {% if cot.tipo_cliente == 'terciario' %}Cliente Terciario{% else %}Cliente Final{% endif %}
+                </div>
+              </td>
+            </tr>
+          </table>
+
+          <!-- Reference + quantity -->
+          <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;border:1px solid #E8E1D2;border-radius:6px;overflow:hidden;">
+            <tr><td style="background:#F4EFE4;padding:8px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#807A6E;">Producto</td></tr>
+            <tr>
+              <td style="padding:12px 16px;">
+                <div style="font-weight:500;font-size:14px;color:#1B1816;">{{ cot.referencia }}</div>
+                <div style="font-size:13px;color:#4A453E;margin-top:4px;">Cantidad: <strong>{{ cot.cantidad }} unidades</strong></div>
+              </td>
+            </tr>
+          </table>
+
+          <!-- Active processes -->
+          {% if proc_rows %}
+          <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;border:1px solid #E8E1D2;border-radius:6px;overflow:hidden;">
+            <tr>
+              <td style="background:#F4EFE4;padding:8px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#807A6E;">Proceso</td>
+              <td style="background:#F4EFE4;padding:8px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#807A6E;text-align:right;">Costo</td>
+            </tr>
+            {% for p in proc_rows %}
+            <tr style="border-top:1px solid #E8E1D2;">
+              <td style="padding:8px 16px;font-size:13px;color:#1B1816;">{{ p.nombre }}</td>
+              <td style="padding:8px 16px;font-size:13px;color:#4A453E;text-align:right;font-family:monospace;">{{ p.costo }}</td>
+            </tr>
+            {% endfor %}
+          </table>
+          {% endif %}
+
+          <!-- Liquidation -->
+          <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;border:1px solid #E8E1D2;border-radius:6px;overflow:hidden;">
+            <tr>
+              <td colspan="2" style="background:#F4EFE4;padding:8px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#807A6E;">Liquidación</td>
+            </tr>
+            <tr style="border-top:1px solid #E8E1D2;">
+              <td style="padding:8px 16px;font-size:13px;color:#4A453E;">Papel</td>
+              <td style="padding:8px 16px;font-size:13px;text-align:right;font-family:monospace;">{{ costo_papel }}</td>
+            </tr>
+            <tr style="border-top:1px solid #E8E1D2;">
+              <td style="padding:8px 16px;font-size:13px;color:#4A453E;">Total costos OP</td>
+              <td style="padding:8px 16px;font-size:13px;text-align:right;font-family:monospace;">{{ total_costos_op }}</td>
+            </tr>
+            <tr style="border-top:1px solid #E8E1D2;">
+              <td style="padding:8px 16px;font-size:13px;color:#4A453E;">Valor unitario</td>
+              <td style="padding:8px 16px;font-size:13px;text-align:right;font-family:monospace;">{{ valor_unitario }}</td>
+            </tr>
+            <tr style="border-top:1px solid #E8E1D2;background:#FBE9DA;">
+              <td style="padding:10px 16px;font-size:14px;font-weight:700;color:#1B1816;">Total cliente</td>
+              <td style="padding:10px 16px;font-size:14px;font-weight:700;text-align:right;font-family:monospace;color:#B8541C;">{{ valor_total }}</td>
+            </tr>
+          </table>
+
+          <!-- Payment conditions -->
+          <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;border:1px solid #E8E1D2;border-radius:6px;overflow:hidden;">
+            <tr><td style="background:#F4EFE4;padding:8px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#807A6E;">Condición de pago</td></tr>
+            <tr>
+              <td style="padding:12px 16px;font-size:13px;color:#1B1816;">
+                {% if cot.condicion_pago == 'mismo' %}Pago el mismo día (contra entrega)
+                {% elif cot.condicion_pago == '8' %}Pago en 8 días
+                {% elif cot.condicion_pago == '30' %}Pago en 30 días
+                {% elif cot.condicion_pago == 'custom' %}{{ cot.condicion_custom }}
+                {% else %}{{ cot.condicion_pago }}{% endif %}
+              </td>
+            </tr>
+          </table>
+
+          <!-- Observations -->
+          {% if cot.observaciones %}
+          <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;border:1px solid #E8E1D2;border-radius:6px;overflow:hidden;">
+            <tr><td style="background:#F4EFE4;padding:8px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#807A6E;">Observaciones</td></tr>
+            <tr>
+              <td style="padding:12px 16px;font-size:13px;color:#4A453E;white-space:pre-wrap;">{{ cot.observaciones }}</td>
+            </tr>
+          </table>
+          {% endif %}
+
+        </td>
+      </tr>
+
+      <!-- Footer -->
+      <tr>
+        <td style="background:#F4EFE4;padding:16px 32px;text-align:center;border-top:1px solid #E8E1D2;">
+          <p style="margin:0;font-size:11px;color:#807A6E;">
+            Troqueles INK · Este correo fue generado automáticamente. Para más información contáctenos directamente.
+          </p>
+        </td>
+      </tr>
+
+    </table>
+  </td></tr>
+</table>
+
+</body>
+</html>

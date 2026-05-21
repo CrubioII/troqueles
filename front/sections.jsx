@@ -440,7 +440,7 @@ function SectionAcciones({ d, set, calc, isAdmin }) {
         </div>
       )}
       <div className="actions-row">
-        <button className="btn"><Icon.Save /> Guardar borrador</button>
+        <button className="btn"><Icon.Save /> Guardar</button>
         <button className="btn accent"><Icon.Send /> Guardar y enviar al cliente</button>
         <div className="spacer"/>
         <span className="muted" style={{ fontSize: 11.5 }}>
