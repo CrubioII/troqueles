@@ -491,8 +491,11 @@ export function SectionCondiciones({ d, set }) {
 // =========================================================
 // Section 6 — Acciones
 // =========================================================
-export function SectionAcciones({ d, calc, onSave, onSendAndSave, saving }) {
+export function SectionAcciones({ d, calc, onSave, onSendAndSave, onDelete, saving }) {
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const isConvertida = d.estado === 'convertida'
+  const canDelete = !!d.id && !isConvertida
+
   return (
     <div>
       {isConvertida && (
@@ -513,6 +516,37 @@ export function SectionAcciones({ d, calc, onSave, onSendAndSave, saving }) {
           Total cotización: <strong className="mono" style={{ color: 'var(--ink)' }}>{fmtCOP(calc.valorTotal)}</strong>
         </span>
       </div>
+      {canDelete && (
+        <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
+          {!confirmDelete ? (
+            <button
+              className="btn"
+              style={{ color: 'var(--danger, #c0392b)', borderColor: 'var(--danger, #c0392b)' }}
+              onClick={() => setConfirmDelete(true)}
+              disabled={saving}
+            >
+              <Icon.Trash /> Eliminar cotización
+            </button>
+          ) : (
+            <>
+              <span style={{ fontSize: 13, color: 'var(--danger, #c0392b)', fontWeight: 500 }}>
+                ¿Eliminar permanentemente?
+              </span>
+              <button
+                className="btn"
+                style={{ background: 'var(--danger, #c0392b)', color: '#fff', borderColor: 'var(--danger, #c0392b)' }}
+                onClick={onDelete}
+                disabled={saving}
+              >
+                Sí, eliminar
+              </button>
+              <button className="btn" onClick={() => setConfirmDelete(false)} disabled={saving}>
+                Cancelar
+              </button>
+            </>
+          )}
+        </div>
+      )}
       <div className="muted" style={{ fontSize: 11, marginTop: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
         <Icon.Info />
         Puedes seguir guardando como borrador todas las veces que necesites. El cambio de estado y la conversión a OP se hacen desde el listado de cotizaciones.

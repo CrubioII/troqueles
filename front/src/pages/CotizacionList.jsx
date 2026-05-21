@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Icon } from '../components/Icons'
 import { fmtNum, STATUS_DEFS } from '../components/core'
-import { getCotizaciones } from '../api'
+import { getCotizaciones, deleteCotizacion } from '../api'
 
 const STATUS_ALL = { id: '', label: 'Todos', cls: '' }
 
@@ -44,6 +44,7 @@ export default function CotizacionList() {
   const [nextPage, setNextPage] = useState(null)
   const [prevPage, setPrevPage] = useState(null)
   const [count, setCount] = useState(0)
+  const [confirmDelete, setConfirmDelete] = useState(null)
   const debounceRef = useRef(null)
 
   const load = (params = '', initial = false) => {
@@ -92,6 +93,23 @@ export default function CotizacionList() {
   const handleStatus = (st) => {
     setStatusFilter(st)
     applyFilters(search, st)
+  }
+
+  const handleDelete = (e, cot) => {
+    e.stopPropagation()
+    if (confirmDelete === cot.id) {
+      // Optimistic: remove immediately, fire API in background
+      setCotizaciones(prev => prev.filter(c => c.id !== cot.id))
+      setCount(prev => prev - 1)
+      setConfirmDelete(null)
+      deleteCotizacion(cot.id).catch(() => {
+        // Rollback on failure
+        setCotizaciones(prev => [...prev, cot].sort((a, b) => b.id - a.id))
+        setCount(prev => prev + 1)
+      })
+    } else {
+      setConfirmDelete(cot.id)
+    }
   }
 
   const goPage = (url) => {
@@ -265,13 +283,44 @@ export default function CotizacionList() {
                       <StatusBadge estado={cot.estado} />
                     </td>
                     <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                      <button
-                        className="btn"
-                        style={{ padding: '4px 10px', fontSize: 11 }}
-                        onClick={e => { e.stopPropagation(); navigate(`/cotizaciones/${cot.id}`) }}
-                      >
-                        Abrir
-                      </button>
+                      <div style={{ display: 'flex', gap: 6, justifyContent: 'center', alignItems: 'center' }}>
+                        <button
+                          className="btn"
+                          style={{ padding: '4px 10px', fontSize: 11 }}
+                          onClick={e => { e.stopPropagation(); navigate(`/cotizaciones/${cot.id}`) }}
+                        >
+                          Abrir
+                        </button>
+                        {cot.estado !== 'convertida' && (
+                          confirmDelete === cot.id ? (
+                            <>
+                              <button
+                                className="btn"
+                                style={{ padding: '4px 8px', fontSize: 11, background: 'var(--danger, #c0392b)', color: '#fff', borderColor: 'var(--danger, #c0392b)' }}
+                                onClick={e => handleDelete(e, cot)}
+                              >
+                                Confirmar
+                              </button>
+                              <button
+                                className="btn"
+                                style={{ padding: '4px 8px', fontSize: 11 }}
+                                onClick={e => { e.stopPropagation(); setConfirmDelete(null) }}
+                              >
+                                ✕
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              className="btn"
+                              style={{ padding: '4px 8px', color: 'var(--danger, #c0392b)', borderColor: 'transparent' }}
+                              title="Eliminar cotización"
+                              onClick={e => handleDelete(e, cot)}
+                            >
+                              <Icon.Trash />
+                            </button>
+                          )
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}

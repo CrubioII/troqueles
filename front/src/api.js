@@ -45,6 +45,10 @@ export const updateCotizacion = (id, data) =>
     body: JSON.stringify(data),
   }).then(json)
 
+export const deleteCotizacion = (id) =>
+  fetch(`${BASE}/cotizaciones/${id}/`, { method: 'DELETE' })
+    .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`) })
+
 export const cambiarEstado = (id, estado) =>
   fetch(`${BASE}/cotizaciones/${id}/estado/`, {
     method: 'PATCH',

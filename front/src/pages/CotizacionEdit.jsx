@@ -4,7 +4,7 @@ import { Icon } from '../components/Icons'
 import { fmtCOP, fmtNum, PROCESS_GROUPS, CONDICIONES_PAGO, STATUS_DEFS, Section } from '../components/core'
 import { SectionGenerales, SectionPapel, SectionProcesos, SectionCondiciones, SectionAcciones } from '../components/sections'
 import LiquidationPanel from '../components/LiquidationPanel'
-import { getCotizacion, getPapeles, createCotizacion, updateCotizacion, cambiarEstado, createCliente, updateCliente, enviarCotizacion } from '../api'
+import { getCotizacion, getPapeles, createCotizacion, updateCotizacion, cambiarEstado, createCliente, updateCliente, enviarCotizacion, deleteCotizacion } from '../api'
 import CotizacionModal from '../components/CotizacionModal'
 
 // Build blank process state from PROCESS_GROUPS definitions
@@ -300,7 +300,7 @@ export default function CotizacionEdit() {
       if (estadoOverride) payload.estado = estadoOverride
 
       let result
-      if (isNew || !d.id) {
+      if (!d.id) {
         result = await createCotizacion(payload)
         // Update URL to reflect new id without full navigation
         window.history.replaceState(null, '', `/cotizaciones/${result.id}`)
@@ -324,6 +324,11 @@ export default function CotizacionEdit() {
     } finally {
       setSaving(false)
     }
+  }
+
+  const handleDelete = () => {
+    navigate('/')
+    deleteCotizacion(d.id).catch(() => {})
   }
 
   const condicionLabel = (() => {
@@ -475,6 +480,7 @@ export default function CotizacionEdit() {
               saving={saving}
               onSave={() => save()}
               onSendAndSave={() => save('enviada')}
+              onDelete={handleDelete}
             />
           </Section>
         </div>

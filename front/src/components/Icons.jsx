@@ -14,4 +14,5 @@ export const Icon = {
   ArrowLeft: (props) => <svg width="14" height="14" viewBox="0 0 16 16" fill="none" {...props}><path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>,
   X: (props) => <svg width="12" height="12" viewBox="0 0 16 16" fill="none" {...props}><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>,
   Print: (props) => <svg width="13" height="13" viewBox="0 0 16 16" fill="none" {...props}><rect x="3" y="9" width="10" height="5" rx="1" stroke="currentColor" strokeWidth="1.3"/><path d="M5 9V3h6v6" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/><rect x="5" y="11" width="2" height="1.2" fill="currentColor"/><rect x="9" y="11" width="2" height="1.2" fill="currentColor"/><path d="M3 9V7a1 1 0 011-1h8a1 1 0 011 1v2" stroke="currentColor" strokeWidth="1.3"/></svg>,
+  Trash: (props) => <svg width="12" height="12" viewBox="0 0 16 16" fill="none" {...props}><path d="M2.5 4h11M6 4V2.5h4V4M5.5 4v8a1 1 0 001 1h3a1 1 0 001-1V4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>,
 }
