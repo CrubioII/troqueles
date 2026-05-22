@@ -252,6 +252,7 @@ input.input[type="number"]::-webkit-inner-spin-button {
 .grid-3 { grid-template-columns: 1fr 1fr 1fr; }
 .grid-4 { grid-template-columns: 1fr 1fr 1fr 1fr; }
 .grid-6 { grid-template-columns: repeat(6, 1fr); }
+.col-span-1 { grid-column: span 1; }
 .col-span-2 { grid-column: span 2; }
 .col-span-3 { grid-column: span 3; }
 

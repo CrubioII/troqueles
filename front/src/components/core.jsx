@@ -51,11 +51,10 @@ export const PROCESS_GROUPS = [
     id: 'acabados',
     titulo: 'Acabados superficiales',
     procesos: [
-      { id: 'laminado',   nombre: 'Laminado',   desc: 'Costo por m²', defaultCost: 0, extras: { tipoLaminado: 'Mate', precioM2: 4200 }, autoCalc: true },
+      { id: 'laminado',   nombre: 'Laminado',   desc: 'Costo por m² · Tiro y retiro por separado', defaultCost: 0, customLayout: true, extras: { tiroActive: false, tiroTipoLaminado: 'Mate', tiroPrecioM2: 4200, retiroActive: false, retiroTipoLaminado: 'Mate', retiroPrecioM2: 4200 } },
       { id: 'uvTotal',    nombre: 'UV total',    defaultCost: 95000 },
       { id: 'uvParcial',  nombre: 'UV parcial',  defaultCost: 145000 },
       { id: 'estampado',  nombre: 'Estampado',   desc: 'Gestionar cliset con terceros', defaultCost: 220000, note: 'Implica gestionar un cliset con terceros — incluir tiempos.' },
-      { id: 'cliset',     nombre: 'Cliset',      defaultCost: 110000 },
     ],
   },
   {

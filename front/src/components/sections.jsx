@@ -117,15 +117,22 @@ export function SectionGenerales({ d, set }) {
         />
       </div>
 
-      <div className="field col-span-3">
+      <div className="field col-span-2">
         <label className="field-label">Referencia / descripción del producto <span className="req">*</span></label>
         <input className="input" placeholder="Ej. Caja plegadiza para fragancia 100ml" value={d.referencia} onChange={e => set({ referencia: e.target.value })} />
       </div>
-      <div className="field col-span-2">
+      <div className="field col-span-1">
         <label className="field-label">Cantidad solicitada <span className="req">*</span></label>
         <div className="input-affix">
           <NumField value={d.cantidad} onChange={v => set({ cantidad: Math.round(v) })} step={1} />
-          <span className="suffix">unidades</span>
+          <span className="suffix">uds</span>
+        </div>
+      </div>
+      <div className="field col-span-1">
+        <label className="field-label">Sobrante</label>
+        <div className="input-affix">
+          <NumField value={d.sobrante || 0} onChange={v => set({ sobrante: Math.round(v) })} step={1} min={0} />
+          <span className="suffix">uds</span>
         </div>
       </div>
       <div className="field col-span-2">
@@ -352,6 +359,79 @@ function ImpresionRow({ pdef, p, onToggle, onUpdate }) {
   )
 }
 
+function LaminadoSide({ titulo, activo, onToggle, tipoLaminado, onTipo, precioM2, onPrecioM2, costoAuto }) {
+  return (
+    <div className={'impresion-side' + (activo ? ' active' : ' inactive')}>
+      <div className="impresion-side-header" onClick={onToggle}>
+        <Checkbox checked={activo} onChange={onToggle} />
+        <span className="side-title">{titulo}</span>
+        {activo && <span className="side-cost mono">{fmtCOP(costoAuto)}</span>}
+      </div>
+      {activo && (
+        <div className="impresion-side-body">
+          <div className="field">
+            <label className="field-label">Tipo de laminado</label>
+            <select className="select" value={tipoLaminado} onChange={e => onTipo(e.target.value)}>
+              <option>Mate</option><option>Brillante</option><option>Metalizado</option>
+            </select>
+          </div>
+          <div className="field">
+            <label className="field-label">Precio $/m² <span className="editable-flag"><Icon.Pencil /></span></label>
+            <MoneyInput value={precioM2} onChange={onPrecioM2} className="admin-editable" suffix="" />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function LaminadoRow({ pdef, p, onToggle, onUpdate, autoVal }) {
+  const active = !!p.active
+  const costoTiro = autoVal?.tiro || 0
+  const costoRetiro = autoVal?.retiro || 0
+  const costoTotal = (active && p.tiroActive ? costoTiro : 0) + (active && p.retiroActive ? costoRetiro : 0)
+  return (
+    <div className={'proc-row impresion-row' + (active ? ' active' : '')}>
+      <div className="impresion-top">
+        <Checkbox checked={active} onChange={onToggle} />
+        <div className="proc-name">
+          {pdef.nombre}
+          {pdef.desc && <span className="desc">— {pdef.desc}</span>}
+        </div>
+        <div className="proc-cost">
+          <div className="input-affix">
+            <input
+              type="text" readOnly
+              className="input mono calc"
+              style={{ textAlign: 'right', paddingRight: 38, fontWeight: active ? 600 : 400, cursor: 'default' }}
+              value={Number(Math.round(costoTotal || 0)).toLocaleString('es-CO')}
+            />
+            <span className="suffix" style={{ fontSize: 10 }}>COP</span>
+          </div>
+        </div>
+      </div>
+      {active && (
+        <div className="impresion-bottom">
+          <LaminadoSide
+            titulo="Tiro (exterior)"
+            activo={!!p.tiroActive} onToggle={() => onUpdate({ tiroActive: !p.tiroActive })}
+            tipoLaminado={p.tiroTipoLaminado || 'Mate'} onTipo={(v) => onUpdate({ tiroTipoLaminado: v })}
+            precioM2={p.tiroPrecioM2 || 0} onPrecioM2={(v) => onUpdate({ tiroPrecioM2: v })}
+            costoAuto={costoTiro}
+          />
+          <LaminadoSide
+            titulo="Retiro (interior)"
+            activo={!!p.retiroActive} onToggle={() => onUpdate({ retiroActive: !p.retiroActive })}
+            tipoLaminado={p.retiroTipoLaminado || 'Mate'} onTipo={(v) => onUpdate({ retiroTipoLaminado: v })}
+            precioM2={p.retiroPrecioM2 || 0} onPrecioM2={(v) => onUpdate({ retiroPrecioM2: v })}
+            costoAuto={costoRetiro}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ProcRowDefault({ pdef, p, onToggle, onUpdate, autoVal }) {
   const active = !!p.active
   return (
@@ -362,17 +442,6 @@ function ProcRowDefault({ pdef, p, onToggle, onUpdate, autoVal }) {
         {pdef.desc && <span className="desc">— {pdef.desc}</span>}
       </div>
       <div className="proc-fields">
-        {pdef.id === 'laminado' && (
-          <>
-            <select className="select" value={p.tipoLaminado} onChange={e => onUpdate({ tipoLaminado: e.target.value })} style={{ flex: '0 0 130px' }}>
-              <option>Mate</option><option>Brillante</option><option>Metalizado</option>
-            </select>
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>$/m²</span>
-              <MoneyInput value={p.precioM2} onChange={(v) => onUpdate({ precioM2: v })} style={{ width: 130 }} suffix="" />
-            </div>
-          </>
-        )}
         {pdef.id === 'diseno' && (
           <select className="select" value={p.disenador} onChange={e => onUpdate({ disenador: e.target.value })} style={{ flex: '0 0 160px' }}>
             {DISENADORES.map(n => <option key={n}>{n}</option>)}
@@ -427,6 +496,7 @@ function ProcRowDefault({ pdef, p, onToggle, onUpdate, autoVal }) {
 
 function ProcRow(props) {
   if (props.pdef.id === 'impresion') return <ImpresionRow {...props} />
+  if (props.pdef.id === 'laminado') return <LaminadoRow {...props} />
   return <ProcRowDefault {...props} />
 }
 

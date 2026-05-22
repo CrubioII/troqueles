@@ -47,7 +47,7 @@ class CotizacionSerializer(serializers.ModelSerializer):
         fields = [
             "id", "numero", "fecha",
             "cliente", "cliente_nombre", "cliente_email", "cliente_telefono", "cliente_nit",
-            "referencia", "cantidad", "tipo_cliente", "estado",
+            "referencia", "cantidad", "sobrante", "tipo_cliente", "estado",
             "molde_ancho", "molde_alto",
             "pliego_tipo", "pliego_w", "pliego_h",
             "papel", "precio_pliego", "costo_papel_override",

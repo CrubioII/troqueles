@@ -37,6 +37,7 @@ function apiToState(cot, papelCatalog) {
     clienteNit: cot.cliente_nit || '',
     referencia: cot.referencia || '',
     cantidad: cot.cantidad || 0,
+    sobrante: cot.sobrante || 0,
     tipoCliente: cot.tipo_cliente || 'final',
     estado: cot.estado || 'borrador',
 
@@ -78,6 +79,7 @@ function stateToApi(d, procesos) {
     cliente: d.clienteId,
     referencia: d.referencia,
     cantidad: d.cantidad,
+    sobrante: d.sobrante,
     tipo_cliente: d.tipoCliente,
     estado: d.estado,
 
@@ -117,6 +119,7 @@ function buildBlankState() {
     clienteNit: '',
     referencia: '',
     cantidad: 0,
+    sobrante: 0,
     tipoCliente: 'final',
     estado: 'borrador',
 
@@ -215,7 +218,8 @@ export default function CotizacionEdit() {
       cols = Math.floor(pw / h); rows = Math.floor(ph / w); total = cols * rows; unitW = h; unitH = w
     }
     const unidadesPorPliego = total
-    const pliegosNecesarios = unidadesPorPliego > 0 ? Math.ceil(d.cantidad / unidadesPorPliego) : 0
+    const cantidadProduccion = d.cantidad + (d.sobrante || 0)
+    const pliegosNecesarios = unidadesPorPliego > 0 ? Math.ceil(cantidadProduccion / unidadesPorPliego) : 0
     const areaPliego = pw * ph
     const areaUsada = unidadesPorPliego * w * h
     const desperdicio = areaPliego > 0 ? Math.max(0, (areaPliego - areaUsada) / areaPliego * 100) : 0
@@ -224,10 +228,11 @@ export default function CotizacionEdit() {
 
     const lamP = procesos.laminado || {}
     const areaM2 = w * h / 10000
-    const laminadoAuto = Math.round(areaM2 * pliegosNecesarios * (lamP.precioM2 || 0))
+    const laminadoTiroAuto = Math.round(areaM2 * pliegosNecesarios * (lamP.tiroPrecioM2 || 0))
+    const laminadoRetiroAuto = Math.round(areaM2 * pliegosNecesarios * (lamP.retiroPrecioM2 || 0))
     const cajasP = procesos.cajas || {}
     const cajasAuto = Math.round((cajasP.cantidad || 0) * (cajasP.precioUnit || 0))
-    const autoValues = { laminado: laminadoAuto, cajas: cajasAuto }
+    const autoValues = { laminado: { tiro: laminadoTiroAuto, retiro: laminadoRetiroAuto }, cajas: cajasAuto }
 
     let totalProcesos = 0
     const procRows = []
@@ -237,6 +242,11 @@ export default function CotizacionEdit() {
       if (pdef.id === 'impresion') {
         if (p.tiroActive) { const c = p.costoTiro || 0; totalProcesos += c; procRows.push({ id: 'impresion-tiro', nombre: `Impresión · Tiro (${p.tiroTipo})`, costo: c }) }
         if (p.retiroActive) { const c = p.costoRetiro || 0; totalProcesos += c; procRows.push({ id: 'impresion-retiro', nombre: `Impresión · Retiro (${p.retiroTipo})`, costo: c }) }
+        return
+      }
+      if (pdef.id === 'laminado') {
+        if (p.tiroActive) { const c = laminadoTiroAuto; totalProcesos += c; procRows.push({ id: 'laminado-tiro', nombre: `Laminado · Tiro (${p.tiroTipoLaminado || 'Mate'})`, costo: c }) }
+        if (p.retiroActive) { const c = laminadoRetiroAuto; totalProcesos += c; procRows.push({ id: 'laminado-retiro', nombre: `Laminado · Retiro (${p.retiroTipoLaminado || 'Mate'})`, costo: c }) }
         return
       }
       let costo

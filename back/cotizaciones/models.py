@@ -56,6 +56,7 @@ class Cotizacion(models.Model):
     cliente = models.ForeignKey(Cliente, on_delete=models.PROTECT, related_name="cotizaciones")
     referencia = models.CharField(max_length=300)
     cantidad = models.PositiveIntegerField()
+    sobrante = models.PositiveIntegerField(default=0)
     tipo_cliente = models.CharField(max_length=20, choices=TIPO_CLIENTE_CHOICES, default="final")
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default="borrador")
 
