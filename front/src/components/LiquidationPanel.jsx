@@ -1,5 +1,7 @@
+import { useState } from 'react'
 import { Icon } from './Icons'
 import { fmtCOP, fmtNum } from './core'
+import { pdfInterno } from '../api'
 
 function LiqInput({ value, onChange, isOverridden, onReset, big }) {
   const display = Number(Math.round(value || 0)).toLocaleString('es-CO')
@@ -24,8 +26,28 @@ function LiqInput({ value, onChange, isOverridden, onReset, big }) {
   )
 }
 
-export default function LiquidationPanel({ d, set, calc, onSave, onSendAndSave, saving }) {
+export default function LiquidationPanel({ d, set, calc, onSave, onCreateDocCliente, saving }) {
   const isConvertida = d.estado === 'convertida'
+  const [dlPdf, setDlPdf] = useState(false)
+
+  const handlePdfInterno = async () => {
+    if (!d.id) return
+    setDlPdf(true)
+    try {
+      const r = await pdfInterno(d.id, calc)
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      const blob = await r.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = `Interno_${d.numero}.pdf`; a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setDlPdf(false)
+    }
+  }
+
   return (
     <div className="liq">
       <div className="liq-header">
@@ -137,12 +159,23 @@ export default function LiquidationPanel({ d, set, calc, onSave, onSendAndSave, 
         </div>
       </div>
       <div className="liq-footer">
-        <button className="btn accent" style={{ width: '100%', justifyContent: 'center' }} onClick={onSendAndSave} disabled={saving || isConvertida}>
+        <button className="btn accent" style={{ width: '100%', justifyContent: 'center' }} onClick={onCreateDocCliente} disabled={saving || isConvertida}>
           <Icon.Send /> {saving ? 'Guardando…' : 'Guardar y enviar al cliente'}
         </button>
         <button className="btn" style={{ width: '100%', justifyContent: 'center' }} onClick={onSave} disabled={saving || isConvertida}>
           <Icon.Save /> {saving ? 'Guardando…' : 'Guardar'}
         </button>
+        <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
+          <button
+            className="btn"
+            style={{ flex: 1, justifyContent: 'center', fontSize: 11 }}
+            onClick={handlePdfInterno}
+            disabled={dlPdf || !d.id}
+            title="Descargar PDF interno (con costos)"
+          >
+            <Icon.Print /> {dlPdf ? '…' : 'PDF interno'}
+          </button>
+        </div>
         {isConvertida && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--ink-3)', justifyContent: 'center', paddingTop: 6 }}>
             <Icon.Lock /> Convertida a OP — solo lectura

@@ -4,6 +4,11 @@ import { Icon } from '../components/Icons'
 import { fmtNum, STATUS_DEFS } from '../components/core'
 import { getCotizaciones, deleteCotizacion } from '../api'
 
+const TAB_DEFS = [
+  { id: 'cotizaciones', label: 'Cotizaciones' },
+  { id: 'documentos',  label: 'Documentos cliente' },
+]
+
 const STATUS_ALL = { id: '', label: 'Todos', cls: '' }
 
 function StatusBadge({ estado }) {
@@ -35,6 +40,7 @@ function Skeleton() {
 
 export default function CotizacionList() {
   const navigate = useNavigate()
+  const [tab, setTab] = useState('cotizaciones')
   const [cotizaciones, setCotizaciones] = useState([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -151,6 +157,29 @@ export default function CotizacionList() {
       {/* List workspace */}
       <div style={{ maxWidth: 1100, margin: '0 auto', padding: '28px 24px' }}>
 
+        {/* Tabs */}
+        <div style={{ display: 'flex', gap: 4, marginBottom: 20, borderBottom: '1px solid var(--border)', paddingBottom: 0 }}>
+          {TAB_DEFS.map(t => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => {
+                setTab(t.id)
+                if (t.id === 'documentos') navigate('/documentos/nuevo')
+              }}
+              style={{
+                padding: '7px 16px', fontSize: 13, fontWeight: tab === t.id ? 700 : 400,
+                color: tab === t.id ? 'var(--accent)' : 'var(--ink-3)',
+                background: 'none', border: 'none',
+                borderBottom: tab === t.id ? '2px solid var(--accent)' : '2px solid transparent',
+                cursor: 'pointer', marginBottom: -1,
+              }}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
         {/* Header row */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
           <div style={{ flex: 1 }}>
@@ -163,6 +192,13 @@ export default function CotizacionList() {
               </div>
             )}
           </div>
+          <button
+            className="btn"
+            style={{ fontSize: 12 }}
+            onClick={() => navigate('/documentos/nuevo')}
+          >
+            <Icon.Plus /> Nuevo doc. cliente
+          </button>
           <button
             className="btn accent"
             onClick={() => navigate('/cotizaciones/nuevo')}

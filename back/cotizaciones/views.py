@@ -6,6 +6,7 @@ from rest_framework import viewsets, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.core.mail import EmailMessage
+from django.http import HttpResponse
 from django.template.loader import render_to_string
 from django.conf import settings
 from weasyprint import HTML as WeasyprintHTML
@@ -36,12 +37,14 @@ def _fmt_cop(n):
     except Exception:
         return "$ 0"
 
-from .models import Cliente, Papel, Cotizacion
+from .models import Cliente, Papel, Cotizacion, DocumentoCliente
 from .serializers import (
     ClienteSerializer,
     PapelSerializer,
     CotizacionSerializer,
     CotizacionListSerializer,
+    DocumentoClienteSerializer,
+    DocumentoClienteListSerializer,
 )
 
 
@@ -74,6 +77,9 @@ class CotizacionViewSet(viewsets.ModelViewSet):
         estado = self.request.query_params.get("estado")
         if estado:
             qs = qs.filter(estado=estado)
+        cliente_id = self.request.query_params.get("cliente")
+        if cliente_id:
+            qs = qs.filter(cliente_id=cliente_id)
         return qs
 
     def get_serializer_class(self):
@@ -135,3 +141,113 @@ class CotizacionViewSet(viewsets.ModelViewSet):
         cotizacion.estado = nuevo
         cotizacion.save(update_fields=["estado", "modificado"])
         return Response(CotizacionSerializer(cotizacion).data)
+
+    @action(detail=True, methods=["post"], url_path="pdf_interno")
+    def pdf_interno(self, request, pk=None):
+        """POST /api/cotizaciones/{id}/pdf_interno/ — devuelve el PDF interno como descarga."""
+        cot = self.get_object()
+        raw_rows = request.data.get("proc_rows", [])
+        ctx = {
+            "cot": cot,
+            "proc_rows": [{"nombre": p.get("nombre", ""), "costo": _fmt_cop(p.get("costo", 0))} for p in raw_rows],
+            "costo_papel": _fmt_cop(request.data.get("costo_papel", 0)),
+            "total_costos_op": _fmt_cop(request.data.get("total_costos_op", 0)),
+            "valor_unitario": _fmt_cop(request.data.get("valor_unitario", 0)),
+            "valor_total": _fmt_cop(request.data.get("valor_total", 0)),
+            "logo_uri": _logo_data_uri(),
+        }
+        try:
+            html_pdf = render_to_string("cotizaciones/pdf_cotizacion.html", ctx)
+            pdf_bytes = WeasyprintHTML(string=html_pdf).write_pdf()
+        except Exception as e:
+            traceback.print_exc()
+            return Response({"error": str(e)}, status=502)
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="Interno_{cot.numero}.pdf"'
+        return response
+
+
+class DocumentoClienteViewSet(viewsets.ModelViewSet):
+    queryset = DocumentoCliente.objects.select_related("cliente").prefetch_related("items")
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ["numero", "cliente__nombre"]
+    ordering_fields = ["creado", "fecha", "estado"]
+
+    def get_serializer_class(self):
+        if self.action == "list":
+            return DocumentoClienteListSerializer
+        return DocumentoClienteSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        estado = self.request.query_params.get("estado")
+        if estado:
+            qs = qs.filter(estado=estado)
+        return qs
+
+    def _build_pdf_ctx(self, doc):
+        return {
+            "doc": doc,
+            "items": [
+                {
+                    "referencia": item.referencia,
+                    "descripcion": item.descripcion,
+                    "tamano_display": item.tamano_display,
+                    "cantidad": item.cantidad,
+                    "valor_unitario": _fmt_cop(item.valor_unitario),
+                    "valor_total": _fmt_cop(item.valor_total),
+                }
+                for item in doc.items.all()
+            ],
+            "logo_uri": _logo_data_uri(),
+        }
+
+    @action(detail=True, methods=["post"], url_path="pdf")
+    def generar_pdf(self, request, pk=None):
+        """POST /api/documentos/{id}/pdf/ — devuelve el PDF cliente como descarga."""
+        doc = self.get_object()
+        ctx = self._build_pdf_ctx(doc)
+        try:
+            html_pdf = render_to_string("cotizaciones/pdf_documento_cliente.html", ctx)
+            pdf_bytes = WeasyprintHTML(string=html_pdf).write_pdf()
+        except Exception as e:
+            traceback.print_exc()
+            return Response({"error": str(e)}, status=502)
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="Cotizacion_{doc.numero}.pdf"'
+        return response
+
+    @action(detail=True, methods=["post"], url_path="enviar")
+    def enviar_correo(self, request, pk=None):
+        """POST /api/documentos/{id}/enviar/ — envía el PDF cliente por correo."""
+        doc = self.get_object()
+        email_destino = request.data.get("email") or (doc.cliente.email if doc.cliente.email else None)
+        if not email_destino:
+            return Response({"error": "No hay email de destino configurado."}, status=400)
+
+        extra_emails = [e for e in request.data.get("extra_emails", []) if e and e.strip()]
+        all_recipients = [email_destino] + extra_emails
+
+        ctx = self._build_pdf_ctx(doc)
+        try:
+            html_pdf = render_to_string("cotizaciones/pdf_documento_cliente.html", ctx)
+            pdf_bytes = WeasyprintHTML(string=html_pdf).write_pdf()
+
+            msg = EmailMessage(
+                subject=f"Cotización {doc.numero} — Troqueles INK",
+                body=html_pdf,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                to=all_recipients,
+            )
+            msg.content_subtype = "html"
+            msg.attach(f"Cotizacion_{doc.numero}.pdf", pdf_bytes, "application/pdf")
+            sent = msg.send()
+            if not sent:
+                return Response({"error": "SMTP no confirmó el envío (send() = 0)."}, status=502)
+        except Exception as e:
+            traceback.print_exc()
+            return Response({"error": str(e)}, status=502)
+
+        doc.estado = "enviado"
+        doc.save(update_fields=["estado", "modificado"])
+        return Response({"ok": True, "enviado_a": all_recipients})

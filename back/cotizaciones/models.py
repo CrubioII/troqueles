@@ -121,3 +121,50 @@ class CotizacionProceso(models.Model):
 
     def __str__(self):
         return f"{self.cotizacion.numero} · {self.proceso_id}"
+
+
+class DocumentoCliente(models.Model):
+    ESTADO_CHOICES = [("borrador", "Borrador"), ("enviado", "Enviado")]
+    CONDICION_CHOICES = Cotizacion.CONDICION_CHOICES
+
+    numero = models.CharField(max_length=20, unique=True, blank=True)
+    fecha = models.DateField()
+    cliente = models.ForeignKey(Cliente, on_delete=models.PROTECT, related_name="documentos")
+    tiempo_entrega = models.CharField(max_length=200, blank=True, default="8 días hábiles")
+    condicion_pago = models.CharField(max_length=20, choices=CONDICION_CHOICES, default="30")
+    condicion_custom = models.CharField(max_length=300, blank=True, default="")
+    nota = models.TextField(blank=True, default="En la presente cotización No incluye el impuesto del IVA, el cliente debe suministrar el diseño de logotipo e impresión.")
+    estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default="borrador")
+    creado = models.DateTimeField(auto_now_add=True)
+    modificado = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-creado"]
+
+    def save(self, *args, **kwargs):
+        is_new = not self.pk
+        super().save(*args, **kwargs)
+        if is_new and not self.numero:
+            self.numero = f"DC-{self.pk:04d}"
+            DocumentoCliente.objects.filter(pk=self.pk).update(numero=self.numero)
+
+    def __str__(self):
+        return f"{self.numero} · {self.cliente}"
+
+
+class DocumentoClienteItem(models.Model):
+    documento = models.ForeignKey(DocumentoCliente, on_delete=models.CASCADE, related_name="items")
+    cotizacion = models.ForeignKey(Cotizacion, on_delete=models.SET_NULL, null=True, blank=True, related_name="documento_items")
+    referencia = models.CharField(max_length=300)
+    descripcion = models.TextField(blank=True, default="")
+    tamano_display = models.CharField(max_length=200, blank=True, default="")
+    cantidad = models.PositiveIntegerField(default=0)
+    valor_unitario = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    valor_total = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    orden = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        ordering = ["orden", "id"]
+
+    def __str__(self):
+        return f"{self.documento.numero} · {self.referencia}"

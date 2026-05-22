@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Cotización {{ doc.numero }} — Troqueles INK</title>
+<style>
+  @page {
+    size: A4;
+    margin: 14mm 16mm 14mm 16mm;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 11px;
+    color: #1B1816;
+    background: #fff;
+    line-height: 1.4;
+  }
+
+  /* ── Outer wrapper ── */
+  .doc {
+    border: 1px solid #e0e0e0;
+    border-top: 4px solid #E8945A;
+  }
+
+  /* ── Header ── */
+  .doc-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 18px 12px;
+    border-bottom: 1px solid #e8e8e8;
+  }
+  .doc-title {
+    font-size: 20px;
+    font-weight: 900;
+    letter-spacing: -0.03em;
+    text-transform: uppercase;
+    color: #1B1816;
+  }
+  .doc-meta {
+    font-size: 10px;
+    color: #888;
+    margin-top: 3px;
+    font-family: monospace;
+    letter-spacing: 0.02em;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .brand img {
+    height: 30px;
+    object-fit: contain;
+  }
+  .brand-name {
+    font-size: 13px;
+    font-weight: 900;
+    color: #1B1816;
+    letter-spacing: -0.03em;
+  }
+
+  /* ── Client section ── */
+  .client-section {
+    padding: 12px 18px;
+    background: #f7f7f7;
+    border-bottom: 1px solid #e8e8e8;
+  }
+  .sec-label {
+    font-size: 8px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #aaa;
+    margin-bottom: 4px;
+  }
+  .client-name {
+    font-size: 15px;
+    font-weight: 700;
+    color: #1B1816;
+    margin-bottom: 5px;
+  }
+  .client-details {
+    display: flex;
+    gap: 0;
+    flex-wrap: wrap;
+  }
+  .client-detail-item {
+    font-size: 10px;
+    color: #666;
+    margin-right: 18px;
+  }
+  .client-detail-item strong {
+    color: #444;
+    font-weight: 600;
+  }
+
+  /* ── Meta strip (fecha + entrega) ── */
+  .meta-strip {
+    display: flex;
+    border-bottom: 1px solid #e8e8e8;
+  }
+  .meta-cell {
+    flex: 1;
+    padding: 9px 18px;
+    border-right: 1px solid #e8e8e8;
+  }
+  .meta-cell:last-child {
+    border-right: none;
+  }
+  .meta-lbl {
+    font-size: 8px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #aaa;
+    display: block;
+    margin-bottom: 2px;
+  }
+  .meta-val {
+    font-size: 11px;
+    font-weight: 600;
+    color: #1B1816;
+  }
+
+  /* ── Item card ── */
+  .item {
+    padding: 12px 18px 12px 15px;
+    border-bottom: 1px solid #e8e8e8;
+    border-left: 3px solid #E8945A;
+  }
+  .item-head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 5px;
+  }
+  .item-num {
+    font-size: 9px;
+    font-weight: 700;
+    color: #E8945A;
+    background: #fff3eb;
+    padding: 1px 6px;
+    letter-spacing: 0.04em;
+    flex-shrink: 0;
+  }
+  .item-ref {
+    font-size: 13px;
+    font-weight: 700;
+    color: #1B1816;
+    letter-spacing: -0.01em;
+  }
+  .item-desc {
+    font-size: 10px;
+    color: #555;
+    line-height: 1.5;
+    margin-bottom: 4px;
+  }
+  .item-size {
+    font-size: 10px;
+    color: #777;
+    margin-bottom: 9px;
+  }
+  .item-size strong {
+    font-weight: 600;
+    color: #555;
+  }
+  .price-divider {
+    border: none;
+    border-top: 1px solid #ebebeb;
+    margin-bottom: 8px;
+  }
+  .price-row {
+    display: flex;
+  }
+  .price-col {
+    flex: 1;
+  }
+  .price-col-right {
+    flex: 1;
+    text-align: right;
+  }
+  .price-col-center {
+    flex: 1;
+    text-align: center;
+  }
+  .price-lbl {
+    font-size: 8px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #aaa;
+    margin-bottom: 3px;
+  }
+  .price-val {
+    font-size: 13px;
+    font-weight: 700;
+    font-family: monospace;
+    color: #1B1816;
+  }
+  .price-val-total {
+    font-size: 14px;
+    font-weight: 700;
+    font-family: monospace;
+    color: #E8945A;
+  }
+
+  /* ── Conditions row ── */
+  .conditions {
+    padding: 10px 18px;
+    border-bottom: 1px solid #e8e8e8;
+    background: #fafafa;
+  }
+  .cond-lbl {
+    font-size: 8px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #aaa;
+    margin-bottom: 2px;
+  }
+  .cond-val {
+    font-size: 11px;
+    color: #1B1816;
+    font-weight: 500;
+  }
+
+  /* ── Nota ── */
+  .nota-section {
+    padding: 10px 18px;
+    background: #fff8f3;
+    border-bottom: 1px solid #e8e8e8;
+  }
+  .nota-lbl {
+    font-size: 8px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #E8945A;
+    margin-bottom: 3px;
+  }
+  .nota-text {
+    font-size: 10px;
+    color: #555;
+    line-height: 1.6;
+    white-space: pre-wrap;
+  }
+
+  /* ── Signature ── */
+  .signature {
+    padding: 12px 18px;
+    text-align: right;
+    font-weight: 700;
+    font-size: 11px;
+    color: #1B1816;
+    line-height: 1.6;
+  }
+  .signature .sig-brand {
+    color: #E8945A;
+  }
+</style>
+</head>
+<body>
+
+<div class="doc">
+
+  <!-- Header -->
+  <div class="doc-header">
+    <div>
+      <div class="doc-title">Cotización</div>
+      <div class="doc-meta">{{ doc.numero }} &nbsp;·&nbsp; {{ doc.fecha }}</div>
+    </div>
+    <div class="brand">
+      {% if logo_uri %}<img src="{{ logo_uri }}" alt="Troqueles INK" height="30" width="auto" style="height:30px;width:auto;max-height:30px;">{% endif %}
+      <span class="brand-name">troqueles<strong>ink</strong></span>
+    </div>
+  </div>
+
+  <!-- Client -->
+  <div class="client-section">
+    <div class="sec-label">Cliente</div>
+    <div class="client-name">{{ doc.cliente.nombre }}</div>
+    <div class="client-details">
+      {% if doc.cliente.nit %}
+      <span class="client-detail-item"><strong>NIT/CC</strong> {{ doc.cliente.nit }}</span>
+      {% endif %}
+      {% if doc.cliente.telefono %}
+      <span class="client-detail-item"><strong>Tel.</strong> {{ doc.cliente.telefono }}</span>
+      {% endif %}
+      {% if doc.cliente.email %}
+      <span class="client-detail-item"><strong>Email</strong> {{ doc.cliente.email }}</span>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Fecha + entrega -->
+  <div class="meta-strip">
+    <div class="meta-cell">
+      <span class="meta-lbl">Fecha</span>
+      <span class="meta-val">{{ doc.fecha }}</span>
+    </div>
+    <div class="meta-cell">
+      <span class="meta-lbl">Tiempo de entrega</span>
+      <span class="meta-val">{{ doc.tiempo_entrega }}</span>
+    </div>
+  </div>
+
+  <!-- Items -->
+  {% for item in items %}
+  <div class="item">
+    <div class="item-head">
+      <span class="item-num">{{ forloop.counter }}</span>
+      <span class="item-ref">{{ item.referencia }}</span>
+    </div>
+    {% if item.descripcion %}
+    <div class="item-desc">{{ item.descripcion }}</div>
+    {% endif %}
+    {% if item.tamano_display %}
+    <div class="item-size"><strong>Tamaño:</strong> {{ item.tamano_display }}</div>
+    {% endif %}
+    <hr class="price-divider">
+    <div class="price-row">
+      <div class="price-col">
+        <div class="price-lbl">Cantidad</div>
+        <div class="price-val">{{ item.cantidad }}</div>
+      </div>
+      <div class="price-col-center">
+        <div class="price-lbl">Valor unitario</div>
+        <div class="price-val">{{ item.valor_unitario }}</div>
+      </div>
+      <div class="price-col-right">
+        <div class="price-lbl">Valor total</div>
+        <div class="price-val-total">{{ item.valor_total }}</div>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+
+  <!-- Forma de pago -->
+  <div class="conditions">
+    <div class="cond-lbl">Forma de pago</div>
+    <div class="cond-val">
+      {% if doc.condicion_pago == 'mismo' %}Pago el mismo día (contra entrega)
+      {% elif doc.condicion_pago == '8' %}Pago en 8 días
+      {% elif doc.condicion_pago == '30' %}Pago en 30 días
+      {% elif doc.condicion_pago == 'custom' %}{{ doc.condicion_custom }}
+      {% else %}{{ doc.condicion_pago }}{% endif %}
+    </div>
+  </div>
+
+  <!-- Nota -->
+  <div class="nota-section">
+    <div class="nota-lbl">Nota</div>
+    <div class="nota-text">{{ doc.nota }}</div>
+  </div>
+
+  <!-- Signature -->
+  <div class="signature">
+    <span class="sig-brand">Troqueles ink</span><br>
+    Alexander Restrepo
+  </div>
+
+</div>
+
+</body>
+</html>

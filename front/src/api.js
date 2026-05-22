@@ -70,3 +70,50 @@ export const enviarCotizacion = (id, email, calc, extraEmails = []) =>
       valor_total: calc?.valorTotal ?? 0,
     }),
   }).then(json)
+
+export const pdfInterno = (id, calc) =>
+  fetch(`${BASE}/cotizaciones/${id}/pdf_interno/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      proc_rows: (calc?.procRows || []).map(p => ({ nombre: p.nombre, costo: p.costo })),
+      costo_papel: calc?.costoPapel ?? 0,
+      total_costos_op: calc?.totalCostosOP ?? 0,
+      valor_unitario: calc?.valorUnitario ?? 0,
+      valor_total: calc?.valorTotal ?? 0,
+    }),
+  })
+
+export const getDocumentos = (params = '') =>
+  fetch(`${BASE}/documentos/${params}`).then(json)
+
+export const getDocumento = (id) =>
+  fetch(`${BASE}/documentos/${id}/`).then(json)
+
+export const createDocumento = (data) =>
+  fetch(`${BASE}/documentos/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  }).then(json)
+
+export const updateDocumento = (id, data) =>
+  fetch(`${BASE}/documentos/${id}/`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  }).then(json)
+
+export const deleteDocumento = (id) =>
+  fetch(`${BASE}/documentos/${id}/`, { method: 'DELETE' })
+    .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`) })
+
+export const pdfDocumento = (id) =>
+  fetch(`${BASE}/documentos/${id}/pdf/`, { method: 'POST' })
+
+export const enviarDocumento = (id, email, extraEmails = []) =>
+  fetch(`${BASE}/documentos/${id}/enviar/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, extra_emails: extraEmails }),
+  }).then(json)

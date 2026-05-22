@@ -4,8 +4,7 @@ import { Icon } from '../components/Icons'
 import { fmtCOP, fmtNum, PROCESS_GROUPS, CONDICIONES_PAGO, STATUS_DEFS, Section } from '../components/core'
 import { SectionGenerales, SectionPapel, SectionProcesos, SectionCondiciones, SectionAcciones } from '../components/sections'
 import LiquidationPanel from '../components/LiquidationPanel'
-import { getCotizacion, getPapeles, createCotizacion, updateCotizacion, cambiarEstado, createCliente, updateCliente, enviarCotizacion, deleteCotizacion } from '../api'
-import CotizacionModal from '../components/CotizacionModal'
+import { getCotizacion, getPapeles, createCotizacion, updateCotizacion, cambiarEstado, createCliente, updateCliente, deleteCotizacion } from '../api'
 
 // Build blank process state from PROCESS_GROUPS definitions
 function buildDefaultProcesos() {
@@ -175,7 +174,6 @@ export default function CotizacionEdit() {
   const [saveError, setSaveError] = useState(null)
   const [toast, setToast] = useState(null)
   const toastRef = useRef(null)
-  const [modal, setModal] = useState(false)
 
   const set = (patch) => setData(prev => ({ ...prev, ...patch }))
   const setProc = (pid, patch) => setProcesos(prev => ({ ...prev, [pid]: { ...prev[pid], ...patch } }))
@@ -329,6 +327,11 @@ export default function CotizacionEdit() {
 
       const payload = stateToApi({ ...d, clienteId }, procesos)
       if (estadoOverride) payload.estado = estadoOverride
+      // Persist effective prices so DC import always has values
+      if (payload.valor_unitario_override == null && calc.valorUnitario > 0)
+        payload.valor_unitario_override = Math.round(calc.valorUnitario)
+      if (payload.valor_total_override == null && calc.valorTotal > 0)
+        payload.valor_total_override = Math.round(calc.valorTotal)
 
       let result
       if (!d.id) {
@@ -349,7 +352,7 @@ export default function CotizacionEdit() {
       clearTimeout(toastRef.current)
       setToast('Cotización guardada correctamente')
       toastRef.current = setTimeout(() => setToast(null), 3000)
-      if (estadoOverride === 'enviada') setModal(true)
+      return result.id
     } catch (e) {
       setSaveError(e.message)
     } finally {
@@ -360,6 +363,14 @@ export default function CotizacionEdit() {
   const handleDelete = () => {
     navigate('/')
     deleteCotizacion(d.id).catch(() => {})
+  }
+
+  const handleCreateDocCliente = async () => {
+    const savedId = await save()
+    if (!savedId) return
+    navigate(
+      `/documentos/nuevo?cotizacion=${savedId}&vu=${Math.round(calc.valorUnitario)}&vt=${Math.round(calc.valorTotal)}`
+    )
   }
 
   const condicionLabel = (() => {
@@ -510,7 +521,7 @@ export default function CotizacionEdit() {
               d={d} calc={calc}
               saving={saving}
               onSave={() => save()}
-              onSendAndSave={() => save('enviada')}
+              onCreateDocCliente={handleCreateDocCliente}
               onDelete={handleDelete}
             />
           </Section>
@@ -518,20 +529,9 @@ export default function CotizacionEdit() {
 
         {/* Sticky right column — Liquidación */}
         <div className="column-side">
-          <LiquidationPanel d={d} set={set} calc={calc} onSave={() => save()} onSendAndSave={() => save('enviada')} saving={saving} />
+          <LiquidationPanel d={d} set={set} calc={calc} onSave={() => save()} onCreateDocCliente={handleCreateDocCliente} saving={saving} />
         </div>
       </div>
-
-      {/* Print / send modal */}
-      {modal && (
-        <CotizacionModal
-          d={d}
-          calc={calc}
-          procesos={procesos}
-          onClose={() => setModal(false)}
-          onSend={(email, extraEmails) => enviarCotizacion(d.id, email, calc, extraEmails)}
-        />
-      )}
 
       {/* Save toast */}
       {toast && (

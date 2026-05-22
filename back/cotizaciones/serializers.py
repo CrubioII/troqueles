@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Cliente, Papel, Cotizacion, CotizacionProceso
+from .models import Cliente, Papel, Cotizacion, CotizacionProceso, DocumentoCliente, DocumentoClienteItem
 
 
 class ClienteSerializer(serializers.ModelSerializer):
@@ -41,6 +41,8 @@ class CotizacionSerializer(serializers.ModelSerializer):
     cliente_email = serializers.EmailField(source="cliente.email", read_only=True)
     cliente_telefono = serializers.CharField(source="cliente.telefono", read_only=True, default='')
     cliente_nit = serializers.CharField(source="cliente.nit", read_only=True, default='')
+    valor_unitario_efectivo = serializers.SerializerMethodField()
+    valor_total_efectivo = serializers.SerializerMethodField()
 
     class Meta:
         model = Cotizacion
@@ -59,8 +61,43 @@ class CotizacionSerializer(serializers.ModelSerializer):
             "condicion_pago", "condicion_custom", "observaciones",
             "creado", "modificado",
             "procesos",
+            "valor_unitario_efectivo", "valor_total_efectivo",
         ]
         read_only_fields = ["id", "numero", "creado", "modificado"]
+
+    def _total_costos(self, obj):
+        """Best-effort total OP cost from stored overrides + process data."""
+        if obj.total_costos_override is not None:
+            return float(obj.total_costos_override)
+        # Build from parts we have stored
+        paper = float(obj.costo_papel_override) if obj.costo_papel_override is not None else None
+        if paper is None:
+            return None  # paper cost without override requires full geometry — skip
+        total = paper
+        if obj.corte_inicial_active:
+            total += float(obj.corte_inicial_precio or 0)
+        if obj.corte_final_active:
+            total += float(obj.corte_final_precio or 0)
+        for proc in obj.procesos.filter(active=True):
+            total += float(proc.costo or 0)
+        return total
+
+    def get_valor_unitario_efectivo(self, obj):
+        if obj.valor_unitario_override is not None:
+            return float(obj.valor_unitario_override)
+        total = self._total_costos(obj)
+        if total is not None and obj.cantidad:
+            margen = float(obj.margen or 80)
+            return round(total / obj.cantidad * (1 + margen / 100))
+        return None
+
+    def get_valor_total_efectivo(self, obj):
+        if obj.valor_total_override is not None:
+            return float(obj.valor_total_override)
+        vu = self.get_valor_unitario_efectivo(obj)
+        if vu is not None and obj.cantidad:
+            return vu * obj.cantidad
+        return None
 
     def create(self, validated_data):
         procesos_data = validated_data.pop("procesos", [])
@@ -79,3 +116,58 @@ class CotizacionSerializer(serializers.ModelSerializer):
             for p in procesos_data:
                 CotizacionProceso.objects.create(cotizacion=instance, **p)
         return instance
+
+
+class DocumentoClienteItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DocumentoClienteItem
+        fields = ["id", "cotizacion", "referencia", "descripcion", "tamano_display",
+                  "cantidad", "valor_unitario", "valor_total", "orden"]
+        read_only_fields = ["id"]
+
+
+class DocumentoClienteSerializer(serializers.ModelSerializer):
+    items = DocumentoClienteItemSerializer(many=True, required=False)
+    cliente_nombre = serializers.CharField(source="cliente.nombre", read_only=True)
+    cliente_email = serializers.EmailField(source="cliente.email", read_only=True)
+    cliente_telefono = serializers.CharField(source="cliente.telefono", read_only=True, default='')
+    cliente_nit = serializers.CharField(source="cliente.nit", read_only=True, default='')
+
+    class Meta:
+        model = DocumentoCliente
+        fields = [
+            "id", "numero", "fecha",
+            "cliente", "cliente_nombre", "cliente_email", "cliente_telefono", "cliente_nit",
+            "tiempo_entrega", "condicion_pago", "condicion_custom",
+            "nota", "estado", "creado", "modificado",
+            "items",
+        ]
+        read_only_fields = ["id", "numero", "creado", "modificado"]
+
+    def create(self, validated_data):
+        items_data = validated_data.pop("items", [])
+        doc = DocumentoCliente.objects.create(**validated_data)
+        for idx, item in enumerate(items_data):
+            item.setdefault("orden", idx)
+            DocumentoClienteItem.objects.create(documento=doc, **item)
+        return doc
+
+    def update(self, instance, validated_data):
+        items_data = validated_data.pop("items", None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        if items_data is not None:
+            instance.items.all().delete()
+            for idx, item in enumerate(items_data):
+                item.setdefault("orden", idx)
+                DocumentoClienteItem.objects.create(documento=instance, **item)
+        return instance
+
+
+class DocumentoClienteListSerializer(serializers.ModelSerializer):
+    cliente_nombre = serializers.CharField(source="cliente.nombre", read_only=True)
+
+    class Meta:
+        model = DocumentoCliente
+        fields = ["id", "numero", "fecha", "cliente_nombre", "estado", "creado", "modificado"]

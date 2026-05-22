@@ -608,7 +608,7 @@ export function SectionCondiciones({ d, set }) {
 // =========================================================
 // Section 6 — Acciones
 // =========================================================
-export function SectionAcciones({ d, calc, onSave, onSendAndSave, onDelete, saving }) {
+export function SectionAcciones({ d, calc, onSave, onCreateDocCliente, onDelete, saving }) {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const isConvertida = d.estado === 'convertida'
   const canDelete = !!d.id && !isConvertida
@@ -625,7 +625,7 @@ export function SectionAcciones({ d, calc, onSave, onSendAndSave, onDelete, savi
         <button className="btn" onClick={onSave} disabled={saving || isConvertida}>
           <Icon.Save /> {saving ? 'Guardando…' : 'Guardar'}
         </button>
-        <button className="btn accent" onClick={onSendAndSave} disabled={saving || isConvertida}>
+        <button className="btn accent" onClick={onCreateDocCliente} disabled={saving || isConvertida}>
           <Icon.Send /> Guardar y enviar al cliente
         </button>
         <div className="spacer" />
