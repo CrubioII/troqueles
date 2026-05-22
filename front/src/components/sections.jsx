@@ -244,6 +244,29 @@ export function SectionPapel({ d, set, calc, papelCatalog }) {
         </div>
       </div>
 
+      <div className="papel-block">
+        <div className="papel-block-title">Cortes</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {[
+            { key: 'corteInicial', label: 'Corte inicial', activeKey: 'corteInicialActive', precioKey: 'corteInicialPrecio' },
+            { key: 'corteFinal',   label: 'Corte final',   activeKey: 'corteFinalActive',   precioKey: 'corteFinalPrecio' },
+          ].map(({ label, activeKey, precioKey }) => (
+            <div key={activeKey} className={'proc-row' + (d[activeKey] ? ' active' : '')} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <Checkbox checked={!!d[activeKey]} onChange={() => set({ [activeKey]: !d[activeKey] })} />
+              <div className="proc-name" style={{ flex: 1 }}>{label}</div>
+              <div className="proc-cost">
+                <MoneyInput
+                  className="admin-editable"
+                  style={{ fontWeight: d[activeKey] ? 600 : 400 }}
+                  value={d[precioKey] || 0}
+                  onChange={(v) => set({ [precioKey]: v })}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       <div className="papel-diagram">
         <div className="sheet-diagram-card">
           <div className="ttl"><Icon.Calc /> Diagrama del pliego — distribución óptima</div>
@@ -359,7 +382,7 @@ function ImpresionRow({ pdef, p, onToggle, onUpdate }) {
   )
 }
 
-function LaminadoSide({ titulo, activo, onToggle, tipoLaminado, onTipo, precioM2, onPrecioM2, costoAuto }) {
+function LaminadoSide({ titulo, activo, onToggle, tipoLaminado, onTipo, precioM2, onPrecioM2, costoAuto, tipoMetalizado, onTipoMetalizado, metalizadoOtros, onMetalizadoOtros }) {
   return (
     <div className={'impresion-side' + (activo ? ' active' : ' inactive')}>
       <div className="impresion-side-header" onClick={onToggle}>
@@ -375,6 +398,26 @@ function LaminadoSide({ titulo, activo, onToggle, tipoLaminado, onTipo, precioM2
               <option>Mate</option><option>Brillante</option><option>Metalizado</option>
             </select>
           </div>
+          {tipoLaminado === 'Metalizado' && (
+            <div className="field">
+              <label className="field-label">Tipo de metalizado</label>
+              <select className="select" value={tipoMetalizado || 'Plateado'} onChange={e => onTipoMetalizado(e.target.value)}>
+                <option>Plateado</option><option>Dorado</option><option>Rosado</option><option>Otros</option>
+              </select>
+            </div>
+          )}
+          {tipoLaminado === 'Metalizado' && (tipoMetalizado || 'Plateado') === 'Otros' && (
+            <div className="field">
+              <label className="field-label">Especificar tipo</label>
+              <input
+                className="input"
+                type="text"
+                placeholder="Ej. Holográfico, Azul…"
+                value={metalizadoOtros || ''}
+                onChange={e => onMetalizadoOtros(e.target.value)}
+              />
+            </div>
+          )}
           <div className="field">
             <label className="field-label">Precio $/m² <span className="editable-flag"><Icon.Pencil /></span></label>
             <MoneyInput value={precioM2} onChange={onPrecioM2} className="admin-editable" suffix="" />
@@ -413,18 +456,22 @@ function LaminadoRow({ pdef, p, onToggle, onUpdate, autoVal }) {
       {active && (
         <div className="impresion-bottom">
           <LaminadoSide
-            titulo="Tiro (exterior)"
+            titulo="Tiro"
             activo={!!p.tiroActive} onToggle={() => onUpdate({ tiroActive: !p.tiroActive })}
             tipoLaminado={p.tiroTipoLaminado || 'Mate'} onTipo={(v) => onUpdate({ tiroTipoLaminado: v })}
             precioM2={p.tiroPrecioM2 || 0} onPrecioM2={(v) => onUpdate({ tiroPrecioM2: v })}
             costoAuto={costoTiro}
+            tipoMetalizado={p.tiroTipoMetalizado} onTipoMetalizado={(v) => onUpdate({ tiroTipoMetalizado: v })}
+            metalizadoOtros={p.tiroMetalizadoOtros} onMetalizadoOtros={(v) => onUpdate({ tiroMetalizadoOtros: v })}
           />
           <LaminadoSide
-            titulo="Retiro (interior)"
+            titulo="Retiro"
             activo={!!p.retiroActive} onToggle={() => onUpdate({ retiroActive: !p.retiroActive })}
             tipoLaminado={p.retiroTipoLaminado || 'Mate'} onTipo={(v) => onUpdate({ retiroTipoLaminado: v })}
             precioM2={p.retiroPrecioM2 || 0} onPrecioM2={(v) => onUpdate({ retiroPrecioM2: v })}
             costoAuto={costoRetiro}
+            tipoMetalizado={p.retiroTipoMetalizado} onTipoMetalizado={(v) => onUpdate({ retiroTipoMetalizado: v })}
+            metalizadoOtros={p.retiroMetalizadoOtros} onMetalizadoOtros={(v) => onUpdate({ retiroMetalizadoOtros: v })}
           />
         </div>
       )}

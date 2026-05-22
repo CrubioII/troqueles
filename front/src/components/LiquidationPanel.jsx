@@ -60,6 +60,28 @@ export default function LiquidationPanel({ d, set, calc, onSave, onSendAndSave, 
               </td>
             </tr>
 
+            <tr>
+              <td style={{ paddingTop: 6 }}>
+                Margen de ganancia <span className="editable-flag"><Icon.Pencil /></span>
+              </td>
+              <td style={{ paddingTop: 6 }}>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, justifyContent: 'flex-end' }}>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    className="liq-input mono"
+                    style={{ width: 52 }}
+                    value={d.margen ?? 80}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value.replace(/[^\d.]/g, '')) || 0
+                      set({ margen: v })
+                    }}
+                  />
+                  <span className="mono" style={{ fontSize: 13, fontWeight: 600 }}>%</span>
+                </div>
+              </td>
+            </tr>
+
             <tr style={{ height: 6 }}><td colSpan="2"></td></tr>
 
             <tr>

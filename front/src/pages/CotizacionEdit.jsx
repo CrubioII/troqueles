@@ -49,11 +49,17 @@ function apiToState(cot, papelCatalog) {
     papelId,
     precioPliego: parseFloat(cot.precio_pliego) || (papelObj ? parseFloat(papelObj.precio) : 0),
     costoPapelOverride: cot.costo_papel_override != null ? parseFloat(cot.costo_papel_override) : null,
+    corteInicialActive: !!cot.corte_inicial_active,
+    corteInicialPrecio: parseFloat(cot.corte_inicial_precio) || 15000,
+    corteFinalActive: !!cot.corte_final_active,
+    corteFinalPrecio: parseFloat(cot.corte_final_precio) || 15000,
 
     valorUnitarioOverride: cot.valor_unitario_override != null ? parseFloat(cot.valor_unitario_override) : null,
     valorTotalOverride: cot.valor_total_override != null ? parseFloat(cot.valor_total_override) : null,
     totalCostosOverride: cot.total_costos_override != null ? parseFloat(cot.total_costos_override) : null,
     subtotalOverride: cot.subtotal_override != null ? parseFloat(cot.subtotal_override) : null,
+
+    margen: cot.margen != null ? parseFloat(cot.margen) : 80,
 
     condicionPago: cot.condicion_pago || '30',
     condicionCustom: cot.condicion_custom || '',
@@ -91,11 +97,17 @@ function stateToApi(d, procesos) {
     papel: d.papelId !== 'manual' ? parseInt(d.papelId) : null,
     precio_pliego: d.precioPliego,
     costo_papel_override: d.costoPapelOverride,
+    corte_inicial_active: d.corteInicialActive,
+    corte_inicial_precio: d.corteInicialPrecio,
+    corte_final_active: d.corteFinalActive,
+    corte_final_precio: d.corteFinalPrecio,
 
     valor_unitario_override: d.valorUnitarioOverride,
     valor_total_override: d.valorTotalOverride,
     total_costos_override: d.totalCostosOverride,
     subtotal_override: d.subtotalOverride,
+
+    margen: d.margen,
 
     condicion_pago: d.condicionPago,
     condicion_custom: d.condicionCustom,
@@ -131,11 +143,17 @@ function buildBlankState() {
     papelId: '',
     precioPliego: 0,
     costoPapelOverride: null,
+    corteInicialActive: false,
+    corteInicialPrecio: 15000,
+    corteFinalActive: false,
+    corteFinalPrecio: 15000,
 
     valorUnitarioOverride: null,
     valorTotalOverride: null,
     totalCostosOverride: null,
     subtotalOverride: null,
+
+    margen: 80,
 
     condicionPago: '30',
     condicionCustom: '',
@@ -234,8 +252,12 @@ export default function CotizacionEdit() {
     const cajasAuto = Math.round((cajasP.cantidad || 0) * (cajasP.precioUnit || 0))
     const autoValues = { laminado: { tiro: laminadoTiroAuto, retiro: laminadoRetiroAuto }, cajas: cajasAuto }
 
-    let totalProcesos = 0
+    const costoCorteInicial = d.corteInicialActive ? (d.corteInicialPrecio || 0) : 0
+    const costoCorteFinal = d.corteFinalActive ? (d.corteFinalPrecio || 0) : 0
+    let totalProcesos = costoCorteInicial + costoCorteFinal
     const procRows = []
+    if (d.corteInicialActive) procRows.push({ id: 'corteInicial', nombre: 'Corte inicial', costo: costoCorteInicial })
+    if (d.corteFinalActive)   procRows.push({ id: 'corteFinal',   nombre: 'Corte final',   costo: costoCorteFinal })
     PROCESS_GROUPS.forEach(g => g.procesos.forEach(pdef => {
       const p = procesos[pdef.id]
       if (!p?.active) return
@@ -256,10 +278,9 @@ export default function CotizacionEdit() {
       totalProcesos += costo
       procRows.push({ id: pdef.id, nombre: pdef.nombre, costo })
     }))
-
     const totalCostosOPAuto = costoPapel + totalProcesos
     const totalCostosOP = d.totalCostosOverride !== null ? d.totalCostosOverride : totalCostosOPAuto
-    const valorUnitarioAuto = d.cantidad > 0 ? Math.round(totalCostosOPAuto / d.cantidad * 1.8 / 10) * 10 : 0
+    const valorUnitarioAuto = d.cantidad > 0 ? Math.round(totalCostosOPAuto / d.cantidad * (1 + (d.margen || 80) / 100)) : 0
     const valorUnitario = d.valorUnitarioOverride !== null ? d.valorUnitarioOverride : valorUnitarioAuto
     const valorTotalAuto = d.cantidad * valorUnitario
     const valorTotal = d.valorTotalOverride !== null ? d.valorTotalOverride : valorTotalAuto

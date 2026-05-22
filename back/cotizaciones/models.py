@@ -69,12 +69,18 @@ class Cotizacion(models.Model):
     papel = models.ForeignKey(Papel, on_delete=models.PROTECT, null=True, blank=True)
     precio_pliego = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     costo_papel_override = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    corte_inicial_active = models.BooleanField(default=False)
+    corte_inicial_precio = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    corte_final_active = models.BooleanField(default=False)
+    corte_final_precio = models.DecimalField(max_digits=14, decimal_places=2, default=0)
 
     # Liquidación overrides (null = usar cálculo automático del front)
     valor_unitario_override = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     valor_total_override = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     total_costos_override = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     subtotal_override = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+
+    margen = models.DecimalField(max_digits=6, decimal_places=2, default=80)
 
     # Condiciones
     condicion_pago = models.CharField(max_length=20, choices=CONDICION_CHOICES, default="30")
