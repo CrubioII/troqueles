@@ -93,6 +93,67 @@ export const STATUS_DEFS = [
   { id: 'convertida', label: 'Convertida a OP',  cls: 'converted' },
 ]
 
+// ============ OP Status definitions ============
+export const OP_STATUS_DEFS = [
+  { id: 'borrador',    label: 'Borrador',    cls: 'draft' },
+  { id: 'programada',  label: 'Programada',  cls: 'sent' },
+  { id: 'en_proceso',  label: 'En Proceso',  cls: 'approved' },
+  { id: 'finalizada',  label: 'Finalizada',  cls: 'converted' },
+  { id: 'remisionada', label: 'Remisionada', cls: 'op-remisionada' },
+  { id: 'anulada',     label: 'Anulada',     cls: 'rejected' },
+]
+
+export const OP_PROCESO_ESTADOS = [
+  { id: 'pendiente',  label: 'Pendiente',  cls: 'draft' },
+  { id: 'en_proceso', label: 'En Proceso', cls: 'sent' },
+  { id: 'completado', label: 'Completado', cls: 'approved' },
+]
+
+// [proceso_id, label, maquina_id]
+export const PROCESOS_OP = [
+  ['plancha',           'Plancha',           'preprensa'],
+  ['corte',             'Corte',             'corte'],
+  ['impresion',         'Impresión',         'impresion'],
+  ['laminado_mate',     'Laminado Mate',     'laminado'],
+  ['laminado_brillante','Laminado Brillante','laminado'],
+  ['uv_total',          'UV Total',          'uv'],
+  ['uv_parcial',        'UV Parcial',        'uv'],
+  ['muestra',           'Muestra',           'terminado'],
+  ['estampado',         'Estampado',         'estampado'],
+  ['cl_set',            'CL/SET',            'preprensa'],
+  ['positivo',          'Positivo',          'preprensa'],
+  ['troquel',           'Troquel',           'troquel'],
+  ['troquelado',        'Troquelado',        'troquel'],
+  ['terminado',         'Terminado',         'terminado'],
+  ['diseno',            'Diseño',            'diseno'],
+  ['pegante',           'Pegante',           'pegante'],
+  ['tinta',             'Tinta',             'impresion'],
+  ['envio',             'Envío',             'logistica'],
+  ['recogida',          'Recogida',          'logistica'],
+  ['cajas',             'Cajas',             'terminado'],
+]
+
+export const MAQUINAS_OP = [
+  { id: 'preprensa',  label: 'Preprensa' },
+  { id: 'corte',      label: 'Corte' },
+  { id: 'impresion',  label: 'Impresión' },
+  { id: 'laminado',   label: 'Laminado' },
+  { id: 'uv',         label: 'UV' },
+  { id: 'troquel',    label: 'Troquel' },
+  { id: 'terminado',  label: 'Terminado' },
+  { id: 'estampado',  label: 'Estampado' },
+  { id: 'diseno',     label: 'Diseño' },
+  { id: 'pegante',    label: 'Pegante' },
+  { id: 'logistica',  label: 'Logística' },
+]
+
+export const CONDICIONES_PAGO_OP = [
+  { id: 'mismo_dia', lbl: 'Mismo día',  sub: 'Contra entrega' },
+  { id: '8_dias',    lbl: '8 días',     sub: 'Crédito corto' },
+  { id: '30_dias',   lbl: '30 días',    sub: 'Crédito estándar' },
+  { id: '60_dias',   lbl: '60 días',    sub: 'Crédito largo' },
+]
+
 // ============ Payment conditions ============
 export const CONDICIONES_PAGO = [
   { id: 'mismo',  lbl: 'Pago el mismo día', sub: 'Contra entrega' },

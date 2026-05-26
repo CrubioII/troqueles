@@ -5,6 +5,7 @@ import { fmtCOP, fmtNum, PROCESS_GROUPS, CONDICIONES_PAGO, STATUS_DEFS, Section 
 import { SectionGenerales, SectionPapel, SectionProcesos, SectionCondiciones, SectionAcciones } from '../components/sections'
 import LiquidationPanel from '../components/LiquidationPanel'
 import { getCotizacion, getPapeles, createCotizacion, updateCotizacion, cambiarEstado, createCliente, updateCliente, deleteCotizacion } from '../api'
+import { useAuth } from '../context/AuthContext'
 
 // Build blank process state from PROCESS_GROUPS definitions
 function buildDefaultProcesos() {
@@ -163,6 +164,8 @@ function buildBlankState() {
 export default function CotizacionEdit() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const { user, logout } = useAuth()
+  const isAdmin = user?.role === 'admin'
   const isNew = id === 'nuevo'
 
   const [d, setData] = useState(buildBlankState)
@@ -365,14 +368,6 @@ export default function CotizacionEdit() {
     deleteCotizacion(d.id).catch(() => {})
   }
 
-  const handleCreateDocCliente = async () => {
-    const savedId = await save()
-    if (!savedId) return
-    navigate(
-      `/documentos/nuevo?cotizacion=${savedId}&vu=${Math.round(calc.valorUnitario)}&vt=${Math.round(calc.valorTotal)}`
-    )
-  }
-
   const condicionLabel = (() => {
     if (d.condicionPago === 'custom') return d.condicionCustom || 'Personalizado'
     return CONDICIONES_PAGO.find(x => x.id === d.condicionPago)?.lbl
@@ -419,12 +414,20 @@ export default function CotizacionEdit() {
             </span>
           )}
           <div className="userchip">
-            <div className="av">JR</div>
+            <div className="av">{user?.username?.slice(0, 2).toUpperCase()}</div>
             <div>
-              <div style={{ color: 'var(--ink)', fontWeight: 500 }}>Jessica</div>
-              <div className="role">Atención al cliente · Admin</div>
+              <div style={{ color: 'var(--ink)', fontWeight: 500 }}>{user?.username}</div>
+              <div className="role">{isAdmin ? 'Administrador' : 'Operador'}</div>
             </div>
           </div>
+          <button
+            className="btn"
+            style={{ padding: '4px 10px', fontSize: 11 }}
+            onClick={logout}
+            title="Cerrar sesión"
+          >
+            Salir
+          </button>
         </div>
       </div>
 
@@ -434,9 +437,42 @@ export default function CotizacionEdit() {
           <div className="num">1</div>
           <div>Cotización <span className="sub">· en edición</span></div>
         </div>
-        <div className="step disabled">
+        <div className={'step' + (d.estado === 'aprobada' || d.estado === 'convertida' ? '' : ' disabled')}>
           <div className="num">2</div>
-          <div>Producción <span className="sub">· se habilita al confirmar</span></div>
+          <div>
+            Producción
+            {d.estado === 'aprobada' && isAdmin && (
+              <button
+                className="btn accent"
+                style={{ marginLeft: 12, fontSize: 11, padding: '2px 10px' }}
+                onClick={() => {
+                  navigate('/ordenes/nuevo', {
+                    state: {
+                      fromCotizacion: {
+                        cotizacion: d.id,
+                        cotizacionNumero: d.numero,
+                        cliente: d.clienteId,
+                        clienteNombre: d.cliente,
+                        referencia: d.referencia,
+                        cantidad: d.cantidad,
+                        tipoClienteOp: d.tipoCliente,
+                        valorUnitario: Math.round(calc.valorUnitario || 0),
+                        valorTotal: Math.round(calc.valorTotal || 0),
+                        totalCostos: Math.round(calc.totalCostosOP || 0),
+                        condicionPago: d.condicionPago === '8' ? '8_dias' : d.condicionPago === '30' ? '30_dias' : 'mismo_dia',
+                        observaciones: d.observaciones,
+                      }
+                    }
+                  })
+                }}
+              >
+                + Crear OP
+              </button>
+            )}
+            {d.estado === 'convertida' && (
+              <span className="sub" style={{ marginLeft: 8 }}>· OP creada</span>
+            )}
+          </div>
         </div>
         <div className="step disabled">
           <div className="num">3</div>
@@ -521,16 +557,17 @@ export default function CotizacionEdit() {
               d={d} calc={calc}
               saving={saving}
               onSave={() => save()}
-              onCreateDocCliente={handleCreateDocCliente}
               onDelete={handleDelete}
             />
           </Section>
         </div>
 
-        {/* Sticky right column — Liquidación */}
-        <div className="column-side">
-          <LiquidationPanel d={d} set={set} calc={calc} onSave={() => save()} onCreateDocCliente={handleCreateDocCliente} saving={saving} />
-        </div>
+        {/* Sticky right column — Liquidación (admin only) */}
+        {isAdmin && (
+          <div className="column-side">
+            <LiquidationPanel d={d} set={set} calc={calc} onSave={() => save()} saving={saving} />
+          </div>
+        )}
       </div>
 
       {/* Save toast */}

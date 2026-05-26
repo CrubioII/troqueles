@@ -5,10 +5,13 @@ import traceback
 from rest_framework import viewsets, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.exceptions import PermissionDenied
+from django.contrib.auth.models import User
 from django.core.mail import EmailMessage
 from django.http import HttpResponse
 from django.template.loader import render_to_string
 from django.conf import settings
+from django.utils import timezone
 from weasyprint import HTML as WeasyprintHTML
 
 _LOGO_PATH = os.path.join(settings.BASE_DIR, "cotizaciones", "static", "cotizaciones", "logo.png")
@@ -37,7 +40,7 @@ def _fmt_cop(n):
     except Exception:
         return "$ 0"
 
-from .models import Cliente, Papel, Cotizacion, DocumentoCliente
+from .models import Cliente, Papel, Cotizacion, DocumentoCliente, OrdenProduccion, OpProceso
 from .serializers import (
     ClienteSerializer,
     PapelSerializer,
@@ -45,7 +48,16 @@ from .serializers import (
     CotizacionListSerializer,
     DocumentoClienteSerializer,
     DocumentoClienteListSerializer,
+    OrdenSerializer,
+    OrdenListSerializer,
+    OpProcesoSerializer,
+    OperarioSerializer,
 )
+
+
+def _require_admin(request):
+    if not request.user.is_staff:
+        raise PermissionDenied("Solo administradores pueden realizar esta acción.")
 
 
 class ClienteViewSet(viewsets.ModelViewSet):
@@ -87,9 +99,26 @@ class CotizacionViewSet(viewsets.ModelViewSet):
             return CotizacionListSerializer
         return CotizacionSerializer
 
+    def create(self, request, *args, **kwargs):
+        _require_admin(request)
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        _require_admin(request)
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        _require_admin(request)
+        return super().partial_update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        _require_admin(request)
+        return super().destroy(request, *args, **kwargs)
+
     @action(detail=True, methods=["post"], url_path="enviar")
     def enviar_correo(self, request, pk=None):
         """POST /api/cotizaciones/{id}/enviar/ — envía cotización por correo con PDF adjunto."""
+        _require_admin(request)
         cot = self.get_object()
         email_destino = request.data.get("email") or (cot.cliente.email if cot.cliente.email else None)
         if not email_destino:
@@ -133,6 +162,7 @@ class CotizacionViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["patch"], url_path="estado")
     def cambiar_estado(self, request, pk=None):
         """PATCH /api/cotizaciones/{id}/estado/ — cambia solo el estado."""
+        _require_admin(request)
         cotizacion = self.get_object()
         nuevo = request.data.get("estado")
         opciones = [c[0] for c in Cotizacion.ESTADO_CHOICES]
@@ -172,6 +202,16 @@ class DocumentoClienteViewSet(viewsets.ModelViewSet):
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ["numero", "cliente__nombre"]
     ordering_fields = ["creado", "fecha", "estado"]
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        _require_admin(request)
+
+    def create(self, request, *args, **kwargs):
+        return Response(
+            {"detail": "Documentos solo se crean desde una cotización aprobada."},
+            status=405,
+        )
 
     def get_serializer_class(self):
         if self.action == "list":
@@ -251,3 +291,130 @@ class DocumentoClienteViewSet(viewsets.ModelViewSet):
         doc.estado = "enviado"
         doc.save(update_fields=["estado", "modificado"])
         return Response({"ok": True, "enviado_a": all_recipients})
+
+
+class OrdenProduccionViewSet(viewsets.ModelViewSet):
+    queryset = OrdenProduccion.objects.select_related("cliente", "cotizacion").prefetch_related(
+        "procesos__operario"
+    )
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ["numero", "cliente__nombre", "referencia"]
+    ordering_fields = ["creado", "fecha", "estado"]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        estado = self.request.query_params.get("estado")
+        if estado:
+            qs = qs.filter(estado=estado)
+        cliente_id = self.request.query_params.get("cliente")
+        if cliente_id:
+            qs = qs.filter(cliente_id=cliente_id)
+        if not self.request.user.is_staff:
+            qs = qs.filter(procesos__operario=self.request.user).distinct()
+        return qs
+
+    def get_serializer_class(self):
+        if self.action == "list":
+            return OrdenListSerializer
+        return OrdenSerializer
+
+    def create(self, request, *args, **kwargs):
+        _require_admin(request)
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        _require_admin(request)
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        _require_admin(request)
+        return super().partial_update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        _require_admin(request)
+        return super().destroy(request, *args, **kwargs)
+
+    @action(detail=True, methods=["patch"], url_path="estado")
+    def cambiar_estado(self, request, pk=None):
+        _require_admin(request)
+        orden = self.get_object()
+        nuevo = request.data.get("estado")
+        opciones = [c[0] for c in OrdenProduccion.ESTADOS]
+        if nuevo not in opciones:
+            return Response({"error": f"Estado inválido. Opciones: {opciones}"}, status=400)
+        orden.estado = nuevo
+        orden.save(update_fields=["estado", "modificado"])
+        return Response(OrdenSerializer(orden).data)
+
+    @action(detail=True, methods=["patch"], url_path="anular")
+    def anular(self, request, pk=None):
+        _require_admin(request)
+        orden = self.get_object()
+        orden.estado = "anulada"
+        orden.save(update_fields=["estado", "modificado"])
+        return Response(OrdenSerializer(orden).data)
+
+    @action(detail=True, methods=["patch"], url_path="procesos/progreso")
+    def actualizar_progreso(self, request, pk=None):
+        """Operario actualiza progreso de un proceso asignado.
+        Body: { proceso_id, estado?, unidades_completadas?, notas? }
+        """
+        orden = self.get_object()
+        proceso_id = request.data.get("proceso_id")
+        if not proceso_id:
+            return Response({"error": "proceso_id requerido"}, status=400)
+
+        try:
+            proc = orden.procesos.get(proceso_id=proceso_id)
+        except OpProceso.DoesNotExist:
+            return Response({"error": "Proceso no encontrado"}, status=404)
+
+        if not request.user.is_staff and proc.operario != request.user:
+            raise PermissionDenied("Solo puedes actualizar tus procesos asignados.")
+
+        update_fields = []
+
+        nuevo_estado = request.data.get("estado")
+        if nuevo_estado and nuevo_estado in [c[0] for c in OpProceso.ESTADOS]:
+            if nuevo_estado == "en_proceso" and not proc.iniciado_en:
+                proc.iniciado_en = timezone.now()
+                update_fields.append("iniciado_en")
+            elif nuevo_estado == "completado" and not proc.completado_en:
+                proc.completado_en = timezone.now()
+                update_fields.append("completado_en")
+            proc.estado = nuevo_estado
+            update_fields.append("estado")
+
+        if "unidades_completadas" in request.data:
+            proc.unidades_completadas = int(request.data["unidades_completadas"])
+            update_fields.append("unidades_completadas")
+
+        if "notas" in request.data:
+            proc.notas = request.data["notas"]
+            update_fields.append("notas")
+
+        if update_fields:
+            proc.save(update_fields=update_fields)
+            self._sync_orden_estado(orden)
+
+        return Response(OpProcesoSerializer(proc).data)
+
+    def _sync_orden_estado(self, orden):
+        procs = list(orden.procesos.filter(active=True))
+        if not procs:
+            return
+        estados = [p.estado for p in procs]
+        if all(e == "completado" for e in estados):
+            if orden.estado not in ("finalizada", "remisionada"):
+                orden.estado = "finalizada"
+                orden.save(update_fields=["estado", "modificado"])
+        elif any(e == "en_proceso" for e in estados):
+            if orden.estado == "programada":
+                orden.estado = "en_proceso"
+                orden.save(update_fields=["estado", "modificado"])
+
+    @action(detail=False, methods=["get"], url_path="operarios")
+    def listar_operarios(self, request):
+        _require_admin(request)
+        users = User.objects.filter(is_active=True).order_by("username")
+        return Response(OperarioSerializer(users, many=True).data)

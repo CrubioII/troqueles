@@ -3,10 +3,10 @@ import { useNavigate } from 'react-router-dom'
 import { Icon } from '../components/Icons'
 import { fmtNum, STATUS_DEFS } from '../components/core'
 import { getCotizaciones, deleteCotizacion } from '../api'
+import { useAuth } from '../context/AuthContext'
 
 const TAB_DEFS = [
   { id: 'cotizaciones', label: 'Cotizaciones' },
-  { id: 'documentos',  label: 'Documentos cliente' },
 ]
 
 const STATUS_ALL = { id: '', label: 'Todos', cls: '' }
@@ -40,6 +40,8 @@ function Skeleton() {
 
 export default function CotizacionList() {
   const navigate = useNavigate()
+  const { user, logout } = useAuth()
+  const isAdmin = user?.role === 'admin'
   const [tab, setTab] = useState('cotizaciones')
   const [cotizaciones, setCotizaciones] = useState([])
   const [loading, setLoading] = useState(true)
@@ -144,13 +146,28 @@ export default function CotizacionList() {
           <div className="mod">Cotizaciones</div>
         </div>
         <div className="topbar-right">
+          <button
+            className="btn"
+            style={{ fontSize: 12 }}
+            onClick={() => navigate('/ordenes')}
+          >
+            Producción
+          </button>
           <div className="userchip">
-            <div className="av">JR</div>
+            <div className="av">{user?.username?.slice(0, 2).toUpperCase()}</div>
             <div>
-              <div style={{ color: 'var(--ink)', fontWeight: 500 }}>Jessica</div>
-              <div className="role">Atención al cliente · Admin</div>
+              <div style={{ color: 'var(--ink)', fontWeight: 500 }}>{user?.username}</div>
+              <div className="role">{isAdmin ? 'Administrador' : 'Operador'}</div>
             </div>
           </div>
+          <button
+            className="btn"
+            style={{ padding: '4px 10px', fontSize: 11 }}
+            onClick={logout}
+            title="Cerrar sesión"
+          >
+            Salir
+          </button>
         </div>
       </div>
 
@@ -165,7 +182,6 @@ export default function CotizacionList() {
               type="button"
               onClick={() => {
                 setTab(t.id)
-                if (t.id === 'documentos') navigate('/documentos/nuevo')
               }}
               style={{
                 padding: '7px 16px', fontSize: 13, fontWeight: tab === t.id ? 700 : 400,
@@ -192,19 +208,14 @@ export default function CotizacionList() {
               </div>
             )}
           </div>
-          <button
-            className="btn"
-            style={{ fontSize: 12 }}
-            onClick={() => navigate('/documentos/nuevo')}
-          >
-            <Icon.Plus /> Nuevo doc. cliente
-          </button>
+{isAdmin && (
           <button
             className="btn accent"
             onClick={() => navigate('/cotizaciones/nuevo')}
           >
             <Icon.Plus /> Nueva cotización
           </button>
+          )}
         </div>
 
         {/* Search + filter bar */}
@@ -327,7 +338,7 @@ export default function CotizacionList() {
                         >
                           Abrir
                         </button>
-                        {cot.estado !== 'convertida' && (
+                        {isAdmin && cot.estado !== 'convertida' && (
                           confirmDelete === cot.id ? (
                             <>
                               <button

@@ -26,7 +26,7 @@ function LiqInput({ value, onChange, isOverridden, onReset, big }) {
   )
 }
 
-export default function LiquidationPanel({ d, set, calc, onSave, onCreateDocCliente, saving }) {
+export default function LiquidationPanel({ d, set, calc, onSave, saving }) {
   const isConvertida = d.estado === 'convertida'
   const [dlPdf, setDlPdf] = useState(false)
 
@@ -159,10 +159,7 @@ export default function LiquidationPanel({ d, set, calc, onSave, onCreateDocClie
         </div>
       </div>
       <div className="liq-footer">
-        <button className="btn accent" style={{ width: '100%', justifyContent: 'center' }} onClick={onCreateDocCliente} disabled={saving || isConvertida}>
-          <Icon.Send /> {saving ? 'Guardando…' : 'Guardar y enviar al cliente'}
-        </button>
-        <button className="btn" style={{ width: '100%', justifyContent: 'center' }} onClick={onSave} disabled={saving || isConvertida}>
+<button className="btn" style={{ width: '100%', justifyContent: 'center' }} onClick={onSave} disabled={saving || isConvertida}>
           <Icon.Save /> {saving ? 'Guardando…' : 'Guardar'}
         </button>
         <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>

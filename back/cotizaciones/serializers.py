@@ -1,5 +1,6 @@
 from rest_framework import serializers
-from .models import Cliente, Papel, Cotizacion, CotizacionProceso, DocumentoCliente, DocumentoClienteItem
+from django.contrib.auth.models import User
+from .models import Cliente, Papel, Cotizacion, CotizacionProceso, DocumentoCliente, DocumentoClienteItem, OrdenProduccion, OpProceso
 
 
 class ClienteSerializer(serializers.ModelSerializer):
@@ -171,3 +172,132 @@ class DocumentoClienteListSerializer(serializers.ModelSerializer):
     class Meta:
         model = DocumentoCliente
         fields = ["id", "numero", "fecha", "cliente_nombre", "estado", "creado", "modificado"]
+
+
+# ─────────────── Órdenes de Producción ───────────────
+
+class OperarioSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ["id", "username", "first_name", "last_name"]
+
+
+class OpProcesoSerializer(serializers.ModelSerializer):
+    operario_username = serializers.CharField(source="operario.username", read_only=True, default="")
+
+    class Meta:
+        model = OpProceso
+        fields = [
+            "id", "proceso_id", "active", "costo", "maquina_id",
+            "operario", "operario_username",
+            "estado", "unidades_completadas",
+            "iniciado_en", "completado_en", "notas",
+        ]
+        read_only_fields = ["id"]
+
+
+class OrdenListSerializer(serializers.ModelSerializer):
+    cliente_nombre    = serializers.CharField(source="cliente.nombre", read_only=True)
+    cotizacion_numero = serializers.CharField(source="cotizacion.numero", read_only=True, default="")
+    saldo             = serializers.SerializerMethodField()
+    progreso_procesos = serializers.SerializerMethodField()
+    progreso_unidades = serializers.SerializerMethodField()
+
+    class Meta:
+        model = OrdenProduccion
+        fields = [
+            "id", "numero", "fecha", "cliente_nombre", "cotizacion_numero",
+            "referencia", "estado", "cantidad", "valor_total", "abono", "saldo",
+            "condicion_pago", "tipo_cliente_op",
+            "progreso_procesos", "progreso_unidades",
+            "creado", "modificado",
+        ]
+
+    def get_saldo(self, obj):
+        return float(obj.valor_total) - float(obj.abono)
+
+    def _active_procs(self, obj):
+        return [p for p in obj.procesos.all() if p.active]
+
+    def get_progreso_procesos(self, obj):
+        procs = self._active_procs(obj)
+        if not procs:
+            return 0
+        completados = sum(1 for p in procs if p.estado == "completado")
+        return round(completados / len(procs) * 100)
+
+    def get_progreso_unidades(self, obj):
+        if not obj.cantidad:
+            return 0
+        procs = self._active_procs(obj)
+        if not procs:
+            return 0
+        max_completadas = max((p.unidades_completadas for p in procs), default=0)
+        return round(min(max_completadas / obj.cantidad * 100, 100))
+
+
+class OrdenSerializer(serializers.ModelSerializer):
+    procesos          = OpProcesoSerializer(many=True, required=False)
+    cliente_nombre    = serializers.CharField(source="cliente.nombre", read_only=True)
+    cotizacion_numero = serializers.CharField(source="cotizacion.numero", read_only=True, default="")
+    saldo             = serializers.SerializerMethodField()
+    progreso_procesos = serializers.SerializerMethodField()
+    progreso_unidades = serializers.SerializerMethodField()
+
+    class Meta:
+        model = OrdenProduccion
+        fields = [
+            "id", "numero", "fecha",
+            "cliente", "cliente_nombre",
+            "cotizacion", "cotizacion_numero",
+            "referencia", "descripcion", "estado",
+            "tipo_cliente_op", "condicion_cobro_terciario",
+            "cantidad", "valor_unitario", "cantidad_pliegos", "papel_referencia",
+            "corte_inicial", "corte_final", "medida_producto", "cantidad_impresion",
+            "total_costos", "valor_total", "subtotal", "abono", "saldo",
+            "condicion_pago", "observaciones",
+            "creado", "modificado",
+            "procesos",
+            "progreso_procesos", "progreso_unidades",
+        ]
+        read_only_fields = ["id", "numero", "creado", "modificado"]
+
+    def get_saldo(self, obj):
+        return float(obj.valor_total) - float(obj.abono)
+
+    def _active_procs(self, obj):
+        return [p for p in obj.procesos.all() if p.active]
+
+    def get_progreso_procesos(self, obj):
+        procs = self._active_procs(obj)
+        if not procs:
+            return 0
+        completados = sum(1 for p in procs if p.estado == "completado")
+        return round(completados / len(procs) * 100)
+
+    def get_progreso_unidades(self, obj):
+        if not obj.cantidad:
+            return 0
+        procs = self._active_procs(obj)
+        if not procs:
+            return 0
+        max_completadas = max((p.unidades_completadas for p in procs), default=0)
+        return round(min(max_completadas / obj.cantidad * 100, 100))
+
+    def create(self, validated_data):
+        procesos_data = validated_data.pop("procesos", [])
+        orden = OrdenProduccion.objects.create(**validated_data)
+        for p in procesos_data:
+            OpProceso.objects.create(orden=orden, **p)
+        return orden
+
+    def update(self, instance, validated_data):
+        procesos_data = validated_data.pop("procesos", None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        if procesos_data is not None:
+            instance.procesos.all().delete()
+            for p in procesos_data:
+                OpProceso.objects.create(orden=instance, **p)
+        return instance

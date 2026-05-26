@@ -1,4 +1,5 @@
 from django.db import models
+from django.contrib.auth.models import User
 
 
 class Cliente(models.Model):
@@ -168,3 +169,110 @@ class DocumentoClienteItem(models.Model):
 
     def __str__(self):
         return f"{self.documento.numero} · {self.referencia}"
+
+
+class OrdenProduccion(models.Model):
+    ESTADOS = [
+        ('borrador',    'Borrador'),
+        ('programada',  'Programada'),
+        ('en_proceso',  'En Proceso'),
+        ('finalizada',  'Finalizada'),
+        ('remisionada', 'Remisionada'),
+        ('anulada',     'Anulada'),
+    ]
+    CONDICION_COBRO_CHOICES = [
+        ('op',       'Solo OP'),
+        ('remision', 'Remisión'),
+        ('factura',  'Factura'),
+    ]
+    CONDICION_PAGO_CHOICES = [
+        ('mismo_dia', 'Mismo Día'),
+        ('8_dias',    '8 Días'),
+        ('30_dias',   '30 Días'),
+        ('60_dias',   '60 Días'),
+    ]
+    TIPO_CLIENTE_CHOICES = [
+        ('final',     'Cliente Final'),
+        ('terciario', 'Cliente Terciario'),
+    ]
+
+    numero       = models.CharField(max_length=20, unique=True, blank=True)
+    fecha        = models.DateField()
+    cliente      = models.ForeignKey(Cliente, on_delete=models.PROTECT, related_name='ordenes')
+    cotizacion   = models.ForeignKey(
+        Cotizacion, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='ordenes'
+    )
+    referencia   = models.CharField(max_length=300)
+    descripcion  = models.TextField(blank=True, default='')
+    estado       = models.CharField(max_length=20, choices=ESTADOS, default='borrador')
+
+    tipo_cliente_op            = models.CharField(max_length=20, choices=TIPO_CLIENTE_CHOICES, default='final')
+    condicion_cobro_terciario  = models.CharField(max_length=20, choices=CONDICION_COBRO_CHOICES, blank=True, default='')
+
+    # RF-01.4
+    cantidad           = models.PositiveIntegerField(default=0)
+    valor_unitario     = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    cantidad_pliegos   = models.PositiveIntegerField(default=0)
+    papel_referencia   = models.CharField(max_length=200, blank=True, default='')
+    corte_inicial      = models.CharField(max_length=100, blank=True, default='')
+    corte_final        = models.CharField(max_length=100, blank=True, default='')
+    medida_producto    = models.CharField(max_length=100, blank=True, default='')
+    cantidad_impresion = models.PositiveIntegerField(default=0)
+
+    # RF-01.5
+    total_costos = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    valor_total  = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    subtotal     = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+
+    # RF-01.6
+    abono = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+
+    condicion_pago = models.CharField(max_length=20, choices=CONDICION_PAGO_CHOICES, default='mismo_dia')
+    observaciones  = models.TextField(blank=True, default='')
+
+    creado    = models.DateTimeField(auto_now_add=True)
+    modificado = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-creado']
+
+    def save(self, *args, **kwargs):
+        is_new = not self.pk
+        super().save(*args, **kwargs)
+        if is_new and not self.numero:
+            self.numero = f'OP-{self.pk:04d}'
+            OrdenProduccion.objects.filter(pk=self.pk).update(numero=self.numero)
+
+    def __str__(self):
+        return f'{self.numero} · {self.cliente}'
+
+
+class OpProceso(models.Model):
+    ESTADOS = [
+        ('pendiente',  'Pendiente'),
+        ('en_proceso', 'En Proceso'),
+        ('completado', 'Completado'),
+    ]
+
+    orden               = models.ForeignKey(OrdenProduccion, on_delete=models.CASCADE, related_name='procesos')
+    proceso_id          = models.CharField(max_length=50)
+    active              = models.BooleanField(default=False)
+    costo               = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    maquina_id          = models.CharField(max_length=50, blank=True, default='')
+    operario            = models.ForeignKey(
+        User, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='procesos_op'
+    )
+    estado              = models.CharField(max_length=20, choices=ESTADOS, default='pendiente')
+    unidades_completadas = models.PositiveIntegerField(default=0)
+    iniciado_en         = models.DateTimeField(null=True, blank=True)
+    completado_en       = models.DateTimeField(null=True, blank=True)
+    notas               = models.TextField(blank=True, default='')
+
+    class Meta:
+        unique_together = ('orden', 'proceso_id')
+        ordering = ['proceso_id']
+
+    def __str__(self):
+        return f'{self.orden.numero} · {self.proceso_id}'
