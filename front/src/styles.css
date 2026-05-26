@@ -560,7 +560,9 @@ input.input[type="number"]::-webkit-inner-spin-button {
   overflow: hidden;
   display: flex; flex-direction: column;
   max-height: calc(100vh - 110px);
+  transition: max-height 0.2s ease;
 }
+.liq.collapsed { max-height: 60px; }
 .liq-header {
   padding: 14px 16px;
   background: var(--ink);
@@ -959,6 +961,65 @@ input.input[type="number"]::-webkit-inner-spin-button {
 }
 .op-proc-item + .op-proc-item { border-top: 1px solid var(--line); }
 .op-proc-name { flex: 1; color: var(--ink-2); }
+
+/* ===== Responsive ===== */
+
+/* Tablet: stack workspace columns */
+@media (max-width: 900px) {
+  .workspace {
+    grid-template-columns: 1fr;
+    padding: 16px 16px 60px;
+    gap: 16px;
+  }
+  .column-side { position: static; }
+  .liq { position: static; max-height: none; }
+}
+
+/* Mobile: compact topbar, 2-col grids */
+@media (max-width: 640px) {
+  .topbar { padding: 8px 12px; gap: 8px; }
+  .brand .biz { display: none; }
+  .userchip > div { display: none; } /* hide name/role text, keep avatar */
+
+  /* Grids collapse to 2 columns */
+  .grid-6 { grid-template-columns: 1fr 1fr; }
+  .grid-4 { grid-template-columns: 1fr 1fr; }
+  .grid-3 { grid-template-columns: 1fr 1fr; }
+
+  /* Cap spanning columns to 2 in 2-col grids */
+  .grid-6 .col-span-3,
+  .grid-6 .col-span-4,
+  .grid-6 .col-span-5,
+  .grid-6 .col-span-6,
+  .grid-4 .col-span-3,
+  .grid-4 .col-span-4,
+  .grid-3 .col-span-3 { grid-column: span 2; }
+
+  /* Process rows adapt */
+  .proc-row {
+    grid-template-columns: 22px 1fr 100px;
+    gap: 8px;
+  }
+  .impresion-bottom { grid-template-columns: 1fr; }
+  .impresion-top { grid-template-columns: 22px 1fr 120px; }
+
+  /* Payment conditions: 2 columns */
+  .cond-pago-options { grid-template-columns: 1fr 1fr; }
+
+  /* Sheet diagram: full width */
+  .papel-layout { grid-template-columns: 1fr; }
+  .papel-diagram { grid-column: 1; grid-row: auto; }
+
+  /* Stepper compact */
+  .stepper { padding: 0 12px; overflow-x: auto; }
+  .step { white-space: nowrap; padding: 10px 10px 10px 0; font-size: 11px; }
+  .step + .step { padding-left: 10px; }
+  .step .sub { display: none; }
+
+  /* Workspace padding */
+  .workspace { padding: 12px 12px 60px; }
+  .section-body { padding: 12px; }
+}
 
 /* ── Print isolation ── */
 @page { size: A4; margin: 12mm 15mm; }

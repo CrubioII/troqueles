@@ -29,6 +29,7 @@ function LiqInput({ value, onChange, isOverridden, onReset, big }) {
 export default function LiquidationPanel({ d, set, calc, onSave, saving }) {
   const isConvertida = d.estado === 'convertida'
   const [dlPdf, setDlPdf] = useState(false)
+  const [collapsed, setCollapsed] = useState(() => typeof window !== 'undefined' && window.innerWidth < 900)
 
   const handlePdfInterno = async () => {
     if (!d.id) return
@@ -49,15 +50,23 @@ export default function LiquidationPanel({ d, set, calc, onSave, saving }) {
   }
 
   return (
-    <div className="liq">
-      <div className="liq-header">
+    <div className={'liq' + (collapsed ? ' collapsed' : '')}>
+      <div className="liq-header" style={{ cursor: 'pointer' }} onClick={() => setCollapsed(c => !c)}>
         <div>
           <div className="ttl">Liquidación</div>
           <div style={{ fontSize: 11, opacity: 0.7, marginTop: 2 }}>Sección 4 · siempre visible</div>
         </div>
-        <div className="sub">{d.numero}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto' }}>
+          <div className="sub">{d.numero}</div>
+          <span style={{
+            fontSize: 16, lineHeight: 1, color: 'rgba(255,255,255,0.8)',
+            transform: collapsed ? 'rotate(-90deg)' : 'rotate(90deg)',
+            transition: 'transform 0.2s',
+            display: 'inline-block',
+          }}>›</span>
+        </div>
       </div>
-      <div className="liq-body">
+      {!collapsed && <div className="liq-body">
         <table className="liq-table">
           <tbody>
             <tr>
@@ -157,9 +166,9 @@ export default function LiquidationPanel({ d, set, calc, onSave, saving }) {
           <Icon.Calc />
           <div>Todos los valores son editables: escribe directamente el número que deseas. El ↺ restaura el cálculo automático.</div>
         </div>
-      </div>
-      <div className="liq-footer">
-<button className="btn" style={{ width: '100%', justifyContent: 'center' }} onClick={onSave} disabled={saving || isConvertida}>
+      </div>}
+      {!collapsed && <div className="liq-footer">
+        <button className="btn" style={{ width: '100%', justifyContent: 'center' }} onClick={onSave} disabled={saving || isConvertida}>
           <Icon.Save /> {saving ? 'Guardando…' : 'Guardar'}
         </button>
         <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
@@ -178,7 +187,7 @@ export default function LiquidationPanel({ d, set, calc, onSave, saving }) {
             <Icon.Lock /> Convertida a OP — solo lectura
           </div>
         )}
-      </div>
+      </div>}
     </div>
   )
 }

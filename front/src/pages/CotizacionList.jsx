@@ -172,7 +172,7 @@ export default function CotizacionList() {
       </div>
 
       {/* List workspace */}
-      <div style={{ maxWidth: 1100, margin: '0 auto', padding: '28px 24px' }}>
+      <div style={{ maxWidth: 1100, margin: '0 auto', padding: 'clamp(12px, 4vw, 28px) clamp(12px, 4vw, 24px)' }}>
 
         {/* Tabs */}
         <div style={{ display: 'flex', gap: 4, marginBottom: 20, borderBottom: '1px solid var(--border)', paddingBottom: 0 }}>
@@ -220,7 +220,7 @@ export default function CotizacionList() {
 
         {/* Search + filter bar */}
         <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-          <div className="input-affix" style={{ flex: '1 1 240px', maxWidth: 380 }}>
+          <div className="input-affix" style={{ flex: '1 1 200px', minWidth: 0 }}>
             <input
               className="input"
               style={{ paddingLeft: 34 }}
@@ -273,106 +273,110 @@ export default function CotizacionList() {
               </div>
             </div>
           ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-              <thead>
-                <tr style={{ background: 'var(--surface-2)', borderBottom: '1px solid var(--border)' }}>
-                  {['N°', 'Fecha', 'Cliente', 'Referencia', 'Cantidad', 'Estado', ''].map((h, i) => (
-                    <th key={i} style={{
-                      padding: '10px 16px', textAlign: i >= 4 ? 'center' : 'left',
-                      fontWeight: 600, fontSize: 11, color: 'var(--ink-3)',
-                      textTransform: 'uppercase', letterSpacing: '0.05em',
-                      whiteSpace: 'nowrap',
-                    }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {cotizaciones.map((cot, idx) => (
-                  <tr
-                    key={cot.id}
-                    onClick={() => navigate(`/cotizaciones/${cot.id}`)}
-                    style={{
-                      borderBottom: '1px solid var(--border)',
-                      cursor: 'pointer',
-                      background: idx % 2 === 0 ? 'transparent' : 'rgba(0,0,0,0.012)',
-                      transition: 'background 0.12s',
-                    }}
-                    onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
-                    onMouseLeave={e => e.currentTarget.style.background = idx % 2 === 0 ? 'transparent' : 'rgba(0,0,0,0.012)'}
-                  >
-                    <td style={{ padding: '12px 16px', whiteSpace: 'nowrap' }}>
-                      <span className="mono" style={{ fontWeight: 600, color: 'var(--accent)', fontSize: 12 }}>
-                        {cot.numero || '—'}
-                      </span>
-                    </td>
-                    <td style={{ padding: '12px 16px', whiteSpace: 'nowrap', color: 'var(--ink-3)', fontSize: 12 }}>
-                      {fmtFecha(cot.fecha)}
-                    </td>
-                    <td style={{ padding: '12px 16px', fontWeight: 500, color: 'var(--ink)', maxWidth: 200 }}>
-                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {cot.cliente_nombre || '—'}
-                      </div>
-                      {cot.tipo_cliente === 'terciario' && (
-                        <span style={{ fontSize: 10, color: 'var(--ink-3)', fontWeight: 400 }}>Terciario</span>
-                      )}
-                    </td>
-                    <td style={{ padding: '12px 16px', color: 'var(--ink-2)', maxWidth: 280 }}>
-                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {cot.referencia || '—'}
-                      </div>
-                    </td>
-                    <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                      <span className="mono" style={{ fontSize: 12 }}>
-                        {fmtNum(cot.cantidad)}
-                      </span>
-                    </td>
-                    <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                      <StatusBadge estado={cot.estado} />
-                    </td>
-                    <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                      <div style={{ display: 'flex', gap: 6, justifyContent: 'center', alignItems: 'center' }}>
-                        <button
-                          className="btn"
-                          style={{ padding: '4px 10px', fontSize: 11 }}
-                          onClick={e => { e.stopPropagation(); navigate(`/cotizaciones/${cot.id}`) }}
-                        >
-                          Abrir
-                        </button>
-                        {isAdmin && cot.estado !== 'convertida' && (
-                          confirmDelete === cot.id ? (
-                            <>
-                              <button
-                                className="btn"
-                                style={{ padding: '4px 8px', fontSize: 11, background: 'var(--danger, #c0392b)', color: '#fff', borderColor: 'var(--danger, #c0392b)' }}
-                                onClick={e => handleDelete(e, cot)}
-                              >
-                                Confirmar
-                              </button>
-                              <button
-                                className="btn"
-                                style={{ padding: '4px 8px', fontSize: 11 }}
-                                onClick={e => { e.stopPropagation(); setConfirmDelete(null) }}
-                              >
-                                ✕
-                              </button>
-                            </>
-                          ) : (
-                            <button
-                              className="btn"
-                              style={{ padding: '4px 8px', color: 'var(--danger, #c0392b)', borderColor: 'transparent' }}
-                              title="Eliminar cotización"
-                              onClick={e => handleDelete(e, cot)}
-                            >
-                              <Icon.Trash />
-                            </button>
-                          )
-                        )}
-                      </div>
-                    </td>
+            <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+              <table style={{ width: '100%', minWidth: 560, borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: 'var(--surface-2)', borderBottom: '1px solid var(--border)' }}>
+                    {['N°', 'Fecha', 'Cliente', 'Referencia', 'Cantidad', 'Estado', ''].map((h, i) => (
+                      <th key={i} style={{
+                        padding: '10px 16px', textAlign: i >= 4 ? 'center' : 'left',
+                        fontWeight: 600, fontSize: 11, color: 'var(--ink-3)',
+                        textTransform: 'uppercase', letterSpacing: '0.05em',
+                        whiteSpace: 'nowrap',
+                      }}>{h}</th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {cotizaciones.map((cot, idx) => (
+                    <tr
+                      key={cot.id}
+                      onClick={() => navigate(`/cotizaciones/${cot.id}`)}
+                      style={{
+                        borderBottom: '1px solid var(--border)',
+                        cursor: 'pointer',
+                        background: idx % 2 === 0 ? 'transparent' : 'rgba(0,0,0,0.012)',
+                        transition: 'background 0.12s',
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                      onMouseLeave={e => e.currentTarget.style.background = idx % 2 === 0 ? 'transparent' : 'rgba(0,0,0,0.012)'}
+                    >
+                      <td style={{ padding: '12px 16px', whiteSpace: 'nowrap' }}>
+                        <span className="mono" style={{ fontWeight: 600, color: 'var(--accent)', fontSize: 12 }}>
+                          {cot.numero || '—'}
+                        </span>
+                      </td>
+                      <td style={{ padding: '12px 16px', whiteSpace: 'nowrap', color: 'var(--ink-3)', fontSize: 12 }}>
+                        {fmtFecha(cot.fecha)}
+                      </td>
+                      <td style={{ padding: '12px 16px', fontWeight: 500, color: 'var(--ink)', maxWidth: 200 }}>
+                        <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {cot.cliente_nombre || '—'}
+                        </div>
+                        {cot.tipo_cliente === 'terciario' && (
+                          <span style={{ fontSize: 10, color: 'var(--ink-3)', fontWeight: 400 }}>Terciario</span>
+                        )}
+                      </td>
+                      <td style={{ padding: '12px 16px', color: 'var(--ink-2)', maxWidth: 280 }}>
+                        <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {cot.referencia || '—'}
+                        </div>
+                      </td>
+                      <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                        <span className="mono" style={{ fontSize: 12 }}>
+                          {fmtNum(cot.cantidad)}
+                        </span>
+                      </td>
+                      <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                        <StatusBadge estado={cot.estado} />
+                      </td>
+                      <td style={{ padding: '12px 8px', whiteSpace: 'nowrap', width: 1 }}>
+                        <div style={{ display: 'flex', gap: 4, alignItems: 'center', justifyContent: 'flex-end' }}>
+                          <button
+                            className="btn"
+                            style={{ padding: '4px 10px', fontSize: 11, flexShrink: 0 }}
+                            onClick={e => { e.stopPropagation(); navigate(`/cotizaciones/${cot.id}`) }}
+                          >
+                            Abrir
+                          </button>
+                          <div style={{ width: 34, display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
+                            {isAdmin && cot.estado !== 'convertida' && (
+                              confirmDelete === cot.id ? (
+                                <div style={{ display: 'flex', gap: 4 }}>
+                                  <button
+                                    className="btn"
+                                    style={{ padding: '4px 8px', fontSize: 11, background: 'var(--danger, #c0392b)', color: '#fff', borderColor: 'var(--danger, #c0392b)' }}
+                                    onClick={e => handleDelete(e, cot)}
+                                  >
+                                    ✓
+                                  </button>
+                                  <button
+                                    className="btn"
+                                    style={{ padding: '4px 8px', fontSize: 11 }}
+                                    onClick={e => { e.stopPropagation(); setConfirmDelete(null) }}
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  className="btn"
+                                  style={{ padding: '4px 8px', color: 'var(--danger, #c0392b)', borderColor: 'transparent' }}
+                                  title="Eliminar cotización"
+                                  onClick={e => handleDelete(e, cot)}
+                                >
+                                  <Icon.Trash />
+                                </button>
+                              )
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
 
