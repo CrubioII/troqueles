@@ -164,7 +164,7 @@ function buildBlankState() {
 export default function CotizacionEdit() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { user, logout } = useAuth()
+  const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
   const isNew = id === 'nuevo'
 
@@ -364,7 +364,7 @@ export default function CotizacionEdit() {
   }
 
   const handleDelete = () => {
-    navigate('/')
+    navigate('/cotizaciones')
     deleteCotizacion(d.id).catch(() => {})
   }
 
@@ -378,9 +378,6 @@ export default function CotizacionEdit() {
       <div className="app">
         <div className="topbar">
           <div className="brand">
-            <div className="mark">TI</div>
-            <div className="biz">Troqueles INK</div>
-            <span className="div">/</span>
             <div className="mod">Cotizaciones</div>
           </div>
         </div>
@@ -394,13 +391,10 @@ export default function CotizacionEdit() {
       {/* Topbar */}
       <div className="topbar">
         <div className="brand">
-          <div className="mark">TI</div>
-          <div className="biz">Troqueles INK</div>
-          <span className="div">/</span>
           <button
             className="btn"
             style={{ padding: '2px 8px', fontSize: 12, gap: 4 }}
-            onClick={() => navigate('/')}
+            onClick={() => navigate('/cotizaciones')}
           >
             <Icon.ArrowLeft /> Cotizaciones
           </button>
@@ -413,21 +407,6 @@ export default function CotizacionEdit() {
               Error: {saveError}
             </span>
           )}
-          <div className="userchip">
-            <div className="av">{user?.username?.slice(0, 2).toUpperCase()}</div>
-            <div>
-              <div style={{ color: 'var(--ink)', fontWeight: 500 }}>{user?.username}</div>
-              <div className="role">{isAdmin ? 'Administrador' : 'Operador'}</div>
-            </div>
-          </div>
-          <button
-            className="btn"
-            style={{ padding: '4px 10px', fontSize: 11 }}
-            onClick={logout}
-            title="Cerrar sesión"
-          >
-            Salir
-          </button>
         </div>
       </div>
 
@@ -558,6 +537,13 @@ export default function CotizacionEdit() {
               saving={saving}
               onSave={() => save()}
               onDelete={handleDelete}
+              onSaveAndSend={async () => {
+                const savedId = await save()
+                if (!savedId) return
+                const vu = Math.round(calc.valorUnitario || 0)
+                const vt = Math.round(calc.valorTotal || 0)
+                navigate(`/documentos/nuevo?cotizacion=${savedId}&vu=${vu}&vt=${vt}`)
+              }}
             />
           </Section>
         </div>
@@ -565,7 +551,18 @@ export default function CotizacionEdit() {
         {/* Sticky right column — Liquidación (admin only) */}
         {isAdmin && (
           <div className="column-side">
-            <LiquidationPanel d={d} set={set} calc={calc} onSave={() => save()} saving={saving} />
+            <LiquidationPanel
+                d={d} set={set} calc={calc}
+                onSave={() => save()}
+                saving={saving}
+                onSaveAndSend={async () => {
+                  const savedId = await save()
+                  if (!savedId) return
+                  const vu = Math.round(calc.valorUnitario || 0)
+                  const vt = Math.round(calc.valorTotal || 0)
+                  navigate(`/documentos/nuevo?cotizacion=${savedId}&vu=${vu}&vt=${vt}`)
+                }}
+              />
           </div>
         )}
       </div>

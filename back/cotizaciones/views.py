@@ -207,12 +207,6 @@ class DocumentoClienteViewSet(viewsets.ModelViewSet):
         super().initial(request, *args, **kwargs)
         _require_admin(request)
 
-    def create(self, request, *args, **kwargs):
-        return Response(
-            {"detail": "Documentos solo se crean desde una cotización aprobada."},
-            status=405,
-        )
-
     def get_serializer_class(self):
         if self.action == "list":
             return DocumentoClienteListSerializer

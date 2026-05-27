@@ -347,7 +347,7 @@ export default function DocumentoClienteEdit() {
   const { id } = useParams()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const isNew = !id
+  const isNew = !id || id === 'nuevo'
 
   const [d, setData] = useState(buildBlank)
   const [loading, setLoading] = useState(!isNew)
@@ -362,6 +362,9 @@ export default function DocumentoClienteEdit() {
   const toastRef = useRef(null)
 
   const set = (patch) => setData(prev => ({ ...prev, ...patch }))
+
+  // Source cotización: from URL param (new doc) or first item (existing doc)
+  const sourceCotId = searchParams.get('cotizacion') || d.items.find(i => i.cotizacion)?.cotizacion
 
   useEffect(() => {
     if (!isNew) {
@@ -496,10 +499,10 @@ export default function DocumentoClienteEdit() {
   }
 
   const handleDelete = async () => {
-    if (!d.id) { navigate('/'); return }
+    if (!d.id) { navigate('/cotizaciones'); return }
     try {
       await deleteDocumento(d.id)
-      navigate('/')
+      navigate('/cotizaciones')
     } catch (e) {
       setSaveError(e.message)
     }
@@ -509,7 +512,7 @@ export default function DocumentoClienteEdit() {
     return (
       <div className="app">
         <div className="topbar">
-          <div className="brand"><div className="mark">TI</div><div className="biz">Troqueles INK</div></div>
+          <div className="brand"><div className="mod">Cotizaciones</div></div>
         </div>
         <div style={{ padding: 48, textAlign: 'center', color: 'var(--ink-3)' }}>Cargando documento…</div>
       </div>
@@ -521,11 +524,9 @@ export default function DocumentoClienteEdit() {
       {/* Topbar */}
       <div className="topbar">
         <div className="brand">
-          <div className="mark">TI</div>
-          <div className="biz">Troqueles INK</div>
-          <span className="div">/</span>
-          <button className="btn" style={{ padding: '2px 8px', fontSize: 12, gap: 4 }} onClick={() => navigate('/')}>
-            <Icon.ArrowLeft /> Cotizaciones
+          <button className="btn" style={{ padding: '2px 8px', fontSize: 12, gap: 4 }}
+            onClick={() => navigate(sourceCotId ? `/cotizaciones/${sourceCotId}` : '/cotizaciones')}>
+            <Icon.ArrowLeft /> {sourceCotId ? 'Cotización' : 'Cotizaciones'}
           </button>
           <span className="div">/</span>
           <div className="mod mono">{d.numero}</div>
@@ -535,13 +536,6 @@ export default function DocumentoClienteEdit() {
         </div>
         <div className="topbar-right">
           {saveError && <span style={{ color: 'var(--danger, #c0392b)', fontSize: 12 }}>Error: {saveError}</span>}
-          <div className="userchip">
-            <div className="av">JR</div>
-            <div>
-              <div style={{ color: 'var(--ink)', fontWeight: 500 }}>Jessica</div>
-              <div className="role">Atención al cliente · Admin</div>
-            </div>
-          </div>
         </div>
       </div>
 
@@ -752,7 +746,7 @@ export default function DocumentoClienteEdit() {
             <Icon.Print /> {downloading ? 'Generando…' : 'Descargar PDF'}
           </button>
           <button className="btn" style={{ flex: '1 1 auto', justifyContent: 'center' }}
-            onClick={() => { if (!d.id) { setSaveError('Guarda el documento primero'); return }; setShowSend(true) }}>
+            onClick={() => setShowSend(true)} disabled={!d.id}>
             <Icon.Send /> Enviar correo
           </button>
           {d.id && (

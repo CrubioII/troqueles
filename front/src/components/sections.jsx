@@ -608,7 +608,7 @@ export function SectionCondiciones({ d, set }) {
 // =========================================================
 // Section 6 — Acciones
 // =========================================================
-export function SectionAcciones({ d, calc, onSave, onDelete, saving }) {
+export function SectionAcciones({ d, calc, onSave, onDelete, onSaveAndSend, saving }) {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const isConvertida = d.estado === 'convertida'
   const canDelete = !!d.id && !isConvertida
@@ -625,7 +625,10 @@ export function SectionAcciones({ d, calc, onSave, onDelete, saving }) {
         <button className="btn" onClick={onSave} disabled={saving || isConvertida}>
           <Icon.Save /> {saving ? 'Guardando…' : 'Guardar'}
         </button>
-<div className="spacer" />
+        <button className="btn accent" onClick={onSaveAndSend} disabled={saving || isConvertida} style={{ gap: 6 }}>
+          <Icon.Send /> {saving ? 'Guardando…' : 'Guardar y Enviar al Cliente'}
+        </button>
+        <div className="spacer" />
         <span className="muted" style={{ fontSize: 11.5 }}>
           Total cotización: <strong className="mono" style={{ color: 'var(--ink)' }}>{fmtCOP(calc.valorTotal)}</strong>
         </span>
