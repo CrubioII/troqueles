@@ -40,7 +40,7 @@ function Skeleton() {
 
 export default function CotizacionList() {
   const navigate = useNavigate()
-  const { user, logout } = useAuth()
+  const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
   const [tab, setTab] = useState('cotizaciones')
   const [cotizaciones, setCotizaciones] = useState([])
@@ -140,34 +140,17 @@ export default function CotizacionList() {
       {/* Topbar */}
       <div className="topbar">
         <div className="brand">
-          <div className="mark">TI</div>
-          <div className="biz">Troqueles INK</div>
-          <span className="div">/</span>
           <div className="mod">Cotizaciones</div>
         </div>
         <div className="topbar-right">
-          <button
-            className="btn"
-            style={{ fontSize: 12 }}
-            onClick={() => navigate('/ordenes')}
-          >
-            Producción
-          </button>
-          <div className="userchip">
-            <div className="av">{user?.username?.slice(0, 2).toUpperCase()}</div>
-            <div>
-              <div style={{ color: 'var(--ink)', fontWeight: 500 }}>{user?.username}</div>
-              <div className="role">{isAdmin ? 'Administrador' : 'Operador'}</div>
-            </div>
-          </div>
-          <button
-            className="btn"
-            style={{ padding: '4px 10px', fontSize: 11 }}
-            onClick={logout}
-            title="Cerrar sesión"
-          >
-            Salir
-          </button>
+          {isAdmin && (
+            <button
+              className="btn accent"
+              onClick={() => navigate('/cotizaciones/nuevo')}
+            >
+              + Nueva cotización
+            </button>
+          )}
         </div>
       </div>
 
@@ -197,24 +180,14 @@ export default function CotizacionList() {
         </div>
 
         {/* Header row */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
-          <div style={{ flex: 1 }}>
-            <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: 'var(--ink)' }}>
-              Listado de cotizaciones
-            </h1>
-            {!loading && (
-              <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>
-                {count} {count === 1 ? 'cotización' : 'cotizaciones'}
-              </div>
-            )}
-          </div>
-{isAdmin && (
-          <button
-            className="btn accent"
-            onClick={() => navigate('/cotizaciones/nuevo')}
-          >
-            <Icon.Plus /> Nueva cotización
-          </button>
+        <div style={{ marginBottom: 20 }}>
+          <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: 'var(--ink)' }}>
+            Listado de cotizaciones
+          </h1>
+          {!loading && (
+            <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>
+              {count} {count === 1 ? 'cotización' : 'cotizaciones'}
+            </div>
           )}
         </div>
 

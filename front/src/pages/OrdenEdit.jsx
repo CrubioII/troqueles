@@ -240,7 +240,7 @@ export default function OrdenEdit() {
   const { id } = useParams()
   const navigate = useNavigate()
   const location = useLocation()
-  const { user, logout } = useAuth()
+  const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
   const isNew = id === 'nuevo'
 
@@ -371,30 +371,17 @@ export default function OrdenEdit() {
       {/* Topbar */}
       <div className="topbar">
         <div className="brand">
-          <div className="mark">TI</div>
-          <div className="biz">Troqueles INK</div>
-          <div className="div">/</div>
-          <div className="mod" style={{ cursor: 'pointer' }} onClick={() => navigate('/ordenes')}>
-            Órdenes de Producción
-          </div>
+          <button className="btn" onClick={() => navigate('/ordenes')} style={{ padding: '2px 8px', fontSize: 12, gap: 4 }}>
+            <Icon.ArrowLeft /> Órdenes de Producción
+          </button>
           {!isNew && (
             <>
-              <div className="div">/</div>
+              <span className="div">/</span>
               <div className="mod">{d.numero || `OP #${id}`}</div>
             </>
           )}
         </div>
-        <div className="topbar-right">
-          <button className="btn" onClick={() => navigate('/ordenes')} style={{ fontSize: 12 }}>
-            ← Lista
-          </button>
-          <div className="userchip">
-            <div className="av">{user?.username?.[0]?.toUpperCase()}</div>
-            <span>{user?.username}</span>
-            <span className="role">{isAdmin ? 'Admin' : 'Operario'}</span>
-          </div>
-          <button className="btn" onClick={logout} style={{ fontSize: 12 }}>Salir</button>
-        </div>
+        <div className="topbar-right" />
       </div>
 
       {/* Toast */}

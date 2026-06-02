@@ -50,7 +50,7 @@ function Skeleton() {
 
 export default function OrdenList() {
   const navigate = useNavigate()
-  const { user, logout } = useAuth()
+  const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
 
   const [ordenes, setOrdenes] = useState([])
@@ -135,25 +135,14 @@ export default function OrdenList() {
     <div className="app" onClick={clearConfirm}>
       <div className="topbar">
         <div className="brand">
-          <div className="mark">TI</div>
-          <div className="biz">Troqueles INK</div>
-          <div className="div">/</div>
           <div className="mod">Órdenes de Producción</div>
         </div>
         <div className="topbar-right">
-          <div
-            className="btn"
-            style={{ fontSize: 12, cursor: 'pointer' }}
-            onClick={() => navigate('/')}
-          >
-            Cotizaciones
-          </div>
-          <div className="userchip">
-            <div className="av">{user?.username?.[0]?.toUpperCase()}</div>
-            <span>{user?.username}</span>
-            <span className="role">{isAdmin ? 'Admin' : 'Operario'}</span>
-          </div>
-          <button className="btn" onClick={logout} style={{ fontSize: 12 }}>Salir</button>
+          {isAdmin && (
+            <button className="btn accent" onClick={() => navigate('/ordenes/nuevo')}>
+              + Nueva OP
+            </button>
+          )}
         </div>
       </div>
 
@@ -187,11 +176,6 @@ export default function OrdenList() {
             ))}
           </div>
 
-          {isAdmin && (
-            <button className="btn accent" onClick={() => navigate('/ordenes/nuevo')}>
-              <Icon.Plus /> Nueva OP
-            </button>
-          )}
         </div>
 
         {/* Progress bar on refresh */}

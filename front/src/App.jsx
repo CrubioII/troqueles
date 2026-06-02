@@ -1,6 +1,8 @@
 import React from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
+import Layout from './components/Layout'
+import Dashboard from './pages/Dashboard'
 import CotizacionList from './pages/CotizacionList'
 import CotizacionEdit from './pages/CotizacionEdit'
 import DocumentoClienteEdit from './pages/DocumentoClienteEdit'
@@ -19,11 +21,14 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
-      <Route path="/" element={<ProtectedRoute><CotizacionList /></ProtectedRoute>} />
-      <Route path="/cotizaciones/:id" element={<ProtectedRoute><CotizacionEdit /></ProtectedRoute>} />
-      <Route path="/documentos/:id" element={<ProtectedRoute><DocumentoClienteEdit /></ProtectedRoute>} />
-      <Route path="/ordenes" element={<ProtectedRoute><OrdenList /></ProtectedRoute>} />
-      <Route path="/ordenes/:id" element={<ProtectedRoute><OrdenEdit /></ProtectedRoute>} />
+      <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
+        <Route path="/" element={<Dashboard />} />
+        <Route path="/cotizaciones" element={<CotizacionList />} />
+        <Route path="/cotizaciones/:id" element={<CotizacionEdit />} />
+        <Route path="/documentos/:id" element={<DocumentoClienteEdit />} />
+        <Route path="/ordenes" element={<OrdenList />} />
+        <Route path="/ordenes/:id" element={<OrdenEdit />} />
+      </Route>
     </Routes>
   )
 }
