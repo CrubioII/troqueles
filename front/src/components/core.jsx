@@ -93,65 +93,19 @@ export const STATUS_DEFS = [
   { id: 'convertida', label: 'Convertida a OP',  cls: 'converted' },
 ]
 
-// ============ OP Status definitions ============
-export const OP_STATUS_DEFS = [
-  { id: 'borrador',    label: 'Borrador',    cls: 'draft' },
-  { id: 'programada',  label: 'Programada',  cls: 'sent' },
-  { id: 'en_proceso',  label: 'En Proceso',  cls: 'approved' },
-  { id: 'finalizada',  label: 'Finalizada',  cls: 'converted' },
-  { id: 'remisionada', label: 'Remisionada', cls: 'op-remisionada' },
-  { id: 'anulada',     label: 'Anulada',     cls: 'rejected' },
-]
-
-export const OP_PROCESO_ESTADOS = [
-  { id: 'pendiente',  label: 'Pendiente',  cls: 'draft' },
-  { id: 'en_proceso', label: 'En Proceso', cls: 'sent' },
-  { id: 'completado', label: 'Completado', cls: 'approved' },
-]
-
-// [proceso_id, label, maquina_id]
-export const PROCESOS_OP = [
-  ['plancha',           'Plancha',           'preprensa'],
-  ['corte',             'Corte',             'corte'],
-  ['impresion',         'Impresión',         'impresion'],
-  ['laminado_mate',     'Laminado Mate',     'laminado'],
-  ['laminado_brillante','Laminado Brillante','laminado'],
-  ['uv_total',          'UV Total',          'uv'],
-  ['uv_parcial',        'UV Parcial',        'uv'],
-  ['muestra',           'Muestra',           'terminado'],
-  ['estampado',         'Estampado',         'estampado'],
-  ['cl_set',            'CL/SET',            'preprensa'],
-  ['positivo',          'Positivo',          'preprensa'],
-  ['troquel',           'Troquel',           'troquel'],
-  ['troquelado',        'Troquelado',        'troquel'],
-  ['terminado',         'Terminado',         'terminado'],
-  ['diseno',            'Diseño',            'diseno'],
-  ['pegante',           'Pegante',           'pegante'],
-  ['tinta',             'Tinta',             'impresion'],
-  ['envio',             'Envío',             'logistica'],
-  ['recogida',          'Recogida',          'logistica'],
-  ['cajas',             'Cajas',             'terminado'],
-]
-
-export const MAQUINAS_OP = [
-  { id: 'preprensa',  label: 'Preprensa' },
-  { id: 'corte',      label: 'Corte' },
-  { id: 'impresion',  label: 'Impresión' },
-  { id: 'laminado',   label: 'Laminado' },
-  { id: 'uv',         label: 'UV' },
-  { id: 'troquel',    label: 'Troquel' },
-  { id: 'terminado',  label: 'Terminado' },
-  { id: 'estampado',  label: 'Estampado' },
-  { id: 'diseno',     label: 'Diseño' },
-  { id: 'pegante',    label: 'Pegante' },
-  { id: 'logistica',  label: 'Logística' },
-]
-
+// ============ OP: condiciones de pago (ids = backend) ============
 export const CONDICIONES_PAGO_OP = [
-  { id: 'mismo_dia', lbl: 'Mismo día',  sub: 'Contra entrega' },
-  { id: '8_dias',    lbl: '8 días',     sub: 'Crédito corto' },
-  { id: '30_dias',   lbl: '30 días',    sub: 'Crédito estándar' },
-  { id: '60_dias',   lbl: '60 días',    sub: 'Crédito largo' },
+  { id: 'mismo', lbl: 'Mismo día', sub: 'Contra entrega' },
+  { id: '8',     lbl: '8 días',    sub: 'Crédito corto' },
+  { id: '30',    lbl: '30 días',   sub: 'Crédito estándar' },
+  { id: '60',    lbl: '60 días',   sub: 'Crédito largo' },
+]
+
+// ============ Tipo de facturación (cliente terciario) ============
+export const TIPOS_FACTURACION = [
+  { id: 'op',       lbl: 'Solo OP',  sub: 'Se cobra con la orden' },
+  { id: 'remision', lbl: 'Remisión', sub: 'Se cobra por remisiones' },
+  { id: 'factura',  lbl: 'Factura',  sub: 'Facturación completa' },
 ]
 
 // ============ Payment conditions ============
@@ -159,6 +113,7 @@ export const CONDICIONES_PAGO = [
   { id: 'mismo',  lbl: 'Pago el mismo día', sub: 'Contra entrega' },
   { id: '8',      lbl: 'Pago en 8 días',    sub: 'Crédito corto' },
   { id: '30',     lbl: 'Pago en 30 días',   sub: 'Crédito estándar' },
+  { id: '60',     lbl: 'Pago en 60 días',   sub: 'Crédito largo' },
   { id: 'custom', lbl: 'Personalizado',     sub: 'Otra condición' },
 ]
 
@@ -270,16 +225,21 @@ export function Section({ num, title, desc, open, onToggle, locked, summary, chi
 export function StatusPicker({ value, onChange }) {
   return (
     <div className="badge-status-picker">
-      {STATUS_DEFS.map(s => (
-        <span
-          key={s.id}
-          className={'badge ' + s.cls + (value === s.id ? ' active' : '')}
-          onClick={() => onChange(s.id)}
-        >
-          <span className="dot"></span>
-          {s.label}
-        </span>
-      ))}
+      {STATUS_DEFS.map(s => {
+        const isConvertida = s.id === 'convertida'
+        if (isConvertida && value !== 'convertida') return null
+        return (
+          <span
+            key={s.id}
+            className={'badge ' + s.cls + (value === s.id ? ' active' : '') + (isConvertida ? ' readonly' : '')}
+            onClick={() => !isConvertida && onChange(s.id)}
+            style={isConvertida ? { cursor: 'default', opacity: 0.8 } : undefined}
+          >
+            <span className="dot"></span>
+            {s.label}
+          </span>
+        )
+      })}
     </div>
   )
 }

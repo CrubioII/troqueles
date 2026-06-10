@@ -6,8 +6,9 @@ from rest_framework import viewsets, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied
-from django.contrib.auth.models import User
 from django.core.mail import EmailMessage
+from django.db import connection, transaction
+from django.db.models import Max
 from django.http import HttpResponse
 from django.template.loader import render_to_string
 from django.conf import settings
@@ -50,8 +51,6 @@ from .serializers import (
     DocumentoClienteListSerializer,
     OrdenSerializer,
     OrdenListSerializer,
-    OpProcesoSerializer,
-    OperarioSerializer,
 )
 
 
@@ -196,6 +195,80 @@ class CotizacionViewSet(viewsets.ModelViewSet):
         response["Content-Disposition"] = f'attachment; filename="Interno_{cot.numero}.pdf"'
         return response
 
+    @action(detail=True, methods=["post"], url_path="crear_op")
+    def crear_op(self, request, pk=None):
+        """POST /api/cotizaciones/{id}/crear_op/ — convierte la COT aprobada en OP.
+
+        Body: { valor_unitario, valor_total, total_costos, costo_papel } — valores
+        efectivos del cálculo del front; se estampan en los overrides de la OP
+        para que queden congelados (independientes de cambios futuros de precios).
+        """
+        _require_admin(request)
+        cot = self.get_object()
+        if cot.estado != "aprobada":
+            return Response({"error": "Solo se puede crear OP desde una cotización aprobada."}, status=409)
+        if cot.ordenes.exists():
+            return Response({"error": "Esta cotización ya tiene una OP creada."}, status=409)
+
+        def _num(key):
+            try:
+                v = float(request.data.get(key, 0) or 0)
+            except (TypeError, ValueError):
+                v = -1
+            return v
+
+        vals = {k: _num(k) for k in ("valor_unitario", "valor_total", "total_costos", "costo_papel")}
+        if any(v < 0 for v in vals.values()):
+            return Response({"error": "Valores de liquidación inválidos."}, status=400)
+
+        with transaction.atomic():
+            op = OrdenProduccion.objects.create(
+                fecha=timezone.localdate(),
+                cotizacion=cot,
+                cliente=cot.cliente,
+                referencia=cot.referencia,
+                cantidad=cot.cantidad,
+                sobrante=cot.sobrante,
+                tipo_cliente=cot.tipo_cliente,
+                molde_ancho=cot.molde_ancho,
+                molde_alto=cot.molde_alto,
+                pliego_tipo=cot.pliego_tipo,
+                pliego_w=cot.pliego_w,
+                pliego_h=cot.pliego_h,
+                papel=cot.papel,
+                precio_pliego=cot.precio_pliego,
+                costo_papel_override=vals["costo_papel"],
+                corte_inicial_active=cot.corte_inicial_active,
+                corte_inicial_precio=cot.corte_inicial_precio,
+                corte_final_active=cot.corte_final_active,
+                corte_final_precio=cot.corte_final_precio,
+                valor_unitario_override=vals["valor_unitario"],
+                valor_total_override=vals["valor_total"],
+                total_costos_override=vals["total_costos"],
+                subtotal_override=cot.subtotal_override,
+                margen=cot.margen,
+                abono=0,
+                condicion_pago=cot.condicion_pago,
+                condicion_custom=cot.condicion_custom,
+                tipo_facturacion=cot.tipo_facturacion,
+                observaciones=cot.observaciones,
+            )
+            OpProceso.objects.bulk_create([
+                OpProceso(
+                    orden=op,
+                    proceso_id=p.proceso_id,
+                    active=p.active,
+                    costo=p.costo,
+                    costo_override=p.costo_override,
+                    extras=p.extras,
+                )
+                for p in cot.procesos.all()
+            ])
+            cot.estado = "convertida"
+            cot.save(update_fields=["estado", "modificado"])
+
+        return Response(OrdenSerializer(op).data, status=201)
+
 
 class DocumentoClienteViewSet(viewsets.ModelViewSet):
     queryset = DocumentoCliente.objects.select_related("cliente").prefetch_related("items")
@@ -287,24 +360,30 @@ class DocumentoClienteViewSet(viewsets.ModelViewSet):
         return Response({"ok": True, "enviado_a": all_recipients})
 
 
+
+
 class OrdenProduccionViewSet(viewsets.ModelViewSet):
-    queryset = OrdenProduccion.objects.select_related("cliente", "cotizacion").prefetch_related(
-        "procesos__operario"
-    )
+    """Órdenes de producción. Módulo admin-only, sin estados."""
+
+    queryset = OrdenProduccion.objects.select_related("cliente", "cotizacion", "papel").prefetch_related("procesos")
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ["numero", "cliente__nombre", "referencia"]
-    ordering_fields = ["creado", "fecha", "estado"]
+    ordering_fields = ["creado", "fecha"]
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        _require_admin(request)
 
     def get_queryset(self):
         qs = super().get_queryset()
-        estado = self.request.query_params.get("estado")
-        if estado:
-            qs = qs.filter(estado=estado)
         cliente_id = self.request.query_params.get("cliente")
         if cliente_id:
             qs = qs.filter(cliente_id=cliente_id)
-        if not self.request.user.is_staff:
-            qs = qs.filter(procesos__operario=self.request.user).distinct()
+        origen = self.request.query_params.get("origen")
+        if origen == "cotizacion":
+            qs = qs.filter(cotizacion__isnull=False)
+        elif origen == "directa":
+            qs = qs.filter(cotizacion__isnull=True)
         return qs
 
     def get_serializer_class(self):
@@ -312,103 +391,75 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
             return OrdenListSerializer
         return OrdenSerializer
 
-    def create(self, request, *args, **kwargs):
-        _require_admin(request)
-        return super().create(request, *args, **kwargs)
+    @action(detail=False, methods=["get"], url_path="next_numero")
+    def next_numero(self, request):
+        """GET /api/ordenes/next_numero/ — número estimado de la próxima OP.
 
-    def update(self, request, *args, **kwargs):
-        _require_admin(request)
-        return super().update(request, *args, **kwargs)
-
-    def partial_update(self, request, *args, **kwargs):
-        _require_admin(request)
-        return super().partial_update(request, *args, **kwargs)
-
-    def destroy(self, request, *args, **kwargs):
-        _require_admin(request)
-        return super().destroy(request, *args, **kwargs)
-
-    @action(detail=True, methods=["patch"], url_path="estado")
-    def cambiar_estado(self, request, pk=None):
-        _require_admin(request)
-        orden = self.get_object()
-        nuevo = request.data.get("estado")
-        opciones = [c[0] for c in OrdenProduccion.ESTADOS]
-        if nuevo not in opciones:
-            return Response({"error": f"Estado inválido. Opciones: {opciones}"}, status=400)
-        orden.estado = nuevo
-        orden.save(update_fields=["estado", "modificado"])
-        return Response(OrdenSerializer(orden).data)
-
-    @action(detail=True, methods=["patch"], url_path="anular")
-    def anular(self, request, pk=None):
-        _require_admin(request)
-        orden = self.get_object()
-        orden.estado = "anulada"
-        orden.save(update_fields=["estado", "modificado"])
-        return Response(OrdenSerializer(orden).data)
-
-    @action(detail=True, methods=["patch"], url_path="procesos/progreso")
-    def actualizar_progreso(self, request, pk=None):
-        """Operario actualiza progreso de un proceso asignado.
-        Body: { proceso_id, estado?, unidades_completadas?, notas? }
+        En SQLite el id usa AUTOINCREMENT (la secuencia no retrocede al borrar),
+        así que el estimado sale de sqlite_sequence y no solo de Max(id).
         """
-        orden = self.get_object()
-        proceso_id = request.data.get("proceso_id")
-        if not proceso_id:
-            return Response({"error": "proceso_id requerido"}, status=400)
+        max_id = OrdenProduccion.objects.aggregate(m=Max("id"))["m"] or 0
+        if connection.vendor == "sqlite":
+            table = OrdenProduccion._meta.db_table
+            with connection.cursor() as cur:
+                cur.execute("SELECT seq FROM sqlite_sequence WHERE name = %s", [table])
+                row = cur.fetchone()
+            if row and row[0]:
+                max_id = max(max_id, int(row[0]))
+        return Response({"next": f"OP-{max_id + 1:04d}"})
 
+    def _ctx_admin(self, op, data):
+        raw_rows = data.get("proc_rows", [])
+        saldo = float(data.get("valor_total", 0) or 0) - float(op.abono or 0)
+        return {
+            "op": op,
+            "proc_rows": [{"nombre": p.get("nombre", ""), "costo": _fmt_cop(p.get("costo", 0))} for p in raw_rows],
+            "costo_papel": _fmt_cop(data.get("costo_papel", 0)),
+            "total_costos_op": _fmt_cop(data.get("total_costos_op", 0)),
+            "valor_unitario": _fmt_cop(data.get("valor_unitario", 0)),
+            "valor_total": _fmt_cop(data.get("valor_total", 0)),
+            "abono": _fmt_cop(op.abono),
+            "saldo": _fmt_cop(saldo),
+            "logo_uri": _logo_data_uri(),
+        }
+
+    @action(detail=True, methods=["post"], url_path="pdf_admin")
+    def pdf_admin(self, request, pk=None):
+        """POST /api/ordenes/{id}/pdf_admin/ — PDF completo (cliente + finanzas)."""
+        op = self.get_object()
+        ctx = self._ctx_admin(op, request.data)
         try:
-            proc = orden.procesos.get(proceso_id=proceso_id)
-        except OpProceso.DoesNotExist:
-            return Response({"error": "Proceso no encontrado"}, status=404)
+            html_pdf = render_to_string("cotizaciones/pdf_op_admin.html", ctx)
+            pdf_bytes = WeasyprintHTML(string=html_pdf).write_pdf()
+        except Exception as e:
+            traceback.print_exc()
+            return Response({"error": str(e)}, status=502)
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="{op.numero}_admin.pdf"'
+        return response
 
-        if not request.user.is_staff and proc.operario != request.user:
-            raise PermissionDenied("Solo puedes actualizar tus procesos asignados.")
+    @action(detail=True, methods=["post"], url_path="pdf_produccion")
+    def pdf_produccion(self, request, pk=None):
+        """POST /api/ordenes/{id}/pdf_produccion/ — PDF para taller.
 
-        update_fields = []
-
-        nuevo_estado = request.data.get("estado")
-        if nuevo_estado and nuevo_estado in [c[0] for c in OpProceso.ESTADOS]:
-            if nuevo_estado == "en_proceso" and not proc.iniciado_en:
-                proc.iniciado_en = timezone.now()
-                update_fields.append("iniciado_en")
-            elif nuevo_estado == "completado" and not proc.completado_en:
-                proc.completado_en = timezone.now()
-                update_fields.append("completado_en")
-            proc.estado = nuevo_estado
-            update_fields.append("estado")
-
-        if "unidades_completadas" in request.data:
-            proc.unidades_completadas = int(request.data["unidades_completadas"])
-            update_fields.append("unidades_completadas")
-
-        if "notas" in request.data:
-            proc.notas = request.data["notas"]
-            update_fields.append("notas")
-
-        if update_fields:
-            proc.save(update_fields=update_fields)
-            self._sync_orden_estado(orden)
-
-        return Response(OpProcesoSerializer(proc).data)
-
-    def _sync_orden_estado(self, orden):
-        procs = list(orden.procesos.filter(active=True))
-        if not procs:
-            return
-        estados = [p.estado for p in procs]
-        if all(e == "completado" for e in estados):
-            if orden.estado not in ("finalizada", "remisionada"):
-                orden.estado = "finalizada"
-                orden.save(update_fields=["estado", "modificado"])
-        elif any(e == "en_proceso" for e in estados):
-            if orden.estado == "programada":
-                orden.estado = "en_proceso"
-                orden.save(update_fields=["estado", "modificado"])
-
-    @action(detail=False, methods=["get"], url_path="operarios")
-    def listar_operarios(self, request):
-        _require_admin(request)
-        users = User.objects.filter(is_active=True).order_by("username")
-        return Response(OperarioSerializer(users, many=True).data)
+        Sin datos de cliente ni valores monetarios.
+        """
+        op = self.get_object()
+        raw_rows = request.data.get("proc_rows", [])
+        ctx = {
+            "op": op,
+            "proc_rows": [{"nombre": p.get("nombre", "")} for p in raw_rows],
+            "unidades_por_pliego": request.data.get("unidades_por_pliego", ""),
+            "pliegos_necesarios": request.data.get("pliegos_necesarios", ""),
+            "papel_referencia": request.data.get("papel_referencia", ""),
+            "logo_uri": _logo_data_uri(),
+        }
+        try:
+            html_pdf = render_to_string("cotizaciones/pdf_op_produccion.html", ctx)
+            pdf_bytes = WeasyprintHTML(string=html_pdf).write_pdf()
+        except Exception as e:
+            traceback.print_exc()
+            return Response({"error": str(e)}, status=502)
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="{op.numero}_produccion.pdf"'
+        return response

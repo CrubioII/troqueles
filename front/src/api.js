@@ -17,74 +17,110 @@ function handleUnauth() {
   window.location.href = '/login'
 }
 
+let refreshPromise = null
+
+export function refreshAccessToken() {
+  const refresh = localStorage.getItem('refresh')
+  if (!refresh) return Promise.resolve(false)
+  if (!refreshPromise) {
+    refreshPromise = fetch(`${BASE}/auth/refresh/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh }),
+    })
+      .then(r => (r.ok ? r.json() : null))
+      .then(data => {
+        if (data?.access) {
+          localStorage.setItem('access', data.access)
+          return true
+        }
+        return false
+      })
+      .catch(() => false)
+      .finally(() => { refreshPromise = null })
+  }
+  return refreshPromise
+}
+
+async function apiFetch(url, opts = {}) {
+  const run = () => fetch(url, { ...opts, headers: authHeaders(opts.headers) })
+  let res = await run()
+  if (res.status === 401) {
+    const refreshed = await refreshAccessToken()
+    if (refreshed) res = await run()
+    if (res.status === 401) {
+      handleUnauth()
+      throw new Error('No autenticado')
+    }
+  }
+  return res
+}
+
 const json = (r) => {
-  if (r.status === 401) { handleUnauth(); throw new Error('No autenticado') }
   if (!r.ok) throw new Error(`HTTP ${r.status}`)
   return r.json()
 }
 
 const ok = (r) => {
-  if (r.status === 401) { handleUnauth(); throw new Error('No autenticado') }
   if (!r.ok) throw new Error(`HTTP ${r.status}`)
 }
 
 export const getPapeles = () =>
-  fetch(`${BASE}/papel/`, { headers: authHeaders() }).then(json)
+  apiFetch(`${BASE}/papel/`).then(json)
 
 export const getClientes = (q = '') =>
-  fetch(`${BASE}/clientes/?search=${encodeURIComponent(q)}`, { headers: authHeaders() }).then(json)
+  apiFetch(`${BASE}/clientes/?search=${encodeURIComponent(q)}`).then(json)
 
 export const createCliente = (data) =>
-  fetch(`${BASE}/clientes/`, {
+  apiFetch(`${BASE}/clientes/`, {
     method: 'POST',
-    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   }).then(json)
 
 export const updateCliente = (id, data) =>
-  fetch(`${BASE}/clientes/${id}/`, {
+  apiFetch(`${BASE}/clientes/${id}/`, {
     method: 'PATCH',
-    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   }).then(json)
 
 export const getCotizaciones = (params = '') =>
-  fetch(`${BASE}/cotizaciones/${params}`, { headers: authHeaders() }).then(json)
+  apiFetch(`${BASE}/cotizaciones/${params}`).then(json)
 
 export const getCotizacion = (id) =>
-  fetch(`${BASE}/cotizaciones/${id}/`, { headers: authHeaders() }).then(json)
+  apiFetch(`${BASE}/cotizaciones/${id}/`).then(json)
 
 export const createCotizacion = (data) =>
-  fetch(`${BASE}/cotizaciones/`, {
+  apiFetch(`${BASE}/cotizaciones/`, {
     method: 'POST',
-    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   }).then(json)
 
 export const updateCotizacion = (id, data) =>
-  fetch(`${BASE}/cotizaciones/${id}/`, {
+  apiFetch(`${BASE}/cotizaciones/${id}/`, {
     method: 'PUT',
-    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   }).then(json)
 
 export const deleteCotizacion = (id) =>
-  fetch(`${BASE}/cotizaciones/${id}/`, {
+  apiFetch(`${BASE}/cotizaciones/${id}/`, {
     method: 'DELETE',
-    headers: authHeaders(),
   }).then(ok)
 
 export const cambiarEstado = (id, estado) =>
-  fetch(`${BASE}/cotizaciones/${id}/estado/`, {
+  apiFetch(`${BASE}/cotizaciones/${id}/estado/`, {
     method: 'PATCH',
-    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ estado }),
   }).then(json)
 
 export const enviarCotizacion = (id, email, calc, extraEmails = []) =>
-  fetch(`${BASE}/cotizaciones/${id}/enviar/`, {
+  apiFetch(`${BASE}/cotizaciones/${id}/enviar/`, {
     method: 'POST',
-    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       email,
       extra_emails: extraEmails,
@@ -97,9 +133,9 @@ export const enviarCotizacion = (id, email, calc, extraEmails = []) =>
   }).then(json)
 
 export const pdfInterno = (id, calc) =>
-  fetch(`${BASE}/cotizaciones/${id}/pdf_interno/`, {
+  apiFetch(`${BASE}/cotizaciones/${id}/pdf_interno/`, {
     method: 'POST',
-    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       proc_rows: (calc?.procRows || []).map(p => ({ nombre: p.nombre, costo: p.costo })),
       costo_papel: calc?.costoPapel ?? 0,
@@ -110,91 +146,100 @@ export const pdfInterno = (id, calc) =>
   })
 
 export const getDocumentos = (params = '') =>
-  fetch(`${BASE}/documentos/${params}`, { headers: authHeaders() }).then(json)
+  apiFetch(`${BASE}/documentos/${params}`).then(json)
 
 export const getDocumento = (id) =>
-  fetch(`${BASE}/documentos/${id}/`, { headers: authHeaders() }).then(json)
+  apiFetch(`${BASE}/documentos/${id}/`).then(json)
 
 export const createDocumento = (data) =>
-  fetch(`${BASE}/documentos/`, {
+  apiFetch(`${BASE}/documentos/`, {
     method: 'POST',
-    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   }).then(json)
 
 export const updateDocumento = (id, data) =>
-  fetch(`${BASE}/documentos/${id}/`, {
+  apiFetch(`${BASE}/documentos/${id}/`, {
     method: 'PUT',
-    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   }).then(json)
 
 export const deleteDocumento = (id) =>
-  fetch(`${BASE}/documentos/${id}/`, {
+  apiFetch(`${BASE}/documentos/${id}/`, {
     method: 'DELETE',
-    headers: authHeaders(),
   }).then(ok)
 
 export const pdfDocumento = (id) =>
-  fetch(`${BASE}/documentos/${id}/pdf/`, {
+  apiFetch(`${BASE}/documentos/${id}/pdf/`, {
     method: 'POST',
-    headers: authHeaders(),
   })
 
 export const enviarDocumento = (id, email, extraEmails = []) =>
-  fetch(`${BASE}/documentos/${id}/enviar/`, {
+  apiFetch(`${BASE}/documentos/${id}/enviar/`, {
     method: 'POST',
-    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, extra_emails: extraEmails }),
   }).then(json)
 
 // ─────────────── Órdenes de Producción ───────────────
 
 export const getOrdenes = (params = '') =>
-  fetch(`${BASE}/ordenes/${params}`, { headers: authHeaders() }).then(json)
+  apiFetch(`${BASE}/ordenes/${params}`).then(json)
 
 export const getOrden = (id) =>
-  fetch(`${BASE}/ordenes/${id}/`, { headers: authHeaders() }).then(json)
+  apiFetch(`${BASE}/ordenes/${id}/`).then(json)
 
 export const createOrden = (data) =>
-  fetch(`${BASE}/ordenes/`, {
+  apiFetch(`${BASE}/ordenes/`, {
     method: 'POST',
-    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   }).then(json)
 
 export const updateOrden = (id, data) =>
-  fetch(`${BASE}/ordenes/${id}/`, {
+  apiFetch(`${BASE}/ordenes/${id}/`, {
     method: 'PUT',
-    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   }).then(json)
 
 export const deleteOrden = (id) =>
-  fetch(`${BASE}/ordenes/${id}/`, {
+  apiFetch(`${BASE}/ordenes/${id}/`, {
     method: 'DELETE',
-    headers: authHeaders(),
   }).then(ok)
 
-export const cambiarEstadoOrden = (id, estado) =>
-  fetch(`${BASE}/ordenes/${id}/estado/`, {
-    method: 'PATCH',
-    headers: authHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ estado }),
+export const getNextNumeroOrden = () =>
+  apiFetch(`${BASE}/ordenes/next_numero/`).then(json)
+
+export const crearOpDesdeCotizacion = (cotId, body) =>
+  apiFetch(`${BASE}/cotizaciones/${cotId}/crear_op/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
   }).then(json)
 
-export const anularOrden = (id) =>
-  fetch(`${BASE}/ordenes/${id}/anular/`, {
-    method: 'PATCH',
-    headers: authHeaders(),
-  }).then(json)
+export const pdfOpAdmin = (id, calc, d) =>
+  apiFetch(`${BASE}/ordenes/${id}/pdf_admin/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      proc_rows: (calc?.procRows || []).map(p => ({ nombre: p.nombre, costo: p.costo })),
+      costo_papel: calc?.costoPapel ?? 0,
+      total_costos_op: calc?.totalCostosOP ?? 0,
+      valor_unitario: calc?.valorUnitario ?? 0,
+      valor_total: calc?.valorTotal ?? 0,
+    }),
+  })
 
-export const updateProcesoProgreso = (ordenId, data) =>
-  fetch(`${BASE}/ordenes/${ordenId}/procesos/progreso/`, {
-    method: 'PATCH',
-    headers: authHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify(data),
-  }).then(json)
-
-export const getOperarios = () =>
-  fetch(`${BASE}/ordenes/operarios/`, { headers: authHeaders() }).then(json)
+export const pdfOpProduccion = (id, calc, papelReferencia = '') =>
+  apiFetch(`${BASE}/ordenes/${id}/pdf_produccion/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      proc_rows: (calc?.procRows || []).map(p => ({ nombre: p.nombre })),
+      unidades_por_pliego: calc?.unidadesPorPliego ?? '',
+      pliegos_necesarios: calc?.pliegosNecesarios ?? '',
+      papel_referencia: papelReferencia,
+    }),
+  })

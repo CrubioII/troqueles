@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>OP {{ op.numero }} — Producción — Troqueles INK</title>
+<style>
+  @page {
+    size: A4;
+    margin: 14mm 16mm 14mm 16mm;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 13px;
+    color: #1B1816;
+    background: #fff;
+  }
+
+  /* ── Header ── */
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 2px solid #2B4D5C;
+    padding-bottom: 10px;
+    margin-bottom: 14px;
+  }
+  .header-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .header-brand img {
+    width: 40px;
+    height: 40px;
+    object-fit: contain;
+  }
+  .brand-name {
+    font-size: 16px;
+    font-weight: 700;
+    color: #1B1816;
+  }
+  .header-meta {
+    text-align: right;
+    font-size: 11px;
+    color: #807A6E;
+  }
+  .header-meta .numero {
+    font-size: 16px;
+    font-weight: 700;
+    color: #2B4D5C;
+    display: block;
+  }
+
+  /* ── Sections ── */
+  .section {
+    margin-bottom: 12px;
+    border: 1px solid #E8E1D2;
+    border-radius: 4px;
+    overflow: hidden;
+    page-break-inside: avoid;
+  }
+  .section-title {
+    background: #EAF0F2;
+    padding: 5px 10px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    color: #2B4D5C;
+    border-bottom: 1px solid #E8E1D2;
+  }
+
+  /* ── Tables ── */
+  table { width: 100%; border-collapse: collapse; }
+  td, th { padding: 7px 10px; }
+  th {
+    background: #EAF0F2;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: #2B4D5C;
+    text-align: left;
+    border-bottom: 1px solid #E8E1D2;
+  }
+  td { border-bottom: 1px solid #E8E1D2; font-size: 13px; }
+  tr:last-child td { border-bottom: none; }
+  .lbl { color: #4A453E; width: 170px; }
+  .check-col { width: 60px; text-align: center; }
+  .check-box {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 1.5px solid #807A6E;
+    border-radius: 2px;
+  }
+
+  /* ── Footer ── */
+  .footer {
+    margin-top: 16px;
+    padding-top: 8px;
+    border-top: 1px solid #E8E1D2;
+    text-align: center;
+    font-size: 10px;
+    color: #807A6E;
+  }
+</style>
+</head>
+<body>
+
+  <!-- Header: solo número y fecha, sin cliente -->
+  <div class="header">
+    <div class="header-brand">
+      {% if logo_uri %}<img src="{{ logo_uri }}" alt="Troqueles INK">{% endif %}
+      <span class="brand-name">Troqueles INK</span>
+    </div>
+    <div class="header-meta">
+      <span class="numero">Orden de Producción {{ op.numero }}</span>
+      <span>{{ op.fecha }}</span>
+    </div>
+  </div>
+
+  <!-- Especificaciones técnicas -->
+  <div class="section">
+    <div class="section-title">Especificaciones técnicas</div>
+    <table>
+      <tr><td class="lbl">Referencia del producto</td><td><strong>{{ op.referencia }}</strong></td></tr>
+      <tr><td class="lbl">Cantidad a producir</td><td><strong>{{ op.cantidad }} unidades{% if op.sobrante %} (+{{ op.sobrante }} sobrante){% endif %}</strong></td></tr>
+      <tr><td class="lbl">Papel</td><td>{{ papel_referencia|default:"—" }}</td></tr>
+      <tr><td class="lbl">Medida molde abierto</td><td>{{ op.molde_ancho }} × {{ op.molde_alto }} cm</td></tr>
+      <tr><td class="lbl">Pliego</td><td>{{ op.pliego_w }} × {{ op.pliego_h }} cm ({{ op.pliego_tipo }})</td></tr>
+      <tr><td class="lbl">Unidades por pliego</td><td>{{ unidades_por_pliego|default:"—" }}</td></tr>
+      <tr><td class="lbl">Cantidad de pliegos</td><td><strong>{{ pliegos_necesarios|default:"—" }}</strong></td></tr>
+      <tr><td class="lbl">Corte inicial</td><td>{% if op.corte_inicial_active %}Sí{% else %}No{% endif %}</td></tr>
+      <tr><td class="lbl">Corte final</td><td>{% if op.corte_final_active %}Sí{% else %}No{% endif %}</td></tr>
+    </table>
+  </div>
+
+  <!-- Procesos sin valores monetarios -->
+  {% if proc_rows %}
+  <div class="section">
+    <div class="section-title">Procesos a realizar</div>
+    <table>
+      <tr><th>Proceso</th><th class="check-col">Hecho</th></tr>
+      {% for p in proc_rows %}
+      <tr><td>{{ p.nombre }}</td><td class="check-col"><span class="check-box"></span></td></tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% endif %}
+
+  <!-- Observaciones -->
+  {% if op.observaciones %}
+  <div class="section">
+    <div class="section-title">Observaciones</div>
+    <table>
+      <tr><td style="white-space:pre-wrap;color:#4A453E;">{{ op.observaciones }}</td></tr>
+    </table>
+  </div>
+  {% endif %}
+
+  <div class="footer">
+    Troqueles INK · Hoja de producción (taller) · {{ op.numero }}
+  </div>
+
+</body>
+</html>

@@ -1,5 +1,4 @@
 from django.db import models
-from django.contrib.auth.models import User
 
 
 class Cliente(models.Model):
@@ -45,11 +44,17 @@ class Cotizacion(models.Model):
         ("mismo", "Mismo día"),
         ("8", "8 días"),
         ("30", "30 días"),
+        ("60", "60 días"),
         ("custom", "Personalizado"),
     ]
     TIPO_CLIENTE_CHOICES = [
         ("final", "Cliente Final"),
         ("terciario", "Cliente Terciario"),
+    ]
+    TIPO_FACTURACION_CHOICES = [
+        ("op", "Solo OP"),
+        ("remision", "Remisión"),
+        ("factura", "Factura"),
     ]
 
     numero = models.CharField(max_length=20, unique=True, blank=True)
@@ -86,6 +91,7 @@ class Cotizacion(models.Model):
     # Condiciones
     condicion_pago = models.CharField(max_length=20, choices=CONDICION_CHOICES, default="30")
     condicion_custom = models.CharField(max_length=300, blank=True, default="")
+    tipo_facturacion = models.CharField(max_length=20, choices=TIPO_FACTURACION_CHOICES, default="factura")
     observaciones = models.TextField(blank=True, default="")
 
     creado = models.DateTimeField(auto_now_add=True)
@@ -172,107 +178,95 @@ class DocumentoClienteItem(models.Model):
 
 
 class OrdenProduccion(models.Model):
-    ESTADOS = [
-        ('borrador',    'Borrador'),
-        ('programada',  'Programada'),
-        ('en_proceso',  'En Proceso'),
-        ('finalizada',  'Finalizada'),
-        ('remisionada', 'Remisionada'),
-        ('anulada',     'Anulada'),
-    ]
-    CONDICION_COBRO_CHOICES = [
-        ('op',       'Solo OP'),
-        ('remision', 'Remisión'),
-        ('factura',  'Factura'),
-    ]
+    """Orden de producción. Espeja la estructura de Cotizacion.
+
+    cotizacion != None => OP creada desde COT: todos los campos quedan
+    bloqueados excepto abono/observaciones/fecha (whitelist en serializer).
+    cotizacion == None => OP directa, totalmente editable. Sin estados.
+    """
+
+    TIPO_CLIENTE_CHOICES = Cliente.TIPO_CHOICES
     CONDICION_PAGO_CHOICES = [
-        ('mismo_dia', 'Mismo Día'),
-        ('8_dias',    '8 Días'),
-        ('30_dias',   '30 Días'),
-        ('60_dias',   '60 Días'),
+        ("mismo", "Mismo día"),
+        ("8", "8 días"),
+        ("30", "30 días"),
+        ("60", "60 días"),
+        ("custom", "Personalizado"),  # solo heredada desde COT
     ]
-    TIPO_CLIENTE_CHOICES = [
-        ('final',     'Cliente Final'),
-        ('terciario', 'Cliente Terciario'),
-    ]
+    TIPO_FACTURACION_CHOICES = Cotizacion.TIPO_FACTURACION_CHOICES
 
-    numero       = models.CharField(max_length=20, unique=True, blank=True)
-    fecha        = models.DateField()
-    cliente      = models.ForeignKey(Cliente, on_delete=models.PROTECT, related_name='ordenes')
-    cotizacion   = models.ForeignKey(
-        Cotizacion, on_delete=models.SET_NULL,
-        null=True, blank=True, related_name='ordenes'
+    numero = models.CharField(max_length=20, unique=True, blank=True)
+    fecha = models.DateField()
+    cotizacion = models.ForeignKey(
+        Cotizacion, on_delete=models.SET_NULL, null=True, blank=True, related_name="ordenes"
     )
-    referencia   = models.CharField(max_length=300)
-    descripcion  = models.TextField(blank=True, default='')
-    estado       = models.CharField(max_length=20, choices=ESTADOS, default='borrador')
+    cliente = models.ForeignKey(Cliente, on_delete=models.PROTECT, related_name="ordenes")
+    referencia = models.CharField(max_length=300)
+    cantidad = models.PositiveIntegerField()
+    sobrante = models.PositiveIntegerField(default=0)
+    tipo_cliente = models.CharField(max_length=20, choices=TIPO_CLIENTE_CHOICES, default="final")
 
-    tipo_cliente_op            = models.CharField(max_length=20, choices=TIPO_CLIENTE_CHOICES, default='final')
-    condicion_cobro_terciario  = models.CharField(max_length=20, choices=CONDICION_COBRO_CHOICES, blank=True, default='')
+    # Papel
+    molde_ancho = models.DecimalField(max_digits=7, decimal_places=2, default=0)
+    molde_alto = models.DecimalField(max_digits=7, decimal_places=2, default=0)
+    pliego_tipo = models.CharField(max_length=20, default="70x100")
+    pliego_w = models.DecimalField(max_digits=7, decimal_places=2, default=70)
+    pliego_h = models.DecimalField(max_digits=7, decimal_places=2, default=100)
+    papel = models.ForeignKey(Papel, on_delete=models.PROTECT, null=True, blank=True)
+    precio_pliego = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    costo_papel_override = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    corte_inicial_active = models.BooleanField(default=False)
+    corte_inicial_precio = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    corte_final_active = models.BooleanField(default=False)
+    corte_final_precio = models.DecimalField(max_digits=14, decimal_places=2, default=0)
 
-    # RF-01.4
-    cantidad           = models.PositiveIntegerField(default=0)
-    valor_unitario     = models.DecimalField(max_digits=14, decimal_places=2, default=0)
-    cantidad_pliegos   = models.PositiveIntegerField(default=0)
-    papel_referencia   = models.CharField(max_length=200, blank=True, default='')
-    corte_inicial      = models.CharField(max_length=100, blank=True, default='')
-    corte_final        = models.CharField(max_length=100, blank=True, default='')
-    medida_producto    = models.CharField(max_length=100, blank=True, default='')
-    cantidad_impresion = models.PositiveIntegerField(default=0)
+    # Liquidación overrides (null = usar cálculo automático del front)
+    valor_unitario_override = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    valor_total_override = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    total_costos_override = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    subtotal_override = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
 
-    # RF-01.5
-    total_costos = models.DecimalField(max_digits=14, decimal_places=2, default=0)
-    valor_total  = models.DecimalField(max_digits=14, decimal_places=2, default=0)
-    subtotal     = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    margen = models.DecimalField(max_digits=6, decimal_places=2, default=80)
 
-    # RF-01.6
     abono = models.DecimalField(max_digits=14, decimal_places=2, default=0)
 
-    condicion_pago = models.CharField(max_length=20, choices=CONDICION_PAGO_CHOICES, default='mismo_dia')
-    observaciones  = models.TextField(blank=True, default='')
+    # Condiciones
+    condicion_pago = models.CharField(max_length=20, choices=CONDICION_PAGO_CHOICES, default="mismo")
+    condicion_custom = models.CharField(max_length=300, blank=True, default="")
+    tipo_facturacion = models.CharField(max_length=20, choices=TIPO_FACTURACION_CHOICES, default="factura")
+    observaciones = models.TextField(blank=True, default="")
 
-    creado    = models.DateTimeField(auto_now_add=True)
+    creado = models.DateTimeField(auto_now_add=True)
     modificado = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ['-creado']
+        ordering = ["-creado"]
 
     def save(self, *args, **kwargs):
         is_new = not self.pk
         super().save(*args, **kwargs)
         if is_new and not self.numero:
-            self.numero = f'OP-{self.pk:04d}'
+            self.numero = f"OP-{self.pk:04d}"
             OrdenProduccion.objects.filter(pk=self.pk).update(numero=self.numero)
 
     def __str__(self):
-        return f'{self.numero} · {self.cliente}'
+        return f"{self.numero} · {self.cliente}"
 
 
 class OpProceso(models.Model):
-    ESTADOS = [
-        ('pendiente',  'Pendiente'),
-        ('en_proceso', 'En Proceso'),
-        ('completado', 'Completado'),
-    ]
+    """Un proceso de producción activado o no en una OP. Espeja CotizacionProceso."""
 
-    orden               = models.ForeignKey(OrdenProduccion, on_delete=models.CASCADE, related_name='procesos')
-    proceso_id          = models.CharField(max_length=50)
-    active              = models.BooleanField(default=False)
-    costo               = models.DecimalField(max_digits=12, decimal_places=2, default=0)
-    maquina_id          = models.CharField(max_length=50, blank=True, default='')
-    operario            = models.ForeignKey(
-        User, on_delete=models.SET_NULL,
-        null=True, blank=True, related_name='procesos_op'
-    )
-    estado              = models.CharField(max_length=20, choices=ESTADOS, default='pendiente')
-    unidades_completadas = models.PositiveIntegerField(default=0)
-    iniciado_en         = models.DateTimeField(null=True, blank=True)
-    completado_en       = models.DateTimeField(null=True, blank=True)
-    notas               = models.TextField(blank=True, default='')
+    orden = models.ForeignKey(OrdenProduccion, on_delete=models.CASCADE, related_name="procesos")
+    proceso_id = models.CharField(max_length=50)
+    active = models.BooleanField(default=False)
+    costo = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    costo_override = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    extras = models.JSONField(default=dict, blank=True)
 
     class Meta:
-        unique_together = ('orden', 'proceso_id')
-        ordering = ['proceso_id']
+        unique_together = ("orden", "proceso_id")
+        ordering = ["proceso_id"]
 
     def __str__(self):
-        return f'{self.orden.numero} · {self.proceso_id}'
+        return f"{self.orden.numero} · {self.proceso_id}"
+

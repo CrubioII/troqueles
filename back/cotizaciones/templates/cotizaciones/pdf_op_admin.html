@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>OP {{ op.numero }} — Admin — Troqueles INK</title>
+<style>
+  @page {
+    size: A4;
+    margin: 14mm 16mm 14mm 16mm;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 12px;
+    color: #1B1816;
+    background: #fff;
+  }
+
+  /* ── Header ── */
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 2px solid #B8541C;
+    padding-bottom: 10px;
+    margin-bottom: 14px;
+  }
+  .header-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .header-brand img {
+    width: 40px;
+    height: 40px;
+    object-fit: contain;
+  }
+  .brand-name {
+    font-size: 16px;
+    font-weight: 700;
+    color: #1B1816;
+  }
+  .header-meta {
+    text-align: right;
+    font-size: 11px;
+    color: #807A6E;
+  }
+  .header-meta .numero {
+    font-size: 14px;
+    font-weight: 700;
+    color: #B8541C;
+    display: block;
+  }
+
+  /* ── Sections ── */
+  .section {
+    margin-bottom: 12px;
+    border: 1px solid #E8E1D2;
+    border-radius: 4px;
+    overflow: hidden;
+    page-break-inside: avoid;
+  }
+  .section-title {
+    background: #F4EFE4;
+    padding: 5px 10px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    color: #807A6E;
+    border-bottom: 1px solid #E8E1D2;
+  }
+
+  /* ── Tables ── */
+  table { width: 100%; border-collapse: collapse; }
+  td, th { padding: 6px 10px; }
+  th {
+    background: #F4EFE4;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: #807A6E;
+    text-align: left;
+    border-bottom: 1px solid #E8E1D2;
+  }
+  td { border-bottom: 1px solid #E8E1D2; font-size: 12px; }
+  tr:last-child td { border-bottom: none; }
+  .num { text-align: right; font-family: monospace; }
+  .lbl { color: #4A453E; width: 150px; }
+
+  /* ── Total row ── */
+  .total-row td {
+    background: #FBE9DA;
+    font-weight: 700;
+    font-size: 13px;
+    border-top: 1px solid #E8E1D2;
+  }
+  .total-row .num { color: #B8541C; font-size: 14px; }
+  .saldo-row td {
+    background: #F8E0DC;
+    font-weight: 700;
+    font-size: 13px;
+    border-top: 1px solid #E8E1D2;
+  }
+  .saldo-row .num { color: #C0392B; font-size: 14px; }
+
+  /* ── Footer ── */
+  .footer {
+    margin-top: 16px;
+    padding-top: 8px;
+    border-top: 1px solid #E8E1D2;
+    text-align: center;
+    font-size: 10px;
+    color: #807A6E;
+  }
+
+  /* ── Two-column info ── */
+  .info-grid {
+    display: flex;
+    gap: 10px;
+  }
+  .info-grid .section { flex: 1; }
+</style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-brand">
+      {% if logo_uri %}<img src="{{ logo_uri }}" alt="Troqueles INK">{% endif %}
+      <span class="brand-name">Troqueles INK</span>
+    </div>
+    <div class="header-meta">
+      <span class="numero">Orden de Producción {{ op.numero }}</span>
+      <span>{{ op.fecha }}</span><br>
+      <span>{% if op.cotizacion %}Generada desde {{ op.cotizacion.numero }}{% else %}OP directa{% endif %}</span>
+    </div>
+  </div>
+
+  <!-- Cliente + condiciones side by side -->
+  <div class="info-grid">
+    <div class="section">
+      <div class="section-title">Cliente</div>
+      <table>
+        <tr><td class="lbl">Nombre</td><td><strong>{{ op.cliente.nombre }}</strong></td></tr>
+        <tr><td class="lbl">NIT / Cédula</td><td>{{ op.cliente.nit|default:"—" }}</td></tr>
+        <tr><td class="lbl">Teléfono</td><td>{{ op.cliente.telefono|default:"—" }}</td></tr>
+        <tr><td class="lbl">Tipo</td><td>{% if op.tipo_cliente == 'terciario' %}Cliente Terciario{% else %}Cliente Final{% endif %}</td></tr>
+        <tr><td class="lbl">Referencia</td><td>{{ op.referencia }}</td></tr>
+        <tr><td class="lbl">Cantidad</td><td>{{ op.cantidad }} unidades{% if op.sobrante %} (+{{ op.sobrante }} sobrante){% endif %}</td></tr>
+      </table>
+    </div>
+    <div class="section">
+      <div class="section-title">Condiciones</div>
+      <table>
+        <tr>
+          <td class="lbl">Condición de pago</td>
+          <td>
+            {% if op.condicion_pago == 'mismo' %}Pago el mismo día (contra entrega)
+            {% elif op.condicion_pago == '8' %}Pago en 8 días
+            {% elif op.condicion_pago == '30' %}Pago en 30 días
+            {% elif op.condicion_pago == '60' %}Pago en 60 días
+            {% elif op.condicion_pago == 'custom' %}{{ op.condicion_custom }}
+            {% else %}{{ op.condicion_pago }}{% endif %}
+          </td>
+        </tr>
+        <tr>
+          <td class="lbl">Tipo de facturación</td>
+          <td>
+            {% if op.tipo_facturacion == 'op' %}Solo OP
+            {% elif op.tipo_facturacion == 'remision' %}Remisión
+            {% else %}Factura{% endif %}
+          </td>
+        </tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- Procesos con valores -->
+  {% if proc_rows %}
+  <div class="section">
+    <div class="section-title">Procesos de producción</div>
+    <table>
+      <tr><th>Proceso</th><th class="num">Costo</th></tr>
+      {% for p in proc_rows %}
+      <tr><td>{{ p.nombre }}</td><td class="num">{{ p.costo }}</td></tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% endif %}
+
+  <!-- Liquidación -->
+  <div class="section">
+    <div class="section-title">Liquidación</div>
+    <table>
+      <tr><td class="lbl">Papel</td><td class="num">{{ costo_papel }}</td></tr>
+      <tr><td class="lbl">Total costos OP</td><td class="num">{{ total_costos_op }}</td></tr>
+      <tr><td class="lbl">Margen</td><td class="num">{{ op.margen }} %</td></tr>
+      <tr><td class="lbl">Valor unitario</td><td class="num">{{ valor_unitario }}</td></tr>
+      <tr><td class="lbl">Cantidad</td><td class="num">{{ op.cantidad }} u</td></tr>
+      <tr class="total-row"><td>Valor total</td><td class="num">{{ valor_total }}</td></tr>
+      <tr><td class="lbl">Abono</td><td class="num">{{ abono }}</td></tr>
+      <tr class="saldo-row"><td>Saldo pendiente</td><td class="num">{{ saldo }}</td></tr>
+    </table>
+  </div>
+
+  <!-- Observaciones -->
+  {% if op.observaciones %}
+  <div class="section">
+    <div class="section-title">Observaciones</div>
+    <table>
+      <tr><td style="white-space:pre-wrap;color:#4A453E;">{{ op.observaciones }}</td></tr>
+    </table>
+  </div>
+  {% endif %}
+
+  <div class="footer">
+    Troqueles INK · Documento interno (administración) · {{ op.numero }}
+  </div>
+
+</body>
+</html>

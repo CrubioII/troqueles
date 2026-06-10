@@ -3,14 +3,15 @@ import { Icon } from './Icons'
 import { getClientes } from '../api'
 import {
   fmtCOP, fmtNum,
-  PLIEGO_SIZES, DISENADORES, PROCESS_GROUPS, STATUS_DEFS, CONDICIONES_PAGO,
+  PLIEGO_SIZES, DISENADORES, PROCESS_GROUPS, CONDICIONES_PAGO,
+  CONDICIONES_PAGO_OP, TIPOS_FACTURACION,
   SheetDiagram, Checkbox, MoneyInput, StatusPicker, NumField,
 } from './core'
 
 // =========================================================
 // Section 1 — Datos Generales
 // =========================================================
-export function SectionGenerales({ d, set }) {
+export function SectionGenerales({ d, set, showEstado = true, numeroLabel = 'N° cotización' }) {
   const [suggestions, setSuggestions] = useState([])
   const [showSugg, setShowSugg] = useState(false)
   const searchRef = useRef(null)
@@ -37,7 +38,7 @@ export function SectionGenerales({ d, set }) {
   return (
     <div className="grid grid-6" style={{ gap: 14 }}>
       <div className="field">
-        <label className="field-label">N° cotización <Icon.Lock /></label>
+        <label className="field-label">{numeroLabel} <Icon.Lock /></label>
         <input className="input readonly mono" value={d.numero} readOnly />
       </div>
       <div className="field">
@@ -135,10 +136,12 @@ export function SectionGenerales({ d, set }) {
           <span className="suffix">uds</span>
         </div>
       </div>
-      <div className="field col-span-2">
-        <label className="field-label">Estado <span className="editable-flag"><Icon.Pencil /></span></label>
-        <StatusPicker value={d.estado} onChange={(v) => set({ estado: v })} />
-      </div>
+      {showEstado && (
+        <div className="field col-span-2">
+          <label className="field-label">Estado <span className="editable-flag"><Icon.Pencil /></span></label>
+          <StatusPicker value={d.estado} onChange={(v) => set({ estado: v })} />
+        </div>
+      )}
     </div>
   )
 }
@@ -576,7 +579,39 @@ export function SectionProcesos({ procesos, setProc, autoValues }) {
 }
 
 // =========================================================
-// Section 5 — Condiciones comerciales
+// Tipo de facturación — compartido COT / OP
+// =========================================================
+function TipoFacturacionPicker({ d, set, readOnly = false }) {
+  if (d.tipoCliente !== 'terciario') {
+    return (
+      <div className="note info" style={{ marginTop: 12 }}>
+        <Icon.Info />
+        <span>Cliente final: flujo de facturación completo (Factura).</span>
+      </div>
+    )
+  }
+  return (
+    <div style={{ marginTop: 14 }}>
+      <label className="field-label" style={{ marginBottom: 8, display: 'block' }}>¿Cómo se le cobra al cliente terciario?</label>
+      <div className="cond-pago-options">
+        {TIPOS_FACTURACION.map(t => (
+          <div
+            key={t.id}
+            className={'opt' + (d.tipoFacturacion === t.id ? ' active' : '')}
+            onClick={readOnly ? undefined : () => set({ tipoFacturacion: t.id })}
+            style={readOnly ? { cursor: 'default', opacity: d.tipoFacturacion === t.id ? 1 : 0.5 } : undefined}
+          >
+            <div className="lbl">{t.lbl}</div>
+            <div className="sub">{t.sub}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// =========================================================
+// Section 5 — Condiciones comerciales (Cotización)
 // =========================================================
 export function SectionCondiciones({ d, set }) {
   return (
@@ -597,6 +632,7 @@ export function SectionCondiciones({ d, set }) {
             onChange={e => set({ condicionCustom: e.target.value })} />
         </div>
       )}
+      <TipoFacturacionPicker d={d} set={set} />
       <div className="note info" style={{ marginTop: 12 }}>
         <Icon.Info />
         <span>La condición seleccionada se transfiere automáticamente a la Orden de Producción al confirmar.</span>
@@ -606,11 +642,66 @@ export function SectionCondiciones({ d, set }) {
 }
 
 // =========================================================
+// Condiciones — Orden de Producción
+// =========================================================
+export function SectionCondicionesOP({ d, set, readOnly = false }) {
+  const setSafe = readOnly ? () => {} : set
+  return (
+    <div>
+      {readOnly && (
+        <div className="banner-readonly" style={{ marginBottom: 14 }}>
+          <Icon.Lock />
+          <span>Condiciones pactadas en la cotización {d.cotizacionNumero || ''} — no editables.</span>
+        </div>
+      )}
+      <div className="field" style={{ marginBottom: 14 }}>
+        <label className="field-label">Tipo de cliente</label>
+        <div className="seg">
+          <button
+            className={d.tipoCliente === 'final' ? 'active' : ''}
+            onClick={() => setSafe({ tipoCliente: 'final', tipoFacturacion: 'factura' })}
+            disabled={readOnly}
+          >Cliente Final</button>
+          <button
+            className={d.tipoCliente === 'terciario' ? 'active' : ''}
+            onClick={() => setSafe({ tipoCliente: 'terciario' })}
+            disabled={readOnly}
+          >Cliente Terciario</button>
+        </div>
+      </div>
+
+      <TipoFacturacionPicker d={d} set={setSafe} readOnly={readOnly} />
+
+      <label className="field-label" style={{ margin: '14px 0 8px', display: 'block' }}>Condición de pago</label>
+      <div className="cond-pago-options">
+        {CONDICIONES_PAGO_OP.map(c => (
+          <div
+            key={c.id}
+            className={'opt' + (d.condicionPago === c.id ? ' active' : '')}
+            onClick={readOnly ? undefined : () => set({ condicionPago: c.id })}
+            style={readOnly ? { cursor: 'default', opacity: d.condicionPago === c.id ? 1 : 0.5 } : undefined}
+          >
+            <div className="lbl">{c.lbl}</div>
+            <div className="sub">{c.sub}</div>
+          </div>
+        ))}
+      </div>
+      {d.condicionPago === 'custom' && (
+        <div className="field" style={{ marginTop: 12 }}>
+          <label className="field-label">Condición personalizada (heredada de la cotización)</label>
+          <input className="input readonly" value={d.condicionCustom || ''} readOnly />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// =========================================================
 // Section 6 — Acciones
 // =========================================================
-export function SectionAcciones({ d, calc, onSave, onDelete, onSaveAndSend, saving }) {
+export function SectionAcciones({ d, calc, onSave, onDelete, onSaveAndSend, saving, originalEstado }) {
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const isConvertida = d.estado === 'convertida'
+  const isConvertida = (originalEstado || d.estado) === 'convertida'
   const canDelete = !!d.id && !isConvertida
 
   return (

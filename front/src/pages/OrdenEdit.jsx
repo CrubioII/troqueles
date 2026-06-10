@@ -1,487 +1,387 @@
-import { useState, useEffect, useRef } from 'react'
-import { useParams, useNavigate, useLocation } from 'react-router-dom'
+import { useState, useMemo, useEffect, useRef } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
 import { Icon } from '../components/Icons'
-import { PROCESOS_OP, OP_STATUS_DEFS } from '../components/core'
+import { fmtCOP, fmtNum, CONDICIONES_PAGO_OP, TIPOS_FACTURACION, Section } from '../components/core'
+import { SectionGenerales, SectionPapel, SectionProcesos, SectionCondicionesOP } from '../components/sections'
+import LiquidationPanel from '../components/LiquidationPanel'
 import {
-  SectionOpGenerales, SectionOpEspecificaciones, SectionOpProcesos,
-  SectionOpLiquidacion, SectionOpCondiciones, SectionOpEstado,
-} from '../components/OrdenSections'
-import OpProgressPanel from '../components/OpProgressPanel'
-import MaquinaBoard from '../components/MaquinaBoard'
-import { Section } from '../components/core'
-import {
-  getOrden, createOrden, updateOrden, cambiarEstadoOrden,
-  getOperarios, updateProcesoProgreso, cambiarEstado,
+  getOrden, getPapeles, createOrden, updateOrden,
+  getNextNumeroOrden, createCliente, updateCliente,
+  pdfOpAdmin, pdfOpProduccion,
 } from '../api'
 import { useAuth } from '../context/AuthContext'
+import { buildDefaultProcesos, buildBlankState, docToState, stateToDoc, seedProcesosFromApi, computeCalc } from '../lib/opQuoteShared'
 
-// ─── State helpers ─────────────────────────────────────────────────────────────
-
-function buildBlankState() {
-  return {
-    id: null,
-    numero: '',
-    fecha: new Date().toISOString().slice(0, 10),
-    cliente: null,
-    clienteNombre: '',
-    cotizacion: null,
-    cotizacionNumero: '',
-    referencia: '',
-    descripcion: '',
-    estado: 'borrador',
-    tipoClienteOp: 'final',
-    condicionCobroTerciario: '',
-    cantidad: 0,
-    valorUnitario: 0,
-    cantidadPliegos: 0,
-    papelReferencia: '',
-    corteInicial: '',
-    corteFinal: '',
-    medidaProducto: '',
-    cantidadImpresion: 0,
-    totalCostos: 0,
-    valorTotal: 0,
-    subtotal: 0,
-    abono: 0,
-    condicionPago: 'mismo_dia',
-    observaciones: '',
-  }
-}
-
-function buildBlankProcesos() {
-  const init = {}
-  PROCESOS_OP.forEach(([pid, , mid]) => {
-    init[pid] = {
-      active: false,
-      costo: 0,
-      maquinaId: mid,
-      operario: null,
-      operarioNombre: '',
-      estado: 'pendiente',
-      unidadesCompletadas: 0,
-      iniciadoEn: null,
-      completadoEn: null,
-      notas: '',
-    }
-  })
-  return init
-}
-
-function apiToState(orden) {
-  return {
-    id: orden.id,
-    numero: orden.numero || '',
-    fecha: orden.fecha || new Date().toISOString().slice(0, 10),
-    cliente: orden.cliente || null,
-    clienteNombre: orden.cliente_nombre || '',
-    cotizacion: orden.cotizacion || null,
-    cotizacionNumero: orden.cotizacion_numero || '',
-    referencia: orden.referencia || '',
-    descripcion: orden.descripcion || '',
-    estado: orden.estado || 'borrador',
-    tipoClienteOp: orden.tipo_cliente_op || 'final',
-    condicionCobroTerciario: orden.condicion_cobro_terciario || '',
-    cantidad: orden.cantidad || 0,
-    valorUnitario: parseFloat(orden.valor_unitario) || 0,
-    cantidadPliegos: orden.cantidad_pliegos || 0,
-    papelReferencia: orden.papel_referencia || '',
-    corteInicial: orden.corte_inicial || '',
-    corteFinal: orden.corte_final || '',
-    medidaProducto: orden.medida_producto || '',
-    cantidadImpresion: orden.cantidad_impresion || 0,
-    totalCostos: parseFloat(orden.total_costos) || 0,
-    valorTotal: parseFloat(orden.valor_total) || 0,
-    subtotal: parseFloat(orden.subtotal) || 0,
-    abono: parseFloat(orden.abono) || 0,
-    condicionPago: orden.condicion_pago || 'mismo_dia',
-    observaciones: orden.observaciones || '',
-  }
-}
-
-function procesosFromApi(apiProcesos) {
-  const result = buildBlankProcesos()
-  ;(apiProcesos || []).forEach(p => {
-    if (result[p.proceso_id]) {
-      result[p.proceso_id] = {
-        active: !!p.active,
-        costo: parseFloat(p.costo) || 0,
-        maquinaId: p.maquina_id || result[p.proceso_id].maquinaId,
-        operario: p.operario || null,
-        operarioNombre: p.operario_username || '',
-        estado: p.estado || 'pendiente',
-        unidadesCompletadas: p.unidades_completadas || 0,
-        iniciadoEn: p.iniciado_en || null,
-        completadoEn: p.completado_en || null,
-        notas: p.notas || '',
-      }
-    }
-  })
-  return result
-}
-
-function stateToApi(d, procesos) {
-  const procesosArr = PROCESOS_OP.map(([pid, , mid]) => {
-    const p = procesos[pid] || {}
-    return {
-      proceso_id: pid,
-      active: !!p.active,
-      costo: p.costo || 0,
-      maquina_id: p.maquinaId || mid,
-      operario: p.operario || null,
-      estado: p.estado || 'pendiente',
-      unidades_completadas: p.unidadesCompletadas || 0,
-      notas: p.notas || '',
-    }
-  })
-
-  return {
-    fecha: d.fecha,
-    cliente: d.cliente,
-    cotizacion: d.cotizacion || null,
-    referencia: d.referencia,
-    descripcion: d.descripcion,
-    estado: d.estado,
-    tipo_cliente_op: d.tipoClienteOp,
-    condicion_cobro_terciario: d.condicionCobroTerciario || '',
-    cantidad: d.cantidad,
-    valor_unitario: d.valorUnitario,
-    cantidad_pliegos: d.cantidadPliegos,
-    papel_referencia: d.papelReferencia,
-    corte_inicial: d.corteInicial,
-    corte_final: d.corteFinal,
-    medida_producto: d.medidaProducto,
-    cantidad_impresion: d.cantidadImpresion,
-    total_costos: d.totalCostos,
-    valor_total: d.valorTotal,
-    subtotal: d.subtotal,
-    abono: d.abono,
-    condicion_pago: d.condicionPago,
-    observaciones: d.observaciones,
-    procesos: procesosArr,
-  }
-}
-
-// ─── Operator task card (needs own state per process) ─────────────────────────
-
-function TareaCard({ pid, label, mid, p, onProgreso }) {
-  const [localUnidades, setLocalUnidades] = useState(p.unidadesCompletadas || 0)
-  const [localNotas, setLocalNotas] = useState(p.notas || '')
-
+// Resumen estático para OP creada desde cotización (datos bloqueados)
+function OrdenResumenLocked({ d, calc, papelCatalog }) {
+  const papelObj = papelCatalog.find(p => String(p.id) === d.papelId)
+  const papelLabel = papelObj ? `${papelObj.nombre} ${papelObj.gramaje}g · ${papelObj.material}` : 'Manual'
+  const rows = [
+    ['Cliente', d.cliente],
+    ['NIT / Cédula', d.clienteNit || '—'],
+    ['Teléfono', d.clienteTelefono || '—'],
+    ['Referencia', d.referencia],
+    ['Cantidad', `${fmtNum(d.cantidad)} uds` + (d.sobrante ? ` (+${fmtNum(d.sobrante)} sobrante)` : '')],
+    ['Papel', papelLabel],
+    ['Medida molde', `${d.moldeAncho} × ${d.moldeAlto} cm`],
+    ['Pliego', `${d.pliegoW} × ${d.pliegoH} cm (${d.pliegoTipo})`],
+    ['Unidades / pliego', fmtNum(calc.unidadesPorPliego)],
+    ['Pliegos necesarios', fmtNum(calc.pliegosNecesarios)],
+    ['Corte inicial', d.corteInicialActive ? `Sí · ${fmtCOP(d.corteInicialPrecio)}` : 'No'],
+    ['Corte final', d.corteFinalActive ? `Sí · ${fmtCOP(d.corteFinalPrecio)}` : 'No'],
+  ]
   return (
-    <div className="task-card">
-      <div className="task-card-header">
-        <div className={`semaforo ${p.estado || 'pendiente'}`} />
-        <div>
-          <div className="task-card-proc">{label}</div>
-          <div className="task-card-machine">{mid}</div>
-        </div>
-      </div>
-      <div className="grid grid-2" style={{ gap: 8 }}>
-        <div className="field">
-          <div className="field-label">Unidades completadas</div>
-          <input
-            type="number"
-            className="input"
-            value={localUnidades}
-            onChange={e => setLocalUnidades(Number(e.target.value))}
-            min={0}
-          />
-        </div>
-        <div className="field">
-          <div className="field-label">Notas</div>
-          <input
-            className="input"
-            value={localNotas}
-            onChange={e => setLocalNotas(e.target.value)}
-            placeholder="Observaciones del proceso…"
-          />
-        </div>
-      </div>
-      <div className="task-actions">
-        {p.estado === 'pendiente' && (
-          <button className="btn accent" onClick={() => onProgreso(pid, { estado: 'en_proceso' })}>
-            ▶ Iniciar
-          </button>
-        )}
-        {p.estado === 'en_proceso' && (
-          <>
-            <button className="btn" onClick={() => onProgreso(pid, { unidades_completadas: localUnidades, notas: localNotas })}>
-              Guardar progreso
-            </button>
-            <button className="btn accent" onClick={() => onProgreso(pid, { estado: 'completado', unidades_completadas: localUnidades, notas: localNotas })}>
-              ✓ Completar
-            </button>
-          </>
-        )}
-        {p.estado === 'completado' && (
-          <span style={{ fontSize: 12, color: 'var(--ok)', fontWeight: 600 }}>✓ Completado</span>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function OperadorTareas({ myProcesos, procesos, onProgreso }) {
-  return (
-    <div style={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 'var(--radius-lg)', padding: 16 }}>
-      <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 12 }}>Mis tareas</div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {myProcesos.map(([pid, label, mid]) => (
-          <TareaCard key={pid} pid={pid} label={label} mid={mid} p={procesos[pid] || {}} onProgreso={onProgreso} />
+    <div>
+      <div className="grid grid-2" style={{ gap: '8px 24px' }}>
+        {rows.map(([label, value]) => (
+          <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '6px 0', borderBottom: '1px solid var(--line)' }}>
+            <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>{label}</span>
+            <span style={{ fontSize: 13, fontWeight: 600, textAlign: 'right' }}>{value}</span>
+          </div>
         ))}
       </div>
+
+      <label className="field-label" style={{ margin: '18px 0 8px', display: 'block' }}>Procesos pactados</label>
+      <table className="liq-table" style={{ width: '100%' }}>
+        <tbody>
+          {calc.procRows.length === 0 && (
+            <tr><td style={{ color: 'var(--ink-3)', fontSize: 12 }}>Sin procesos activos</td><td></td></tr>
+          )}
+          {calc.procRows.map(p => (
+            <tr key={p.id}>
+              <td style={{ padding: '5px 0', fontSize: 13 }}>{p.nombre}</td>
+              <td className="mono" style={{ textAlign: 'right', fontSize: 13 }}>{fmtCOP(p.costo)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {d.observaciones && (
+        <>
+          <label className="field-label" style={{ margin: '18px 0 6px', display: 'block' }}>Observaciones</label>
+          <div style={{ fontSize: 13, color: 'var(--ink-2)', whiteSpace: 'pre-wrap' }}>{d.observaciones}</div>
+        </>
+      )}
     </div>
   )
 }
-
-// ─── Main page ─────────────────────────────────────────────────────────────────
 
 export default function OrdenEdit() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const location = useLocation()
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
   const isNew = id === 'nuevo'
 
-  const [d, setData] = useState(buildBlankState)
-  const [procesos, setProcesos] = useState(buildBlankProcesos)
-  const [operarios, setOperarios] = useState([])
-  const [open, setOpen] = useState({ s1: true, s2: true, s3: true, s4: true, s5: true, s6: false, sMaq: false })
+  const [d, setData] = useState(() => buildBlankState('op'))
+  const [procesos, setProcesos] = useState(buildDefaultProcesos)
+  const [papelCatalog, setPapelCatalog] = useState([])
+  const [open, setOpen] = useState({ s1: true, s2: true, s3: true, s5: true })
   const [loading, setLoading] = useState(!isNew)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState(null)
   const [toast, setToast] = useState(null)
   const toastRef = useRef(null)
 
+  const locked = !!d.cotizacionId
+
   const set = (patch) => setData(prev => ({ ...prev, ...patch }))
   const setProc = (pid, patch) => setProcesos(prev => ({ ...prev, [pid]: { ...prev[pid], ...patch } }))
+  const toggle = (k) => setOpen(o => ({ ...o, [k]: !o[k] }))
 
-  const showToast = (msg, type = 'ok') => {
-    setToast({ msg, type })
-    clearTimeout(toastRef.current)
-    toastRef.current = setTimeout(() => setToast(null), 3000)
-  }
-
-  // Pre-fill from cotizacion state (when navigating from CotizacionEdit)
+  // Load papers + orden (if editing) + next number (if new)
   useEffect(() => {
-    const prefill = location.state?.fromCotizacion
-    if (isNew && prefill) {
-      setData(prev => ({
-        ...prev,
-        ...prefill,
-      }))
-    }
-  }, [])
+    const tasks = [getPapeles()]
+    if (!isNew) tasks.push(getOrden(id))
 
-  useEffect(() => {
-    if (isAdmin) {
-      getOperarios().then(setOperarios).catch(() => {})
-    }
+    Promise.all(tasks)
+      .then(([papeles, orden]) => {
+        const catalog = papeles.results || papeles
+        setPapelCatalog(catalog)
 
-    if (isNew) return
-
-    setLoading(true)
-    getOrden(id)
-      .then(orden => {
-        setData(apiToState(orden))
-        setProcesos(procesosFromApi(orden.procesos))
+        if (orden) {
+          setData(docToState(orden, catalog, 'op'))
+          if (orden.procesos && orden.procesos.length > 0) {
+            setProcesos(seedProcesosFromApi(orden.procesos))
+          }
+        } else if (catalog.length > 0) {
+          const first = catalog[0]
+          set({ papelId: String(first.id), precioPliego: parseFloat(first.precio) })
+        }
       })
-      .catch(e => setSaveError(e.message))
+      .catch(console.error)
       .finally(() => setLoading(false))
+
+    if (isNew) {
+      // Número estimado en tiempo real; el definitivo lo asigna el guardado
+      getNextNumeroOrden()
+        .then(r => {
+          setData(prev => prev.id ? prev : { ...prev, numero: `${r.next} · estimado` })
+        })
+        .catch(() => {})
+    }
   }, [id])
 
-  const handleSave = async () => {
-    if (!d.cliente) { showToast('Selecciona un cliente', 'warn'); return }
-    if (!d.referencia.trim()) { showToast('Ingresa una referencia', 'warn'); return }
+  const calc = useMemo(() => computeCalc(d, procesos), [d, procesos])
 
+  // ============ Save ============
+  const save = async () => {
     setSaving(true)
     setSaveError(null)
     try {
-      const payload = stateToApi(d, procesos)
-      const result = isNew
-        ? await createOrden(payload)
-        : await updateOrden(d.id, payload)
-      setData(apiToState(result))
-      setProcesos(procesosFromApi(result.procesos))
-      showToast(isNew ? 'OP creada' : 'Cambios guardados')
-      if (isNew) {
-        if (d.cotizacion) {
-          cambiarEstado(d.cotizacion, 'convertida').catch(() => {})
+      let result
+      if (locked) {
+        // OP desde COT: backend solo acepta abono/observaciones/fecha
+        result = await updateOrden(d.id, {
+          ...stateToDoc(d, procesos, 'op'),
+          abono: d.abono || 0,
+        })
+      } else {
+        let clienteId = d.clienteId
+        if (!clienteId) {
+          if (!d.cliente.trim()) throw new Error('El campo Cliente es obligatorio')
+          const newCliente = await createCliente({
+            nombre: d.cliente.trim(),
+            tipo: d.tipoCliente,
+            email: d.clienteEmail || '',
+            telefono: d.clienteTelefono || '',
+            nit: d.clienteNit || '',
+          })
+          clienteId = newCliente.id
+          set({ clienteId: newCliente.id })
+        } else {
+          await updateCliente(clienteId, {
+            email: d.clienteEmail || '',
+            telefono: d.clienteTelefono || '',
+            nit: d.clienteNit || '',
+          })
         }
-        navigate(`/ordenes/${result.id}`, { replace: true })
+        const payload = stateToDoc({ ...d, clienteId }, procesos, 'op')
+        // Persistir valores efectivos para que la OP quede congelada
+        if (payload.valor_unitario_override == null && calc.valorUnitario > 0)
+          payload.valor_unitario_override = Math.round(calc.valorUnitario)
+        if (payload.valor_total_override == null && calc.valorTotal > 0)
+          payload.valor_total_override = Math.round(calc.valorTotal)
+
+        if (!d.id) {
+          result = await createOrden(payload)
+          window.history.replaceState(null, '', `/ordenes/${result.id}`)
+        } else {
+          result = await updateOrden(d.id, payload)
+        }
       }
+
+      setData(prev => ({
+        ...prev,
+        id: result.id,
+        numero: result.numero || prev.numero,
+      }))
+      clearTimeout(toastRef.current)
+      setToast('Orden de producción guardada')
+      toastRef.current = setTimeout(() => setToast(null), 3000)
+      return result.id
     } catch (e) {
       setSaveError(e.message)
-      showToast('Error al guardar: ' + e.message, 'danger')
     } finally {
       setSaving(false)
     }
   }
 
-  const handleCambiarEstado = async (nuevo) => {
+  // ============ PDFs ============
+  const papelReferencia = (() => {
+    const papel = papelCatalog.find(p => String(p.id) === d.papelId)
+    return papel ? `${papel.nombre} ${papel.gramaje}g · ${papel.material}` : 'Manual'
+  })()
+
+  const downloadBlob = async (resp, filename) => {
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+    const blob = await resp.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = filename; a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const handlePdfAdmin = async () => {
     if (!d.id) return
-    setSaving(true)
     try {
-      const result = await cambiarEstadoOrden(d.id, nuevo)
-      setData(prev => ({ ...prev, estado: result.estado }))
-      showToast('Estado actualizado')
-    } catch (e) {
-      showToast('Error: ' + e.message, 'danger')
-    } finally {
-      setSaving(false)
-    }
+      await downloadBlob(await pdfOpAdmin(d.id, calc, d), `${d.numero}_admin.pdf`)
+    } catch (e) { console.error(e) }
   }
 
-  // Operator: update process progress
-  const handleProgresoUpdate = async (pid, patch) => {
+  const handlePdfProduccion = async () => {
     if (!d.id) return
-    setSaving(true)
     try {
-      const result = await updateProcesoProgreso(d.id, { proceso_id: pid, ...patch })
-      setProc(pid, {
-        estado: result.estado,
-        unidadesCompletadas: result.unidades_completadas,
-        iniciadoEn: result.iniciado_en,
-        completadoEn: result.completado_en,
-        notas: result.notas,
-      })
-      showToast('Progreso actualizado')
-    } catch (e) {
-      showToast('Error: ' + e.message, 'danger')
-    } finally {
-      setSaving(false)
-    }
+      await downloadBlob(await pdfOpProduccion(d.id, calc, papelReferencia), `${d.numero}_produccion.pdf`)
+    } catch (e) { console.error(e) }
   }
 
-  const myProcesos = !isAdmin
-    ? PROCESOS_OP.filter(([pid]) => procesos[pid]?.operario === user?.id && procesos[pid]?.active)
-    : []
-
-  if (loading) return (
-    <div className="app">
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh', color: 'var(--ink-3)' }}>
-        Cargando OP…
+  if (loading) {
+    return (
+      <div className="app">
+        <div className="topbar">
+          <div className="brand">
+            <div className="mod">Órdenes de Producción</div>
+          </div>
+        </div>
+        <div style={{ padding: 48, textAlign: 'center', color: 'var(--ink-3)' }}>Cargando orden…</div>
       </div>
-    </div>
-  )
+    )
+  }
 
   return (
     <div className="app">
       {/* Topbar */}
       <div className="topbar">
         <div className="brand">
-          <button className="btn" onClick={() => navigate('/ordenes')} style={{ padding: '2px 8px', fontSize: 12, gap: 4 }}>
-            <Icon.ArrowLeft /> Órdenes de Producción
+          <button
+            className="btn"
+            style={{ padding: '2px 8px', fontSize: 12, gap: 4 }}
+            onClick={() => navigate('/ordenes')}
+          >
+            <Icon.ArrowLeft /> Órdenes
           </button>
-          {!isNew && (
-            <>
-              <span className="div">/</span>
-              <div className="mod">{d.numero || `OP #${id}`}</div>
-            </>
+          <span className="div">/</span>
+          <div className="mod mono">{d.numero}</div>
+          {locked && (
+            <span className="badge converted" style={{ marginLeft: 10 }}>
+              <span className="dot"></span>Desde {d.cotizacionNumero}
+            </span>
+          )}
+          {!locked && !isNew && (
+            <span className="badge draft" style={{ marginLeft: 10 }}>
+              <span className="dot"></span>OP directa
+            </span>
           )}
         </div>
-        <div className="topbar-right" />
+        <div className="topbar-right">
+          {saveError && (
+            <span style={{ color: 'var(--danger, #c0392b)', fontSize: 12 }}>
+              Error: {saveError}
+            </span>
+          )}
+        </div>
       </div>
 
-      {/* Toast */}
-      {toast && (
-        <div style={{
-          position: 'fixed', bottom: 24, right: 24, zIndex: 100,
-          padding: '10px 16px', borderRadius: 'var(--radius)',
-          background: toast.type === 'danger' ? 'var(--danger)' : toast.type === 'warn' ? 'var(--warn)' : 'var(--ok)',
-          color: 'white', fontWeight: 600, fontSize: 13,
-          boxShadow: 'var(--shadow-md)',
-        }}>
-          {toast.msg}
+      {locked && (
+        <div className="banner-readonly" style={{ margin: '14px 24px 0' }}>
+          <Icon.Lock />
+          <span>
+            Generada desde la cotización <strong>{d.cotizacionNumero}</strong> — datos generales, procesos y
+            condiciones bloqueados. Solo la liquidación (abono) es editable.
+          </span>
         </div>
       )}
 
+      {/* Workspace */}
       <div className="workspace">
         <div className="column-main">
-          {/* Operator view: my tasks */}
-          {!isAdmin && myProcesos.length > 0 && (
-            <OperadorTareas
-              myProcesos={myProcesos}
-              procesos={procesos}
-              onProgreso={handleProgresoUpdate}
-            />
+          {locked ? (
+            <>
+              <Section num="1" title="Resumen de la orden" desc="Datos pactados en la cotización" open={true} locked={true}>
+                <OrdenResumenLocked d={d} calc={calc} papelCatalog={papelCatalog} />
+              </Section>
+              <Section num="2" title="Condiciones" desc="Pactadas en la cotización" open={true} locked={true}>
+                <SectionCondicionesOP d={d} set={set} readOnly={true} />
+              </Section>
+            </>
+          ) : (
+            <>
+              <Section
+                num="1" title="Datos generales"
+                desc="Información básica de la orden"
+                open={open.s1} onToggle={() => toggle('s1')}
+                summary={!open.s1 && <>
+                  <span>Cliente:</span> <span className="v">{d.cliente || '—'}</span>
+                  <span>· Cantidad:</span> <span className="v mono">{fmtNum(d.cantidad)}</span>
+                </>}
+              >
+                <SectionGenerales d={d} set={set} showEstado={false} numeroLabel="N° OP" />
+              </Section>
+
+              <Section
+                num="2" title="Calculadora de papel y pliegos"
+                desc="Cuántos pliegos necesitas comprar"
+                open={open.s2} onToggle={() => toggle('s2')}
+                summary={!open.s2 && <>
+                  <span>Pliegos:</span> <span className="v mono">{calc.pliegosNecesarios}</span>
+                  <span>· Costo papel:</span> <span className="v mono">{fmtCOP(calc.costoPapel)}</span>
+                </>}
+              >
+                <SectionPapel d={d} set={set} calc={calc} papelCatalog={papelCatalog} />
+              </Section>
+
+              <Section
+                num="3" title="Procesos de producción"
+                desc="Marca los procesos que requiere esta orden"
+                open={open.s3} onToggle={() => toggle('s3')}
+                summary={!open.s3 && <>
+                  <span>Procesos activos:</span> <span className="v">{calc.procRows.length}</span>
+                  <span>· Costo procesos:</span> <span className="v mono">{fmtCOP(calc.totalProcesos)}</span>
+                </>}
+              >
+                <SectionProcesos procesos={procesos} setProc={setProc} autoValues={calc.autoValues} />
+              </Section>
+
+              <Section
+                num="4" title="Observaciones y notas"
+                desc="Texto libre al pie de la orden"
+                open={true} locked={true}
+              >
+                <div className="obs-card">
+                  <label className="field-label" style={{ marginBottom: 6 }}>Observaciones de la orden</label>
+                  <textarea
+                    className="textarea"
+                    placeholder="Notas internas, instrucciones para el taller, etc."
+                    value={d.observaciones}
+                    onChange={e => set({ observaciones: e.target.value })}
+                  />
+                </div>
+              </Section>
+
+              <Section
+                num="5" title="Condiciones"
+                desc="Tipo de cliente, facturación y pago"
+                open={open.s5} onToggle={() => toggle('s5')}
+                summary={!open.s5 && <>
+                  <span>Pago:</span> <span className="v">{CONDICIONES_PAGO_OP.find(c => c.id === d.condicionPago)?.lbl || d.condicionCustom}</span>
+                  <span>· Facturación:</span> <span className="v">{TIPOS_FACTURACION.find(t => t.id === d.tipoFacturacion)?.lbl}</span>
+                </>}
+              >
+                <SectionCondicionesOP d={d} set={set} />
+              </Section>
+            </>
           )}
+        </div>
 
-          {!isAdmin && myProcesos.length === 0 && !isNew && (
-            <div className="note info">
-              No tienes procesos asignados en esta OP. Contacta al administrador para recibir asignaciones.
-            </div>
-          )}
-
-          <SectionOpGenerales
-            d={d} set={set}
-            open={open.s1} onToggle={() => setOpen(o => ({ ...o, s1: !o.s1 }))}
-            operarios={operarios}
-            isAdmin={isAdmin}
-          />
-          <SectionOpEspecificaciones
-            d={d} set={set}
-            open={open.s2} onToggle={() => setOpen(o => ({ ...o, s2: !o.s2 }))}
-            isAdmin={isAdmin}
-          />
-          <SectionOpProcesos
-            procesos={procesos} setProc={setProc}
-            open={open.s3} onToggle={() => setOpen(o => ({ ...o, s3: !o.s3 }))}
-            operarios={operarios}
-            isAdmin={isAdmin}
-          />
-          <SectionOpLiquidacion
-            d={d} set={set} procesos={procesos}
-            open={open.s4} onToggle={() => setOpen(o => ({ ...o, s4: !o.s4 }))}
-            isAdmin={isAdmin}
-          />
-          <SectionOpCondiciones
-            d={d} set={set}
-            open={open.s5} onToggle={() => setOpen(o => ({ ...o, s5: !o.s5 }))}
-            isAdmin={isAdmin}
-          />
-
-          {isAdmin && !isNew && (
-            <SectionOpEstado
-              d={d} set={set}
-              open={open.s6} onToggle={() => setOpen(o => ({ ...o, s6: !o.s6 }))}
-              onCambiarEstado={handleCambiarEstado}
+        {/* Sticky right column — Liquidación (admin only) */}
+        {isAdmin && (
+          <div className="column-side">
+            <LiquidationPanel
+              d={d} set={set} calc={calc}
               saving={saving}
+              mode="op"
+              locked={locked}
+              onSave={() => save()}
+              onPdfAdmin={handlePdfAdmin}
+              onPdfProduccion={handlePdfProduccion}
             />
-          )}
-
-          {/* MaquinaBoard */}
-          {!isNew && (
-            <Section
-              num="☷"
-              title="Tablero de máquinas"
-              desc="estado por máquina en tiempo real"
-              open={open.sMaq}
-              onToggle={() => setOpen(o => ({ ...o, sMaq: !o.sMaq }))}
-            >
-              <MaquinaBoard procesos={procesos} currentUserId={user?.id} />
-            </Section>
-          )}
-
-          {saveError && (
-            <div className="note" style={{ marginTop: 8 }}>
-              <Icon.Info /> {saveError}
-            </div>
-          )}
-        </div>
-
-        <div className="column-side">
-          <OpProgressPanel
-            d={d}
-            procesos={procesos}
-            onSave={handleSave}
-            saving={saving}
-            isAdmin={isAdmin}
-            isNew={isNew}
-          />
-        </div>
+          </div>
+        )}
       </div>
+
+      {/* Save toast */}
+      {toast && (
+        <div style={{
+          position: 'fixed', bottom: 28, left: '50%', transform: 'translateX(-50%)',
+          background: '#1a4a2e', color: '#fff', padding: '10px 22px',
+          borderRadius: 8, fontSize: 13, fontWeight: 500, zIndex: 9999,
+          boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
+          display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap',
+        }}>
+          ✓ {toast}
+        </div>
+      )}
     </div>
   )
 }

@@ -1,36 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Icon } from '../components/Icons'
-import { fmtCOP, fmtNum, OP_STATUS_DEFS } from '../components/core'
-import { getOrdenes, deleteOrden, anularOrden } from '../api'
+import { fmtCOP, fmtNum } from '../components/core'
+import { getOrdenes, deleteOrden } from '../api'
 import { useAuth } from '../context/AuthContext'
-
-const STATUS_ALL = { id: '', label: 'Todos', cls: '' }
-
-function OpBadge({ estado }) {
-  const def = OP_STATUS_DEFS.find(s => s.id === estado)
-  if (!def) return null
-  return (
-    <span className={'badge ' + def.cls}>
-      <span className="dot"></span>
-      {def.label}
-    </span>
-  )
-}
-
-function ProgressBar({ value, warn }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-      <div className="op-progress-track" style={{ width: 60 }}>
-        <div
-          className={'op-progress-fill' + (warn ? ' warn' : '')}
-          style={{ width: `${value}%` }}
-        />
-      </div>
-      <span className="mono" style={{ fontSize: 11, color: 'var(--ink-3)', minWidth: 28 }}>{value}%</span>
-    </div>
-  )
-}
 
 function Skeleton() {
   return (
@@ -58,11 +31,10 @@ export default function OrdenList() {
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState(null)
   const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState('')
   const [nextPage, setNextPage] = useState(null)
   const [prevPage, setPrevPage] = useState(null)
   const [count, setCount] = useState(0)
-  const [confirmAction, setConfirmAction] = useState(null)
+  const [confirmDelete, setConfirmDelete] = useState(null)
   const debounceRef = useRef(null)
 
   const load = (params = '', initial = false) => {
@@ -89,36 +61,24 @@ export default function OrdenList() {
 
   useEffect(() => { load('', true) }, [])
 
-  const buildParams = (s, st) => {
-    const parts = []
-    if (s) parts.push(`search=${encodeURIComponent(s)}`)
-    if (st) parts.push(`estado=${encodeURIComponent(st)}`)
-    return parts.length ? '?' + parts.join('&') : ''
-  }
-
-  const applyFilters = (s, st) => load(buildParams(s, st))
-
   const handleSearch = (v) => {
     setSearch(v)
     clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(() => applyFilters(v, statusFilter), 350)
+    debounceRef.current = setTimeout(() => {
+      load(v ? `?search=${encodeURIComponent(v)}` : '')
+    }, 350)
   }
 
-  const handleStatus = (st) => {
-    setStatusFilter(st)
-    applyFilters(search, st)
-  }
-
-  const handleAnular = (e, ord) => {
+  const handleDelete = (e, ord) => {
     e.stopPropagation()
-    if (confirmAction === `anular-${ord.id}`) {
-      setOrdenes(prev => prev.map(o => o.id === ord.id ? { ...o, estado: 'anulada' } : o))
-      setConfirmAction(null)
-      anularOrden(ord.id).catch(() => {
-        setOrdenes(prev => prev.map(o => o.id === ord.id ? ord : o))
+    if (confirmDelete === ord.id) {
+      setOrdenes(prev => prev.filter(o => o.id !== ord.id))
+      setConfirmDelete(null)
+      deleteOrden(ord.id).catch(() => {
+        setOrdenes(prev => [ord, ...prev])
       })
     } else {
-      setConfirmAction(`anular-${ord.id}`)
+      setConfirmDelete(ord.id)
     }
   }
 
@@ -129,10 +89,8 @@ export default function OrdenList() {
     load(params)
   }
 
-  const clearConfirm = () => setConfirmAction(null)
-
   return (
-    <div className="app" onClick={clearConfirm}>
+    <div className="app" onClick={() => setConfirmDelete(null)}>
       <div className="topbar">
         <div className="brand">
           <div className="mod">Órdenes de Producción</div>
@@ -161,24 +119,8 @@ export default function OrdenList() {
               <Icon.Search />
             </span>
           </div>
-
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {[STATUS_ALL, ...OP_STATUS_DEFS].map(s => (
-              <span
-                key={s.id}
-                className={'badge ' + s.cls + (statusFilter === s.id ? ' active' : '')}
-                style={{ cursor: 'pointer', userSelect: 'none' }}
-                onClick={e => { e.stopPropagation(); handleStatus(s.id) }}
-              >
-                {s.id && <span className="dot"></span>}
-                {s.label}
-              </span>
-            ))}
-          </div>
-
         </div>
 
-        {/* Progress bar on refresh */}
         {refreshing && (
           <div style={{ height: 2, background: 'var(--accent)', borderRadius: 1, marginBottom: 12, animation: 'pulse 1s ease-in-out infinite' }} />
         )}
@@ -201,7 +143,7 @@ export default function OrdenList() {
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ borderBottom: '2px solid var(--line)' }}>
-                  {['OP #', 'Fecha', 'Cliente', 'Referencia', 'Estado', 'Progreso proc.', 'Unidades', 'Valor total', 'Saldo', 'Cond. pago', ''].map((h, i) => (
+                  {['OP #', 'Fecha', 'Cliente', 'Referencia', 'Cantidad', 'Valor total', 'Abono', 'Saldo', 'Origen', ''].map((h, i) => (
                     <th key={i} style={{
                       padding: '10px 12px', textAlign: 'left',
                       fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
@@ -227,31 +169,30 @@ export default function OrdenList() {
                   >
                     <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 12 }}>
                       {ord.numero}
-                      {ord.cotizacion_numero && (
-                        <div style={{ fontSize: 10, color: 'var(--ink-3)', fontWeight: 400 }}>← {ord.cotizacion_numero}</div>
-                      )}
                     </td>
                     <td style={{ padding: '10px 12px', fontSize: 12, color: 'var(--ink-2)' }}>{ord.fecha}</td>
                     <td style={{ padding: '10px 12px', fontWeight: 600 }}>{ord.cliente_nombre}</td>
-                    <td style={{ padding: '10px 12px', color: 'var(--ink-2)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <td style={{ padding: '10px 12px', color: 'var(--ink-2)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {ord.referencia}
                     </td>
-                    <td style={{ padding: '10px 12px' }}><OpBadge estado={ord.estado} /></td>
-                    <td style={{ padding: '10px 12px' }}>
-                      <ProgressBar value={ord.progreso_procesos} warn={false} />
-                    </td>
-                    <td style={{ padding: '10px 12px' }}>
-                      <ProgressBar value={ord.progreso_unidades} warn={false} />
-                      <div style={{ fontSize: 10, color: 'var(--ink-3)', marginTop: 2 }}>unidades</div>
+                    <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}>
+                      {fmtNum(ord.cantidad)}
                     </td>
                     <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}>
-                      {fmtCOP(ord.valor_total)}
+                      {fmtCOP(ord.valor_total_efectivo)}
                     </td>
-                    <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontSize: 12, color: ord.saldo > 0 ? 'var(--ok)' : 'var(--ink-3)' }}>
+                    <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontSize: 12, color: 'var(--ink-2)' }}>
+                      {fmtCOP(ord.abono)}
+                    </td>
+                    <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontSize: 12, color: ord.saldo > 0 ? 'var(--danger, #c0392b)' : 'var(--ok, #27ae60)' }}>
                       {fmtCOP(ord.saldo)}
                     </td>
-                    <td style={{ padding: '10px 12px', fontSize: 11, color: 'var(--ink-3)' }}>
-                      {ord.condicion_pago?.replace('_', ' ')}
+                    <td style={{ padding: '10px 12px' }}>
+                      {ord.cotizacion_numero ? (
+                        <span className="badge converted"><span className="dot"></span>{ord.cotizacion_numero}</span>
+                      ) : (
+                        <span className="badge draft"><span className="dot"></span>Directa</span>
+                      )}
                     </td>
                     <td style={{ padding: '10px 12px' }} onClick={e => e.stopPropagation()}>
                       <div style={{ display: 'flex', gap: 4 }}>
@@ -260,13 +201,13 @@ export default function OrdenList() {
                           style={{ fontSize: 11, padding: '4px 8px' }}
                           onClick={() => navigate(`/ordenes/${ord.id}`)}
                         >Abrir</button>
-                        {isAdmin && ord.estado !== 'anulada' && (
+                        {isAdmin && (
                           <button
-                            className={'btn' + (confirmAction === `anular-${ord.id}` ? ' danger' : '')}
+                            className={'btn' + (confirmDelete === ord.id ? ' danger' : '')}
                             style={{ fontSize: 11, padding: '4px 8px' }}
-                            onClick={e => handleAnular(e, ord)}
+                            onClick={e => handleDelete(e, ord)}
                           >
-                            {confirmAction === `anular-${ord.id}` ? '¿Anular?' : 'Anular'}
+                            {confirmDelete === ord.id ? '¿Eliminar?' : 'Eliminar'}
                           </button>
                         )}
                       </div>

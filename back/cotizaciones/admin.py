@@ -33,7 +33,7 @@ class CotizacionAdmin(admin.ModelAdmin):
         ("General", {"fields": ["numero", "fecha", "cliente", "referencia", "cantidad", "tipo_cliente", "estado"]}),
         ("Papel", {"fields": ["molde_ancho", "molde_alto", "pliego_tipo", "pliego_w", "pliego_h", "papel", "precio_pliego", "costo_papel_override"]}),
         ("Liquidación overrides", {"fields": ["valor_unitario_override", "valor_total_override", "total_costos_override", "subtotal_override"], "classes": ["collapse"]}),
-        ("Condiciones", {"fields": ["condicion_pago", "condicion_custom", "observaciones"]}),
+        ("Condiciones", {"fields": ["condicion_pago", "condicion_custom", "tipo_facturacion", "observaciones"]}),
         ("Auditoría", {"fields": ["creado", "modificado"], "classes": ["collapse"]}),
     ]
 
@@ -41,21 +41,20 @@ class CotizacionAdmin(admin.ModelAdmin):
 class OpProcesoInline(admin.TabularInline):
     model = OpProceso
     extra = 0
-    fields = ["proceso_id", "active", "costo", "maquina_id", "operario", "estado", "unidades_completadas", "notas"]
+    fields = ["proceso_id", "active", "costo", "costo_override", "extras"]
 
 
 @admin.register(OrdenProduccion)
 class OrdenProduccionAdmin(admin.ModelAdmin):
-    list_display = ["numero", "cliente", "referencia", "estado", "cantidad", "valor_total", "abono", "creado"]
-    list_filter = ["estado", "tipo_cliente_op", "condicion_pago"]
+    list_display = ["numero", "cliente", "referencia", "cantidad", "abono", "creado"]
+    list_filter = ["tipo_cliente", "condicion_pago", "tipo_facturacion"]
     search_fields = ["numero", "cliente__nombre", "referencia"]
     readonly_fields = ["numero", "creado", "modificado"]
     inlines = [OpProcesoInline]
     fieldsets = [
-        ("General", {"fields": ["numero", "fecha", "cliente", "cotizacion", "referencia", "descripcion", "estado"]}),
-        ("Tipo cliente", {"fields": ["tipo_cliente_op", "condicion_cobro_terciario"]}),
-        ("Especificaciones", {"fields": ["cantidad", "valor_unitario", "cantidad_pliegos", "papel_referencia", "corte_inicial", "corte_final", "medida_producto", "cantidad_impresion"]}),
-        ("Liquidación", {"fields": ["total_costos", "valor_total", "subtotal", "abono"]}),
-        ("Condiciones", {"fields": ["condicion_pago", "observaciones"]}),
+        ("General", {"fields": ["numero", "fecha", "cliente", "cotizacion", "referencia", "cantidad", "sobrante", "tipo_cliente"]}),
+        ("Papel", {"fields": ["molde_ancho", "molde_alto", "pliego_tipo", "pliego_w", "pliego_h", "papel", "precio_pliego", "costo_papel_override", "corte_inicial_active", "corte_inicial_precio", "corte_final_active", "corte_final_precio"]}),
+        ("Liquidación", {"fields": ["margen", "abono", "valor_unitario_override", "valor_total_override", "total_costos_override", "subtotal_override"]}),
+        ("Condiciones", {"fields": ["condicion_pago", "condicion_custom", "tipo_facturacion", "observaciones"]}),
         ("Auditoría", {"fields": ["creado", "modificado"], "classes": ["collapse"]}),
     ]

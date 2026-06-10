@@ -1,10 +1,13 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import { refreshAccessToken } from '../api'
 
 const AuthContext = createContext(null)
 
 function decodePayload(token) {
   try {
-    return JSON.parse(atob(token.split('.')[1]))
+    const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')
+    const padded = b64.padEnd(b64.length + (4 - b64.length % 4) % 4, '=')
+    return JSON.parse(atob(padded))
   } catch {
     return null
   }
@@ -21,12 +24,35 @@ export function AuthProvider({ children }) {
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
-    const token = localStorage.getItem('access')
-    if (token && !isExpired(token)) {
-      const p = decodePayload(token)
-      setUser({ username: p.username, role: p.role })
-    }
-    setReady(true)
+    let cancelled = false
+    ;(async () => {
+      let token = localStorage.getItem('access')
+      if (!token || isExpired(token)) {
+        await refreshAccessToken()
+        token = localStorage.getItem('access')
+      }
+      if (token && !isExpired(token)) {
+        try {
+          const res = await fetch('/api/auth/me/', {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+          if (res.ok) {
+            const data = await res.json()
+            if (!cancelled) setUser({ username: data.username, role: data.role })
+          } else {
+            localStorage.removeItem('access')
+            localStorage.removeItem('refresh')
+          }
+        } catch {
+          // network error: leave tokens as-is, treat as logged out for this load
+        }
+      } else {
+        localStorage.removeItem('access')
+        localStorage.removeItem('refresh')
+      }
+      if (!cancelled) setReady(true)
+    })()
+    return () => { cancelled = true }
   }, [])
 
   const login = useCallback(async (username, password) => {

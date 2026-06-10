@@ -1,5 +1,4 @@
 from rest_framework import serializers
-from django.contrib.auth.models import User
 from .models import Cliente, Papel, Cotizacion, CotizacionProceso, DocumentoCliente, DocumentoClienteItem, OrdenProduccion, OpProceso
 
 
@@ -44,6 +43,7 @@ class CotizacionSerializer(serializers.ModelSerializer):
     cliente_nit = serializers.CharField(source="cliente.nit", read_only=True, default='')
     valor_unitario_efectivo = serializers.SerializerMethodField()
     valor_total_efectivo = serializers.SerializerMethodField()
+    orden_id = serializers.SerializerMethodField()
 
     class Meta:
         model = Cotizacion
@@ -59,12 +59,17 @@ class CotizacionSerializer(serializers.ModelSerializer):
             "valor_unitario_override", "valor_total_override",
             "total_costos_override", "subtotal_override",
             "margen",
-            "condicion_pago", "condicion_custom", "observaciones",
+            "condicion_pago", "condicion_custom", "tipo_facturacion", "observaciones",
             "creado", "modificado",
             "procesos",
             "valor_unitario_efectivo", "valor_total_efectivo",
+            "orden_id",
         ]
         read_only_fields = ["id", "numero", "creado", "modificado"]
+
+    def get_orden_id(self, obj):
+        orden = obj.ordenes.first()
+        return orden.id if orden else None
 
     def _total_costos(self, obj):
         """Best-effort total OP cost from stored overrides + process data."""
@@ -176,113 +181,123 @@ class DocumentoClienteListSerializer(serializers.ModelSerializer):
 
 # ─────────────── Órdenes de Producción ───────────────
 
-class OperarioSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = User
-        fields = ["id", "username", "first_name", "last_name"]
+# Campos editables en una OP creada desde cotización (todo lo demás quedó
+# pactado en la COT y se ignora server-side).
+OP_LOCKED_WHITELIST = {"abono", "observaciones", "fecha"}
 
 
 class OpProcesoSerializer(serializers.ModelSerializer):
-    operario_username = serializers.CharField(source="operario.username", read_only=True, default="")
-
     class Meta:
         model = OpProceso
-        fields = [
-            "id", "proceso_id", "active", "costo", "maquina_id",
-            "operario", "operario_username",
-            "estado", "unidades_completadas",
-            "iniciado_en", "completado_en", "notas",
-        ]
+        fields = ["id", "proceso_id", "active", "costo", "costo_override", "extras"]
         read_only_fields = ["id"]
 
 
 class OrdenListSerializer(serializers.ModelSerializer):
-    cliente_nombre    = serializers.CharField(source="cliente.nombre", read_only=True)
+    cliente_nombre = serializers.CharField(source="cliente.nombre", read_only=True)
     cotizacion_numero = serializers.CharField(source="cotizacion.numero", read_only=True, default="")
-    saldo             = serializers.SerializerMethodField()
-    progreso_procesos = serializers.SerializerMethodField()
-    progreso_unidades = serializers.SerializerMethodField()
+    valor_total_efectivo = serializers.SerializerMethodField()
+    saldo = serializers.SerializerMethodField()
 
     class Meta:
         model = OrdenProduccion
         fields = [
-            "id", "numero", "fecha", "cliente_nombre", "cotizacion_numero",
-            "referencia", "estado", "cantidad", "valor_total", "abono", "saldo",
-            "condicion_pago", "tipo_cliente_op",
-            "progreso_procesos", "progreso_unidades",
-            "creado", "modificado",
+            "id", "numero", "fecha", "cliente_nombre", "referencia",
+            "cantidad", "valor_total_efectivo", "abono", "saldo",
+            "cotizacion", "cotizacion_numero", "creado", "modificado",
         ]
 
+    def get_valor_total_efectivo(self, obj):
+        return _orden_valor_total_efectivo(obj)
+
     def get_saldo(self, obj):
-        return float(obj.valor_total) - float(obj.abono)
+        total = _orden_valor_total_efectivo(obj)
+        if total is None:
+            return None
+        return total - float(obj.abono or 0)
 
-    def _active_procs(self, obj):
-        return [p for p in obj.procesos.all() if p.active]
 
-    def get_progreso_procesos(self, obj):
-        procs = self._active_procs(obj)
-        if not procs:
-            return 0
-        completados = sum(1 for p in procs if p.estado == "completado")
-        return round(completados / len(procs) * 100)
+def _orden_total_costos(obj):
+    """Best-effort total cost from stored overrides + process data (mismo patrón COT)."""
+    if obj.total_costos_override is not None:
+        return float(obj.total_costos_override)
+    paper = float(obj.costo_papel_override) if obj.costo_papel_override is not None else None
+    if paper is None:
+        return None
+    total = paper
+    if obj.corte_inicial_active:
+        total += float(obj.corte_inicial_precio or 0)
+    if obj.corte_final_active:
+        total += float(obj.corte_final_precio or 0)
+    for proc in obj.procesos.all():
+        if proc.active:
+            total += float(proc.costo or 0)
+    return total
 
-    def get_progreso_unidades(self, obj):
-        if not obj.cantidad:
-            return 0
-        procs = self._active_procs(obj)
-        if not procs:
-            return 0
-        max_completadas = max((p.unidades_completadas for p in procs), default=0)
-        return round(min(max_completadas / obj.cantidad * 100, 100))
+
+def _orden_valor_unitario_efectivo(obj):
+    if obj.valor_unitario_override is not None:
+        return float(obj.valor_unitario_override)
+    total = _orden_total_costos(obj)
+    if total is not None and obj.cantidad:
+        margen = float(obj.margen or 80)
+        return round(total / obj.cantidad * (1 + margen / 100))
+    return None
+
+
+def _orden_valor_total_efectivo(obj):
+    if obj.valor_total_override is not None:
+        return float(obj.valor_total_override)
+    vu = _orden_valor_unitario_efectivo(obj)
+    if vu is not None and obj.cantidad:
+        return vu * obj.cantidad
+    return None
 
 
 class OrdenSerializer(serializers.ModelSerializer):
-    procesos          = OpProcesoSerializer(many=True, required=False)
-    cliente_nombre    = serializers.CharField(source="cliente.nombre", read_only=True)
+    procesos = OpProcesoSerializer(many=True, required=False)
+    cliente_nombre = serializers.CharField(source="cliente.nombre", read_only=True)
+    cliente_email = serializers.EmailField(source="cliente.email", read_only=True)
+    cliente_telefono = serializers.CharField(source="cliente.telefono", read_only=True, default='')
+    cliente_nit = serializers.CharField(source="cliente.nit", read_only=True, default='')
     cotizacion_numero = serializers.CharField(source="cotizacion.numero", read_only=True, default="")
-    saldo             = serializers.SerializerMethodField()
-    progreso_procesos = serializers.SerializerMethodField()
-    progreso_unidades = serializers.SerializerMethodField()
+    valor_unitario_efectivo = serializers.SerializerMethodField()
+    valor_total_efectivo = serializers.SerializerMethodField()
+    saldo = serializers.SerializerMethodField()
 
     class Meta:
         model = OrdenProduccion
         fields = [
             "id", "numero", "fecha",
-            "cliente", "cliente_nombre",
             "cotizacion", "cotizacion_numero",
-            "referencia", "descripcion", "estado",
-            "tipo_cliente_op", "condicion_cobro_terciario",
-            "cantidad", "valor_unitario", "cantidad_pliegos", "papel_referencia",
-            "corte_inicial", "corte_final", "medida_producto", "cantidad_impresion",
-            "total_costos", "valor_total", "subtotal", "abono", "saldo",
-            "condicion_pago", "observaciones",
+            "cliente", "cliente_nombre", "cliente_email", "cliente_telefono", "cliente_nit",
+            "referencia", "cantidad", "sobrante", "tipo_cliente",
+            "molde_ancho", "molde_alto",
+            "pliego_tipo", "pliego_w", "pliego_h",
+            "papel", "precio_pliego", "costo_papel_override",
+            "corte_inicial_active", "corte_inicial_precio",
+            "corte_final_active", "corte_final_precio",
+            "valor_unitario_override", "valor_total_override",
+            "total_costos_override", "subtotal_override",
+            "margen", "abono",
+            "condicion_pago", "condicion_custom", "tipo_facturacion", "observaciones",
             "creado", "modificado",
             "procesos",
-            "progreso_procesos", "progreso_unidades",
+            "valor_unitario_efectivo", "valor_total_efectivo", "saldo",
         ]
-        read_only_fields = ["id", "numero", "creado", "modificado"]
+        read_only_fields = ["id", "numero", "cotizacion", "creado", "modificado"]
+
+    def get_valor_unitario_efectivo(self, obj):
+        return _orden_valor_unitario_efectivo(obj)
+
+    def get_valor_total_efectivo(self, obj):
+        return _orden_valor_total_efectivo(obj)
 
     def get_saldo(self, obj):
-        return float(obj.valor_total) - float(obj.abono)
-
-    def _active_procs(self, obj):
-        return [p for p in obj.procesos.all() if p.active]
-
-    def get_progreso_procesos(self, obj):
-        procs = self._active_procs(obj)
-        if not procs:
-            return 0
-        completados = sum(1 for p in procs if p.estado == "completado")
-        return round(completados / len(procs) * 100)
-
-    def get_progreso_unidades(self, obj):
-        if not obj.cantidad:
-            return 0
-        procs = self._active_procs(obj)
-        if not procs:
-            return 0
-        max_completadas = max((p.unidades_completadas for p in procs), default=0)
-        return round(min(max_completadas / obj.cantidad * 100, 100))
+        total = _orden_valor_total_efectivo(obj)
+        if total is None:
+            return None
+        return total - float(obj.abono or 0)
 
     def create(self, validated_data):
         procesos_data = validated_data.pop("procesos", [])
@@ -293,6 +308,10 @@ class OrdenSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         procesos_data = validated_data.pop("procesos", None)
+        if instance.cotizacion_id is not None:
+            # OP desde COT: solo liquidación editable
+            validated_data = {k: v for k, v in validated_data.items() if k in OP_LOCKED_WHITELIST}
+            procesos_data = None
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
