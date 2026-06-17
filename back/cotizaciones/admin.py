@@ -1,12 +1,16 @@
 from django.contrib import admin
-from .models import Cliente, Papel, Cotizacion, CotizacionProceso, OrdenProduccion, OpProceso
+from .models import (
+    Cliente, Papel, Cotizacion, CotizacionProceso, OrdenProduccion, OpProceso,
+    PrecioTroquel, TroquelModelo, FormatoCuchillas, Remision, RemisionItem,
+)
 
 
 @admin.register(Cliente)
 class ClienteAdmin(admin.ModelAdmin):
-    list_display = ["nombre", "tipo", "creado"]
+    list_display = ["nombre", "tipo", "ciudad", "creado"]
     search_fields = ["nombre"]
     list_filter = ["tipo"]
+    fields = ["nombre", "email", "telefono", "nit", "direccion", "ciudad", "tipo"]
 
 
 @admin.register(Papel)
@@ -58,3 +62,38 @@ class OrdenProduccionAdmin(admin.ModelAdmin):
         ("Condiciones", {"fields": ["condicion_pago", "condicion_custom", "tipo_facturacion", "observaciones"]}),
         ("Auditoría", {"fields": ["creado", "modificado"], "classes": ["collapse"]}),
     ]
+
+
+@admin.register(PrecioTroquel)
+class PrecioTroquelAdmin(admin.ModelAdmin):
+    list_display = ["tipo", "precio_unitario", "modificado"]
+    list_editable = ["precio_unitario"]
+
+
+@admin.register(TroquelModelo)
+class TroquelModeloAdmin(admin.ModelAdmin):
+    list_display = ["troquel_numero", "orden", "material", "creado"]
+    search_fields = ["troquel_numero", "orden__numero"]
+    readonly_fields = ["creado", "modificado"]
+
+
+@admin.register(FormatoCuchillas)
+class FormatoCuchillasAdmin(admin.ModelAdmin):
+    list_display = ["orden", "operador", "caucho_cm", "fecha_hora"]
+    search_fields = ["orden__numero"]
+    readonly_fields = ["fecha_hora"]
+
+
+class RemisionItemInline(admin.TabularInline):
+    model = RemisionItem
+    extra = 0
+    fields = ["orden", "descripcion", "cantidad", "valor_total"]
+
+
+@admin.register(Remision)
+class RemisionAdmin(admin.ModelAdmin):
+    list_display = ["numero", "cliente", "orden", "estado", "fecha", "creado"]
+    list_filter = ["estado"]
+    search_fields = ["numero", "cliente__nombre", "orden__numero"]
+    readonly_fields = ["numero", "enviada_en", "liquidada_en", "creado", "modificado"]
+    inlines = [RemisionItemInline]

@@ -4,6 +4,7 @@ import { Icon } from '../components/Icons'
 import { fmtCOP, fmtNum, CONDICIONES_PAGO_OP, TIPOS_FACTURACION, Section } from '../components/core'
 import { SectionGenerales, SectionPapel, SectionProcesos, SectionCondicionesOP } from '../components/sections'
 import LiquidationPanel from '../components/LiquidationPanel'
+import { ModeloTroquelGestion } from '../components/Troquel'
 import {
   getOrden, getPapeles, createOrden, updateOrden,
   getNextNumeroOrden, createCliente, updateCliente,
@@ -237,9 +238,9 @@ export default function OrdenEdit() {
           <button
             className="btn"
             style={{ padding: '2px 8px', fontSize: 12, gap: 4 }}
-            onClick={() => navigate('/ordenes')}
+            onClick={() => (window.history.length > 1 ? navigate(-1) : navigate('/ordenes'))}
           >
-            <Icon.ArrowLeft /> Órdenes
+            <Icon.ArrowLeft /> Volver
           </button>
           <span className="div">/</span>
           <div className="mod mono">{d.numero}</div>
@@ -284,6 +285,12 @@ export default function OrdenEdit() {
               <Section num="2" title="Condiciones" desc="Pactadas en la cotización" open={true} locked={true}>
                 <SectionCondicionesOP d={d} set={set} readOnly={true} />
               </Section>
+              <Section num="3" title="Programación" desc="Fecha de entrega para ordenar la producción" open={true}>
+                <div className="field" style={{ maxWidth: 220, padding: '4px 0' }}>
+                  <label className="field-label">Fecha de entrega <span className="editable-flag" title="Editable por admin"><Icon.Pencil /></span></label>
+                  <input className="input admin-editable mono" type="date" value={d.fechaEntrega || ''} onChange={e => set({ fechaEntrega: e.target.value })} />
+                </div>
+              </Section>
             </>
           ) : (
             <>
@@ -296,7 +303,7 @@ export default function OrdenEdit() {
                   <span>· Cantidad:</span> <span className="v mono">{fmtNum(d.cantidad)}</span>
                 </>}
               >
-                <SectionGenerales d={d} set={set} showEstado={false} numeroLabel="N° OP" />
+                <SectionGenerales d={d} set={set} showEstado={false} numeroLabel="N° OP" showFechaEntrega={true} />
               </Section>
 
               <Section
@@ -351,6 +358,23 @@ export default function OrdenEdit() {
                 <SectionCondicionesOP d={d} set={set} />
               </Section>
             </>
+          )}
+
+          {/* Modelo del troquel — preguntar al hacer OP con cliente tercerizado */}
+          {isAdmin && d.tipoCliente === 'terciario' && (
+            <Section
+              num="6" title="Modelo del troquel"
+              desc="Cliente tercerizado: ¿tienes el modelo del troquel para esta OP? Súbelo y queda asignado."
+              open={true} locked={true}
+            >
+              {d.id ? (
+                <ModeloTroquelGestion ordenId={d.id} />
+              ) : (
+                <div style={{ padding: 16, fontSize: 13, color: 'var(--ink-3)' }}>
+                  Guarda la orden primero para poder subir y asignar el modelo del troquel.
+                </div>
+              )}
+            </Section>
           )}
         </div>
 

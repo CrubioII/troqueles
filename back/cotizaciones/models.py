@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 
 
@@ -8,6 +9,8 @@ class Cliente(models.Model):
     email = models.EmailField(blank=True, default='')
     telefono = models.CharField(max_length=30, blank=True, default='')
     nit = models.CharField(max_length=30, blank=True, default='')
+    direccion = models.CharField(max_length=300, blank=True, default='')
+    ciudad = models.CharField(max_length=120, blank=True, default='')
     tipo = models.CharField(max_length=20, choices=TIPO_CHOICES, default="final")
     creado = models.DateTimeField(auto_now_add=True)
 
@@ -197,6 +200,7 @@ class OrdenProduccion(models.Model):
 
     numero = models.CharField(max_length=20, unique=True, blank=True)
     fecha = models.DateField()
+    fecha_entrega = models.DateField(null=True, blank=True)
     cotizacion = models.ForeignKey(
         Cotizacion, on_delete=models.SET_NULL, null=True, blank=True, related_name="ordenes"
     )
@@ -262,6 +266,8 @@ class OpProceso(models.Model):
     costo = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     costo_override = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     extras = models.JSONField(default=dict, blank=True)
+    completado = models.BooleanField(default=False)
+    completado_en = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         unique_together = ("orden", "proceso_id")
@@ -269,4 +275,188 @@ class OpProceso(models.Model):
 
     def __str__(self):
         return f"{self.orden.numero} · {self.proceso_id}"
+
+
+class RegistroMaquina(models.Model):
+    """Registro de ejecución en una máquina (troquel, guillotina).
+
+    Operador registra descripción y costo; fecha_hora y operador se
+    estampan server-side.
+    """
+
+    MAQUINA_CHOICES = [
+        ("troquel", "Troquel"),
+        ("guillotina", "Guillotina"),
+    ]
+
+    orden = models.ForeignKey(
+        OrdenProduccion, on_delete=models.CASCADE, related_name="registros_maquina",
+        null=True, blank=True,
+    )
+    maquina = models.CharField(max_length=30, choices=MAQUINA_CHOICES)
+    descripcion = models.CharField(max_length=300)
+    costo = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    fecha_hora = models.DateTimeField(auto_now_add=True)
+    operador = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="registros_maquina",
+    )
+
+    class Meta:
+        ordering = ["-fecha_hora"]
+
+    def __str__(self):
+        return f"{self.orden.numero} · {self.maquina} · {self.fecha_hora:%Y-%m-%d %H:%M}"
+
+
+class PrecioTroquel(models.Model):
+    """Precio unitario por tipo de cobro de troquel (COP por cm lineal).
+
+    Gestionado por el Admin. Defaults sembrados en migración.
+    """
+
+    TIPO_CHOICES = [
+        ("corte", "Corte"),
+        ("score", "Score"),
+        ("hendido", "C. Hendido"),
+        ("caucho", "Caucho"),
+    ]
+
+    tipo = models.CharField(max_length=20, choices=TIPO_CHOICES, unique=True)
+    precio_unitario = models.DecimalField(max_digits=12, decimal_places=4, default=0, help_text="COP por cm")
+    modificado = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.get_tipo_display()}: {self.precio_unitario}"
+
+
+class TroquelModelo(models.Model):
+    """Modelo del troquel asociado a una OP. Cargado por el Admin.
+
+    Incluye archivo (diagrama recibido por email), datos técnicos visibles
+    al Operador (vista sanitizada) y los CM lineales por tipo de cobro que
+    alimentan el cálculo de costos (solo Admin).
+    """
+
+    orden = models.OneToOneField(
+        OrdenProduccion, on_delete=models.CASCADE, related_name="troquel_modelo",
+        null=True, blank=True,
+    )
+    archivo = models.FileField(upload_to="troquel_modelos/", null=True, blank=True)
+    # Datos técnicos (visibles al Operador)
+    troquel_numero = models.CharField(max_length=50, blank=True, default="")
+    pinza = models.CharField(max_length=100, blank=True, default="")
+    madera = models.CharField(max_length=100, blank=True, default="")
+    cuchilla_puntos = models.CharField(max_length=100, blank=True, default="")
+    material = models.CharField(max_length=100, blank=True, default="")
+    espejo = models.BooleanField(default=False)  # "NO hacer espejo" cuando False
+    # Anotaciones técnicas (único cuadro libre, visible al Operador)
+    instrucciones = models.TextField(blank=True, default="")
+    # CM lineales impresos en el modelo (alimentan cálculo, solo Admin)
+    corte_cm = models.DecimalField(max_digits=12, decimal_places=3, default=0)
+    score_cm = models.DecimalField(max_digits=12, decimal_places=3, default=0)
+    hendido_cm = models.DecimalField(max_digits=12, decimal_places=3, default=0)
+    creado = models.DateTimeField(auto_now_add=True)
+    modificado = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        ref = self.orden.numero if self.orden else "sin OP"
+        return f"Modelo troquel {self.troquel_numero or ''} · {ref}".strip()
+
+
+class FormatoCuchillas(models.Model):
+    """Captura operativa del Operador sobre una OP (formato de cuchillas + tiempos).
+
+    Reemplaza el RegistroMaquina simple para troquel. Varios registros por OP,
+    cada uno con fecha/hora y operador estampados server-side (trazabilidad).
+    """
+
+    orden = models.ForeignKey(
+        OrdenProduccion, on_delete=models.CASCADE, related_name="formatos_cuchillas"
+    )
+    cuchilla_cm = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    grafa_cm = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    dos_puntos = models.BooleanField(default=False)
+    tres_puntos = models.BooleanField(default=False)
+    perfo = models.BooleanField(default=False)
+    ch = models.CharField(max_length=100, blank=True, default="")
+    sac = models.CharField(max_length=100, blank=True, default="")
+    gan = models.CharField(max_length=100, blank=True, default="")
+    caucho_cm = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    desperdicio = models.CharField(max_length=200, blank=True, default="")
+    # Tiempos por fase en minutos enteros (analizable: promedios, sumas, gráficos)
+    tiempo_encalado_min = models.PositiveIntegerField(default=0)
+    tiempo_encuchillado_min = models.PositiveIntegerField(default=0)
+    tiempo_encauchado_min = models.PositiveIntegerField(default=0)
+    operador = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="formatos_cuchillas",
+    )
+    fecha_hora = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-fecha_hora"]
+
+    def __str__(self):
+        return f"{self.orden.numero} · cuchillas · {self.fecha_hora:%Y-%m-%d %H:%M}"
+
+
+class Remision(models.Model):
+    """Comprobante de entrega y cobro al cliente, generado al completar una OP.
+
+    Se crea automáticamente cuando la OP llega al 100% (estado=pendiente).
+    El dueño la liquida (edita ítems/valores) y la envía por correo a contaduría
+    y al cliente; al liquidarse pasa al historial (estado=liquidada).
+    Espeja la estructura de DocumentoCliente.
+    """
+
+    ESTADO_CHOICES = [
+        ("pendiente", "Pendiente"),
+        ("liquidada", "Liquidada"),
+    ]
+
+    numero = models.CharField(max_length=20, unique=True, blank=True)
+    fecha = models.DateField()
+    orden = models.OneToOneField(
+        OrdenProduccion, on_delete=models.PROTECT, related_name="remision"
+    )
+    cliente = models.ForeignKey(Cliente, on_delete=models.PROTECT, related_name="remisiones")
+    # Snapshot editable de datos del cliente impresos en el comprobante
+    direccion = models.CharField(max_length=300, blank=True, default="")
+    ciudad = models.CharField(max_length=120, blank=True, default="")
+    observaciones = models.TextField(blank=True, default="")
+    estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default="pendiente")
+    enviada_en = models.DateTimeField(null=True, blank=True)
+    liquidada_en = models.DateTimeField(null=True, blank=True)
+    creado = models.DateTimeField(auto_now_add=True)
+    modificado = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-creado"]
+
+    def save(self, *args, **kwargs):
+        is_new = not self.pk
+        super().save(*args, **kwargs)
+        if is_new and not self.numero:
+            self.numero = f"REM-{self.pk:04d}"
+            Remision.objects.filter(pk=self.pk).update(numero=self.numero)
+
+    def __str__(self):
+        return f"{self.numero} · {self.cliente}"
+
+
+class RemisionItem(models.Model):
+    """Ítem de línea de una remisión: Descripción · Cantidad · Vr. Total."""
+
+    remision = models.ForeignKey(Remision, on_delete=models.CASCADE, related_name="items")
+    descripcion = models.TextField(blank=True, default="")
+    cantidad = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    valor_total = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    orden = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        ordering = ["orden", "id"]
+
+    def __str__(self):
+        return f"{self.remision.numero} · {self.descripcion[:40]}"
 

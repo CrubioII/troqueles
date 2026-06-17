@@ -8,6 +8,12 @@ import CotizacionEdit from './pages/CotizacionEdit'
 import DocumentoClienteEdit from './pages/DocumentoClienteEdit'
 import OrdenList from './pages/OrdenList'
 import OrdenEdit from './pages/OrdenEdit'
+import Remisiones from './pages/Remisiones'
+import RemisionEdit from './pages/RemisionEdit'
+import ProduccionHub from './pages/ProduccionHub'
+import Troqueles from './pages/Troqueles'
+import Guillotina from './pages/Guillotina'
+import ProduccionGeneral from './pages/ProduccionGeneral'
 import Login from './pages/Login'
 
 function ProtectedRoute({ children }) {
@@ -17,17 +23,32 @@ function ProtectedRoute({ children }) {
   return children
 }
 
+// Solo Admin. El Operador queda confinado a /produccion/*.
+function AdminRoute({ children }) {
+  const { user, ready } = useAuth()
+  if (!ready) return null
+  if (!user) return <Navigate to="/login" replace />
+  if (user.role !== 'admin') return <Navigate to="/produccion" replace />
+  return children
+}
+
 function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/cotizaciones" element={<CotizacionList />} />
-        <Route path="/cotizaciones/:id" element={<CotizacionEdit />} />
-        <Route path="/documentos/:id" element={<DocumentoClienteEdit />} />
-        <Route path="/ordenes" element={<OrdenList />} />
-        <Route path="/ordenes/:id" element={<OrdenEdit />} />
+        <Route path="/" element={<AdminRoute><Dashboard /></AdminRoute>} />
+        <Route path="/cotizaciones" element={<AdminRoute><CotizacionList /></AdminRoute>} />
+        <Route path="/cotizaciones/:id" element={<AdminRoute><CotizacionEdit /></AdminRoute>} />
+        <Route path="/documentos/:id" element={<AdminRoute><DocumentoClienteEdit /></AdminRoute>} />
+        <Route path="/ordenes" element={<AdminRoute><OrdenList /></AdminRoute>} />
+        <Route path="/ordenes/:id" element={<AdminRoute><OrdenEdit /></AdminRoute>} />
+        <Route path="/remisiones" element={<AdminRoute><Remisiones /></AdminRoute>} />
+        <Route path="/remisiones/:id" element={<AdminRoute><RemisionEdit /></AdminRoute>} />
+        <Route path="/produccion" element={<ProduccionHub />} />
+        <Route path="/produccion/troqueles" element={<Troqueles />} />
+        <Route path="/produccion/guillotina" element={<Guillotina />} />
+        <Route path="/produccion/general" element={<ProduccionGeneral />} />
       </Route>
     </Routes>
   )

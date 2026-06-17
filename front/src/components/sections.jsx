@@ -11,7 +11,7 @@ import {
 // =========================================================
 // Section 1 — Datos Generales
 // =========================================================
-export function SectionGenerales({ d, set, showEstado = true, numeroLabel = 'N° cotización' }) {
+export function SectionGenerales({ d, set, showEstado = true, numeroLabel = 'N° cotización', showFechaEntrega = false }) {
   const [suggestions, setSuggestions] = useState([])
   const [showSugg, setShowSugg] = useState(false)
   const searchRef = useRef(null)
@@ -45,6 +45,12 @@ export function SectionGenerales({ d, set, showEstado = true, numeroLabel = 'N°
         <label className="field-label">Fecha <span className="editable-flag" title="Editable por admin"><Icon.Pencil /></span></label>
         <input className="input admin-editable mono" value={d.fecha} onChange={e => set({ fecha: e.target.value })} />
       </div>
+      {showFechaEntrega && (
+        <div className="field">
+          <label className="field-label">Fecha de entrega <span className="editable-flag" title="Editable por admin"><Icon.Pencil /></span></label>
+          <input className="input admin-editable mono" type="date" value={d.fechaEntrega || ''} onChange={e => set({ fechaEntrega: e.target.value })} />
+        </div>
+      )}
       <div className="field col-span-2" style={{ position: 'relative' }}>
         <label className="field-label">
           Cliente <span className="req">*</span>

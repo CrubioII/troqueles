@@ -4,6 +4,7 @@ import { Icon } from '../components/Icons'
 import { fmtNum, STATUS_DEFS } from '../components/core'
 import { getCotizaciones, deleteCotizacion } from '../api'
 import { useAuth } from '../context/AuthContext'
+import { usePolling } from '../lib/usePolling'
 
 const TAB_DEFS = [
   { id: 'cotizaciones', label: 'Cotizaciones' },
@@ -54,8 +55,10 @@ export default function CotizacionList() {
   const [count, setCount] = useState(0)
   const [confirmDelete, setConfirmDelete] = useState(null)
   const debounceRef = useRef(null)
+  const paramsRef = useRef('')
 
   const load = (params = '', initial = false) => {
+    paramsRef.current = params
     if (initial) setLoading(true)
     else setRefreshing(true)
     setError(null)
@@ -80,6 +83,8 @@ export default function CotizacionList() {
   useEffect(() => {
     load('', true)
   }, [])
+
+  usePolling(() => load(paramsRef.current), { enabled: confirmDelete == null })
 
   const buildParams = (s, st) => {
     const parts = []

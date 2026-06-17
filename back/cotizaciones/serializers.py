@@ -1,11 +1,11 @@
 from rest_framework import serializers
-from .models import Cliente, Papel, Cotizacion, CotizacionProceso, DocumentoCliente, DocumentoClienteItem, OrdenProduccion, OpProceso
+from .models import Cliente, Papel, Cotizacion, CotizacionProceso, DocumentoCliente, DocumentoClienteItem, OrdenProduccion, OpProceso, RegistroMaquina, PrecioTroquel, TroquelModelo, FormatoCuchillas, Remision, RemisionItem
 
 
 class ClienteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Cliente
-        fields = ["id", "nombre", "email", "telefono", "nit", "tipo", "creado"]
+        fields = ["id", "nombre", "email", "telefono", "nit", "direccion", "ciudad", "tipo", "creado"]
         read_only_fields = ["id", "creado"]
 
 
@@ -183,14 +183,14 @@ class DocumentoClienteListSerializer(serializers.ModelSerializer):
 
 # Campos editables en una OP creada desde cotización (todo lo demás quedó
 # pactado en la COT y se ignora server-side).
-OP_LOCKED_WHITELIST = {"abono", "observaciones", "fecha"}
+OP_LOCKED_WHITELIST = {"abono", "observaciones", "fecha", "fecha_entrega"}
 
 
 class OpProcesoSerializer(serializers.ModelSerializer):
     class Meta:
         model = OpProceso
-        fields = ["id", "proceso_id", "active", "costo", "costo_override", "extras"]
-        read_only_fields = ["id"]
+        fields = ["id", "proceso_id", "active", "costo", "costo_override", "extras", "completado", "completado_en"]
+        read_only_fields = ["id", "completado", "completado_en"]
 
 
 class OrdenListSerializer(serializers.ModelSerializer):
@@ -198,13 +198,15 @@ class OrdenListSerializer(serializers.ModelSerializer):
     cotizacion_numero = serializers.CharField(source="cotizacion.numero", read_only=True, default="")
     valor_total_efectivo = serializers.SerializerMethodField()
     saldo = serializers.SerializerMethodField()
+    progreso = serializers.SerializerMethodField()
 
     class Meta:
         model = OrdenProduccion
         fields = [
-            "id", "numero", "fecha", "cliente_nombre", "referencia",
+            "id", "numero", "fecha", "fecha_entrega", "cliente_nombre", "referencia",
             "cantidad", "valor_total_efectivo", "abono", "saldo",
             "cotizacion", "cotizacion_numero", "creado", "modificado",
+            "progreso",
         ]
 
     def get_valor_total_efectivo(self, obj):
@@ -215,6 +217,22 @@ class OrdenListSerializer(serializers.ModelSerializer):
         if total is None:
             return None
         return total - float(obj.abono or 0)
+
+    def get_progreso(self, obj):
+        return _orden_progreso(obj)
+
+
+def _orden_progreso(obj):
+    """Progreso de la OP = % de procesos activos marcados como completado."""
+    activos = [p for p in obj.procesos.all() if p.active]
+    if not activos:
+        return None
+    completados = sum(1 for p in activos if p.completado)
+    return {
+        "total": len(activos),
+        "completados": completados,
+        "porcentaje": round(completados / len(activos) * 100),
+    }
 
 
 def _orden_total_costos(obj):
@@ -264,11 +282,12 @@ class OrdenSerializer(serializers.ModelSerializer):
     valor_unitario_efectivo = serializers.SerializerMethodField()
     valor_total_efectivo = serializers.SerializerMethodField()
     saldo = serializers.SerializerMethodField()
+    progreso = serializers.SerializerMethodField()
 
     class Meta:
         model = OrdenProduccion
         fields = [
-            "id", "numero", "fecha",
+            "id", "numero", "fecha", "fecha_entrega",
             "cotizacion", "cotizacion_numero",
             "cliente", "cliente_nombre", "cliente_email", "cliente_telefono", "cliente_nit",
             "referencia", "cantidad", "sobrante", "tipo_cliente",
@@ -283,7 +302,7 @@ class OrdenSerializer(serializers.ModelSerializer):
             "condicion_pago", "condicion_custom", "tipo_facturacion", "observaciones",
             "creado", "modificado",
             "procesos",
-            "valor_unitario_efectivo", "valor_total_efectivo", "saldo",
+            "valor_unitario_efectivo", "valor_total_efectivo", "saldo", "progreso",
         ]
         read_only_fields = ["id", "numero", "cotizacion", "creado", "modificado"]
 
@@ -298,6 +317,9 @@ class OrdenSerializer(serializers.ModelSerializer):
         if total is None:
             return None
         return total - float(obj.abono or 0)
+
+    def get_progreso(self, obj):
+        return _orden_progreso(obj)
 
     def create(self, validated_data):
         procesos_data = validated_data.pop("procesos", [])
@@ -316,7 +338,163 @@ class OrdenSerializer(serializers.ModelSerializer):
             setattr(instance, attr, value)
         instance.save()
         if procesos_data is not None:
+            old_state = {p.proceso_id: (p.completado, p.completado_en) for p in instance.procesos.all()}
             instance.procesos.all().delete()
             for p in procesos_data:
-                OpProceso.objects.create(orden=instance, **p)
+                completado, completado_en = old_state.get(p["proceso_id"], (False, None))
+                OpProceso.objects.create(orden=instance, completado=completado, completado_en=completado_en, **p)
         return instance
+
+
+class RegistroMaquinaSerializer(serializers.ModelSerializer):
+    orden_numero = serializers.CharField(source="orden.numero", read_only=True, default="")
+    orden_cliente = serializers.CharField(source="orden.cliente.nombre", read_only=True, default="")
+    orden_referencia = serializers.CharField(source="orden.referencia", read_only=True, default="")
+    operador_username = serializers.CharField(source="operador.username", read_only=True, default="")
+
+    class Meta:
+        model = RegistroMaquina
+        fields = [
+            "id", "orden", "orden_numero", "orden_cliente", "orden_referencia",
+            "maquina", "descripcion", "costo", "fecha_hora",
+            "operador", "operador_username",
+        ]
+        read_only_fields = ["id", "fecha_hora", "operador"]
+
+
+# ─────────────── Troqueles ───────────────
+
+
+class PrecioTroquelSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PrecioTroquel
+        fields = ["id", "tipo", "precio_unitario", "modificado"]
+        read_only_fields = ["id", "tipo", "modificado"]
+
+
+class TroquelModeloSerializer(serializers.ModelSerializer):
+    """Vista completa del modelo (solo Admin): incluye los CM de cobro."""
+
+    orden_numero = serializers.CharField(source="orden.numero", read_only=True, default="")
+
+    class Meta:
+        model = TroquelModelo
+        fields = [
+            "id", "orden", "orden_numero", "archivo",
+            "troquel_numero", "pinza", "madera", "cuchilla_puntos", "material",
+            "espejo", "instrucciones",
+            "corte_cm", "score_cm", "hendido_cm",
+            "creado", "modificado",
+        ]
+        read_only_fields = ["id", "creado", "modificado"]
+
+
+class TroquelModeloOperadorSerializer(serializers.ModelSerializer):
+    """Vista sanitizada del modelo para el Operador: datos técnicos sin CM de cobro."""
+
+    class Meta:
+        model = TroquelModelo
+        fields = [
+            "id", "archivo",
+            "troquel_numero", "pinza", "madera", "cuchilla_puntos", "material",
+            "espejo", "instrucciones",
+        ]
+
+
+class FormatoCuchillasSerializer(serializers.ModelSerializer):
+    orden_numero = serializers.CharField(source="orden.numero", read_only=True, default="")
+    operador_username = serializers.CharField(source="operador.username", read_only=True, default="")
+
+    class Meta:
+        model = FormatoCuchillas
+        fields = [
+            "id", "orden", "orden_numero",
+            "cuchilla_cm", "grafa_cm",
+            "dos_puntos", "tres_puntos", "perfo",
+            "ch", "sac", "gan",
+            "caucho_cm", "desperdicio",
+            "tiempo_encalado_min", "tiempo_encuchillado_min", "tiempo_encauchado_min",
+            "operador", "operador_username", "fecha_hora",
+        ]
+        read_only_fields = ["id", "operador", "fecha_hora"]
+
+
+class OrdenOperadorSerializer(serializers.ModelSerializer):
+    """Vista sanitizada de la OP para el Operador.
+
+    Sin cliente ni valores monetarios. Solo lo necesario para producir:
+    referencia, cantidad, procesos activos y el modelo del troquel sanitizado.
+    """
+
+    procesos = serializers.SerializerMethodField()
+    troquel_modelo = serializers.SerializerMethodField()
+
+    class Meta:
+        model = OrdenProduccion
+        fields = ["id", "numero", "fecha_entrega", "referencia", "cantidad", "procesos", "troquel_modelo"]
+
+    def get_procesos(self, obj):
+        return [
+            {"proceso_id": p.proceso_id, "active": p.active, "completado": p.completado}
+            for p in obj.procesos.all() if p.active
+        ]
+
+    def get_troquel_modelo(self, obj):
+        modelo = getattr(obj, "troquel_modelo", None)
+        if modelo is None:
+            return None
+        return TroquelModeloOperadorSerializer(modelo, context=self.context).data
+
+
+# ─────────────── Remisiones ───────────────
+
+
+class RemisionItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RemisionItem
+        fields = ["id", "descripcion", "cantidad", "valor_total", "orden"]
+        read_only_fields = ["id"]
+
+
+class RemisionSerializer(serializers.ModelSerializer):
+    items = RemisionItemSerializer(many=True, required=False)
+    cliente_nombre = serializers.CharField(source="cliente.nombre", read_only=True)
+    cliente_email = serializers.EmailField(source="cliente.email", read_only=True)
+    cliente_telefono = serializers.CharField(source="cliente.telefono", read_only=True, default='')
+    cliente_nit = serializers.CharField(source="cliente.nit", read_only=True, default='')
+    orden_numero = serializers.CharField(source="orden.numero", read_only=True, default="")
+
+    class Meta:
+        model = Remision
+        fields = [
+            "id", "numero", "fecha",
+            "orden", "orden_numero",
+            "cliente", "cliente_nombre", "cliente_email", "cliente_telefono", "cliente_nit",
+            "direccion", "ciudad", "observaciones",
+            "estado", "enviada_en", "liquidada_en", "creado", "modificado",
+            "items",
+        ]
+        read_only_fields = ["id", "numero", "orden", "cliente", "estado",
+                            "enviada_en", "liquidada_en", "creado", "modificado"]
+
+    def update(self, instance, validated_data):
+        items_data = validated_data.pop("items", None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        if items_data is not None:
+            instance.items.all().delete()
+            for idx, item in enumerate(items_data):
+                item.setdefault("orden", idx)
+                RemisionItem.objects.create(remision=instance, **item)
+        return instance
+
+
+class RemisionListSerializer(serializers.ModelSerializer):
+    cliente_nombre = serializers.CharField(source="cliente.nombre", read_only=True)
+    orden_numero = serializers.CharField(source="orden.numero", read_only=True, default="")
+
+    class Meta:
+        model = Remision
+        fields = ["id", "numero", "fecha", "cliente_nombre", "orden_numero",
+                  "estado", "creado", "modificado"]

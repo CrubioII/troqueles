@@ -4,6 +4,7 @@ import { Icon } from '../components/Icons'
 import { fmtCOP, fmtNum } from '../components/core'
 import { getOrdenes, deleteOrden } from '../api'
 import { useAuth } from '../context/AuthContext'
+import { usePolling } from '../lib/usePolling'
 
 function Skeleton() {
   return (
@@ -36,8 +37,10 @@ export default function OrdenList() {
   const [count, setCount] = useState(0)
   const [confirmDelete, setConfirmDelete] = useState(null)
   const debounceRef = useRef(null)
+  const paramsRef = useRef('')
 
   const load = (params = '', initial = false) => {
+    paramsRef.current = params
     if (initial) setLoading(true)
     else setRefreshing(true)
     setError(null)
@@ -60,6 +63,8 @@ export default function OrdenList() {
   }
 
   useEffect(() => { load('', true) }, [])
+
+  usePolling(() => load(paramsRef.current), { enabled: confirmDelete == null })
 
   const handleSearch = (v) => {
     setSearch(v)

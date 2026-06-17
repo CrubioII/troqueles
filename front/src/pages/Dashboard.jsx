@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { ModuleCard } from '../components/core'
 
 const MODULES = [
   {
@@ -19,11 +20,11 @@ const MODULES = [
     ),
   },
   {
-    key: 'ordenes',
-    label: 'Órdenes de Producción',
-    desc: 'Administra el flujo de producción. Visualiza avances, máquinas y operaciones activas.',
+    key: 'produccion',
+    label: 'Producción',
+    desc: 'Hub de producción: Troqueles, Guillotina y progreso general de las órdenes.',
     action: 'Ver producción',
-    path: '/ordenes',
+    path: '/produccion',
     color: '#2E7D5B',
     soft: '#DCEFE3',
     icon: (
@@ -39,9 +40,9 @@ const MODULES = [
   {
     key: 'remisiones',
     label: 'Remisiones',
-    desc: 'Registra y consulta entregas parciales de producción. Próximamente disponible.',
-    action: 'Próximamente',
-    path: null,
+    desc: 'Liquida las OP completadas, envíalas a contaduría y consulta el historial.',
+    action: 'Ver remisiones',
+    path: '/remisiones',
     color: '#3A5B8C',
     soft: '#DEE6F3',
     icon: (
@@ -111,76 +112,6 @@ export default function Dashboard() {
             onNavigate={() => mod.path && navigate(mod.path)}
           />
         ))}
-      </div>
-    </div>
-  )
-}
-
-function ModuleCard({ mod, onNavigate }) {
-  const disabled = !mod.path
-
-  return (
-    <div
-      style={{
-        background: 'var(--surface)',
-        borderRadius: 10,
-        border: '1px solid var(--line)',
-        borderTop: `3px solid ${mod.color}`,
-        padding: '20px 20px 18px',
-        display: 'flex', flexDirection: 'column', gap: 10,
-        opacity: disabled ? 0.72 : 1,
-        boxShadow: 'var(--shadow-sm)',
-        transition: 'box-shadow 0.15s, transform 0.15s',
-        cursor: disabled ? 'default' : 'pointer',
-      }}
-      onClick={disabled ? undefined : onNavigate}
-      onMouseEnter={e => {
-        if (!disabled) {
-          e.currentTarget.style.boxShadow = 'var(--shadow-md)'
-          e.currentTarget.style.transform = 'translateY(-1px)'
-        }
-      }}
-      onMouseLeave={e => {
-        e.currentTarget.style.boxShadow = 'var(--shadow-sm)'
-        e.currentTarget.style.transform = 'translateY(0)'
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
-        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: mod.color, marginBottom: 3 }}>
-          {mod.label}
-        </div>
-        <div style={{
-          width: 38, height: 38, borderRadius: 8,
-          background: mod.soft, color: mod.color,
-          display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-        }}>
-          {mod.icon}
-        </div>
-      </div>
-
-      <div style={{ fontSize: 12.5, color: 'var(--ink-2)', lineHeight: 1.55, flex: 1 }}>
-        {mod.desc}
-      </div>
-
-      <div>
-        <button
-          onClick={e => { e.stopPropagation(); if (!disabled) onNavigate() }}
-          disabled={disabled}
-          style={{
-            padding: '6px 14px',
-            background: 'transparent',
-            border: `1px solid ${disabled ? 'var(--line)' : mod.color}`,
-            borderRadius: 6,
-            color: disabled ? 'var(--ink-3)' : mod.color,
-            fontSize: 12, fontWeight: 500,
-            cursor: disabled ? 'not-allowed' : 'pointer',
-            transition: 'background 0.12s',
-          }}
-          onMouseEnter={e => { if (!disabled) e.currentTarget.style.background = mod.soft }}
-          onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
-        >
-          {mod.action} →
-        </button>
       </div>
     </div>
   )

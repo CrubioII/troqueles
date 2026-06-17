@@ -42,6 +42,7 @@ export function buildBlankState(kind = 'cot') {
     id: null,
     numero: kind === 'op' ? 'OP-????' : 'COT-????',
     fecha: today,
+    fechaEntrega: '',
     cliente: '',
     clienteId: null,
     clienteEmail: '',
@@ -92,6 +93,7 @@ export function docToState(doc, papelCatalog, kind = 'cot') {
     id: doc.id,
     numero: doc.numero || (kind === 'op' ? 'OP-????' : 'COT-????'),
     fecha: doc.fecha || '',
+    fechaEntrega: doc.fecha_entrega || '',
     cliente: doc.cliente_nombre || '',
     clienteId: doc.cliente || null,
     clienteEmail: doc.cliente_email || '',
@@ -153,6 +155,7 @@ export function stateToDoc(d, procesos, kind = 'cot') {
 
   const base = {
     fecha: d.fecha,
+    fecha_entrega: d.fechaEntrega || null,
     cliente: d.clienteId,
     referencia: d.referencia,
     cantidad: d.cantidad,

@@ -243,3 +243,107 @@ export const pdfOpProduccion = (id, calc, papelReferencia = '') =>
       papel_referencia: papelReferencia,
     }),
   })
+
+export const toggleProcesoCompletado = (opId, procesoId, completado) =>
+  apiFetch(`${BASE}/ordenes/${opId}/procesos/${procesoId}/completado/`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ completado }),
+  }).then(json)
+
+// ─────────────── Remisiones ───────────────
+
+export const getRemisiones = (params = '') =>
+  apiFetch(`${BASE}/remisiones/${params}`).then(json)
+
+export const getRemision = (id) =>
+  apiFetch(`${BASE}/remisiones/${id}/`).then(json)
+
+export const updateRemision = (id, data) =>
+  apiFetch(`${BASE}/remisiones/${id}/`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  }).then(json)
+
+export const liquidarRemision = (id, email, extraEmails = []) =>
+  apiFetch(`${BASE}/remisiones/${id}/liquidar/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, extra_emails: extraEmails }),
+  }).then(json)
+
+export const pdfRemision = (id) =>
+  apiFetch(`${BASE}/remisiones/${id}/pdf/`, {
+    method: 'POST',
+  })
+
+// ─────────────── Registros de máquina (Troqueles / Guillotina) ───────────────
+
+export const getRegistrosMaquina = (params = '') =>
+  apiFetch(`${BASE}/registros-maquina/${params}`).then(json)
+
+export const createRegistroMaquina = (data) =>
+  apiFetch(`${BASE}/registros-maquina/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  }).then(json)
+
+// ─────────────── Troqueles: modelo, formato de cuchillas, precios, costos ───────────────
+
+// OP sanitizada para el Operador (sin cliente ni dinero)
+export const getOrdenProduccion = (id) =>
+  apiFetch(`${BASE}/ordenes/${id}/produccion/`).then(json)
+
+export const buscarOrdenPorNumero = (numero) =>
+  apiFetch(`${BASE}/ordenes/buscar/?numero=${encodeURIComponent(numero)}`).then(json)
+
+// Lista de OPs con proceso pendiente, ordenadas por fecha de entrega asc (Operador)
+export const getOrdenesPendientes = (proceso = 'troquel') =>
+  apiFetch(`${BASE}/ordenes/produccion_pendientes/?proceso=${encodeURIComponent(proceso)}`).then(json)
+
+// Costos de troquel (solo Admin)
+export const getTroquelCostos = (id) =>
+  apiFetch(`${BASE}/ordenes/${id}/troquel_costos/`).then(json)
+
+// Modelo del troquel (Admin)
+export const getTroquelModelo = (ordenId) =>
+  apiFetch(`${BASE}/troquel-modelos/?orden=${ordenId}`).then(json)
+
+// formData: FormData con archivo + campos. Sin Content-Type manual (boundary automático).
+export const saveTroquelModelo = (id, formData) =>
+  apiFetch(`${BASE}/troquel-modelos/${id ? id + '/' : ''}`, {
+    method: id ? 'PATCH' : 'POST',
+    body: formData,
+  }).then(json)
+
+// Formato de cuchillas
+export const getFormatosCuchillas = (ordenId) =>
+  apiFetch(`${BASE}/formatos-cuchillas/?orden=${ordenId}`).then(json)
+
+export const createFormatoCuchillas = (data) =>
+  apiFetch(`${BASE}/formatos-cuchillas/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  }).then(json)
+
+// Editar formato existente — solo Admin (backend exige is_staff)
+export const updateFormatoCuchillas = (id, data) =>
+  apiFetch(`${BASE}/formatos-cuchillas/${id}/`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  }).then(json)
+
+// Precios unitarios (Admin)
+export const getPreciosTroquel = () =>
+  apiFetch(`${BASE}/precios-troquel/`).then(json)
+
+export const updatePrecioTroquel = (id, precio_unitario) =>
+  apiFetch(`${BASE}/precios-troquel/${id}/`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ precio_unitario }),
+  }).then(json)
