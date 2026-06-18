@@ -217,6 +217,20 @@
       </tr>
       {% endfor %}
     </tbody>
+    <tfoot>
+      <tr class="total-row">
+        <td></td>
+        <td class="item-desc">Total entregado</td>
+        <td class="col-cant">{{ total_cantidad }}</td>
+        <td class="col-total"></td>
+      </tr>
+      <tr class="total-row">
+        <td></td>
+        <td class="item-desc">Total</td>
+        <td class="col-cant"></td>
+        <td class="col-total">{{ total_valor }}</td>
+      </tr>
+    </tfoot>
   </table>
 
   {% if rem.observaciones %}

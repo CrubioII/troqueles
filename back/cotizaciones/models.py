@@ -413,6 +413,7 @@ class Remision(models.Model):
     ESTADO_CHOICES = [
         ("pendiente", "Pendiente"),
         ("liquidada", "Liquidada"),
+        ("consolidada", "Consolidada"),
     ]
 
     numero = models.CharField(max_length=20, unique=True, blank=True)
@@ -428,6 +429,12 @@ class Remision(models.Model):
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default="pendiente")
     enviada_en = models.DateTimeField(null=True, blank=True)
     liquidada_en = models.DateTimeField(null=True, blank=True)
+    # Si fue fusionada dentro de otra remisión: estado=consolidada y apunta al destino.
+    consolidada_en = models.DateTimeField(null=True, blank=True)
+    consolidada_en_remision = models.ForeignKey(
+        "self", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="remisiones_consolidadas",
+    )
     creado = models.DateTimeField(auto_now_add=True)
     modificado = models.DateTimeField(auto_now=True)
 

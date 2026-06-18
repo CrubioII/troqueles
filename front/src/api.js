@@ -278,6 +278,18 @@ export const pdfRemision = (id) =>
     method: 'POST',
   })
 
+// Remisiones pendientes del mismo cliente que pueden fusionarse en esta
+export const getRemisionesImportables = (id) =>
+  apiFetch(`${BASE}/remisiones/${id}/importables/`).then(json)
+
+// Fusiona los ítems de las remisiones origen (mismo cliente, pendientes) en esta
+export const importarRemisiones = (id, remisionIds) =>
+  apiFetch(`${BASE}/remisiones/${id}/importar/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ remision_ids: remisionIds }),
+  }).then(json)
+
 // ─────────────── Registros de máquina (Troqueles / Guillotina) ───────────────
 
 export const getRegistrosMaquina = (params = '') =>
@@ -317,6 +329,13 @@ export const saveTroquelModelo = (id, formData) =>
     method: id ? 'PATCH' : 'POST',
     body: formData,
   }).then(json)
+
+// Lee un PDF de modelo de troquel y devuelve los campos detectados (no guarda nada)
+export const extraerPdfTroquel = (file) => {
+  const fd = new FormData()
+  fd.append('archivo', file)
+  return apiFetch(`${BASE}/troquel-modelos/extraer_pdf/`, { method: 'POST', body: fd }).then(json)
+}
 
 // Formato de cuchillas
 export const getFormatosCuchillas = (ordenId) =>

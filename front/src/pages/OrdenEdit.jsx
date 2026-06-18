@@ -360,11 +360,11 @@ export default function OrdenEdit() {
             </>
           )}
 
-          {/* Modelo del troquel — preguntar al hacer OP con cliente tercerizado */}
-          {isAdmin && d.tipoCliente === 'terciario' && (
+          {/* Modelo del troquel — cliente tercerizado, o cliente final con proceso Troquel marcado */}
+          {isAdmin && (d.tipoCliente === 'terciario' || procesos['troquel']?.active) && (
             <Section
               num="6" title="Modelo del troquel"
-              desc="Cliente tercerizado: ¿tienes el modelo del troquel para esta OP? Súbelo y queda asignado."
+              desc="¿Tienes el modelo del troquel para esta OP? Súbelo y queda asignado."
               open={true} locked={true}
             >
               {d.id ? (

@@ -463,6 +463,8 @@ class RemisionSerializer(serializers.ModelSerializer):
     cliente_telefono = serializers.CharField(source="cliente.telefono", read_only=True, default='')
     cliente_nit = serializers.CharField(source="cliente.nit", read_only=True, default='')
     orden_numero = serializers.CharField(source="orden.numero", read_only=True, default="")
+    consolidada_en_numero = serializers.CharField(
+        source="consolidada_en_remision.numero", read_only=True, default="")
 
     class Meta:
         model = Remision
@@ -471,11 +473,15 @@ class RemisionSerializer(serializers.ModelSerializer):
             "orden", "orden_numero",
             "cliente", "cliente_nombre", "cliente_email", "cliente_telefono", "cliente_nit",
             "direccion", "ciudad", "observaciones",
-            "estado", "enviada_en", "liquidada_en", "creado", "modificado",
+            "estado", "enviada_en", "liquidada_en",
+            "consolidada_en", "consolidada_en_remision", "consolidada_en_numero",
+            "creado", "modificado",
             "items",
         ]
         read_only_fields = ["id", "numero", "orden", "cliente", "estado",
-                            "enviada_en", "liquidada_en", "creado", "modificado"]
+                            "enviada_en", "liquidada_en",
+                            "consolidada_en", "consolidada_en_remision", "consolidada_en_numero",
+                            "creado", "modificado"]
 
     def update(self, instance, validated_data):
         items_data = validated_data.pop("items", None)

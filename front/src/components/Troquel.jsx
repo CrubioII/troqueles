@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { fmtCOP, fmtNum, NumField, Checkbox, MoneyInput } from './core'
 import {
-  getTroquelModelo, saveTroquelModelo, getTroquelCostos,
+  getTroquelModelo, saveTroquelModelo, getTroquelCostos, extraerPdfTroquel,
   getFormatosCuchillas, createFormatoCuchillas, updateFormatoCuchillas,
   getPreciosTroquel, updatePrecioTroquel,
 } from '../api'
@@ -19,6 +19,16 @@ function Field({ label, children, full }) {
       <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-3)' }}>{label}</span>
       {children}
     </label>
+  )
+}
+
+function Spinner({ size = 13 }) {
+  return (
+    <span style={{
+      display: 'inline-block', width: size, height: size, flexShrink: 0,
+      border: '2px solid var(--line)', borderTopColor: 'var(--accent)',
+      borderRadius: '50%', animation: 'troquel-spin 0.7s linear infinite',
+    }} />
   )
 }
 
@@ -46,6 +56,8 @@ export function TroquelModeloForm({ ordenId, onSaved, onLoaded }) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
   const [okMsg, setOkMsg] = useState(false)
+  const [pdfMsg, setPdfMsg] = useState(null)
+  const [pdfLoading, setPdfLoading] = useState(false)
 
   const load = () => {
     setLoading(true)
@@ -74,6 +86,41 @@ export function TroquelModeloForm({ ordenId, onSaved, onLoaded }) {
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
+  // Al elegir un PDF, se intenta leer Referencia/Troquel/Pinza/Madera/Cuchilla/Material
+  // y los cm lineales (Corte/Score/Hendido) para autorrellenar el formulario.
+  const handleArchivoChange = (file) => {
+    setArchivo(file)
+    if (!file || file.type !== 'application/pdf') { setPdfMsg(null); setPdfLoading(false); return }
+    setPdfMsg('Leyendo PDF…')
+    setPdfLoading(true)
+    extraerPdfTroquel(file)
+      .then(data => {
+        const campos = [
+          ['Referencia', data.referencia],
+          ['Troquel', data.troquel],
+          ['Pinza', data.pinza],
+          ['Madera', data.madera],
+          ['Cuchilla', data.cuchilla],
+          ['Material', data.material],
+        ].filter(([, v]) => v)
+        const hayCm = data.corte_cm != null || data.score_cm != null || data.hendido_cm != null
+        setForm(f => {
+          const next = { ...f }
+          if (campos.length) {
+            next.instrucciones = campos.map(([k, v]) => `${k}: ${v}`).join('\n')
+              + (data.espejo === false ? '\n(NO Hacer espejo)' : '')
+          }
+          if (data.corte_cm != null) next.corte_cm = data.corte_cm
+          if (data.score_cm != null) next.score_cm = data.score_cm
+          if (data.hendido_cm != null) next.hendido_cm = data.hendido_cm
+          return next
+        })
+        setPdfMsg(campos.length || hayCm ? 'Datos leídos del PDF ✓ — revisa antes de guardar' : 'No se detectaron datos en el PDF, completa manualmente')
+      })
+      .catch(() => setPdfMsg('No se pudo leer el PDF, completa manualmente'))
+      .finally(() => setPdfLoading(false))
+  }
+
   const submit = () => {
     setSaving(true); setError(null); setOkMsg(false)
     const fd = new FormData()
@@ -86,6 +133,8 @@ export function TroquelModeloForm({ ordenId, onSaved, onLoaded }) {
         setModelo(saved)
         setForm({ ...EMPTY_MODELO, ...saved })
         setArchivo(null)
+        setPdfMsg(null)
+        setPdfLoading(false)
         setOkMsg(true)
         onSaved && onSaved(saved)
       })
@@ -116,8 +165,14 @@ export function TroquelModeloForm({ ordenId, onSaved, onLoaded }) {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <Field label="Archivo del modelo (imagen / PDF)" full>
-          <input type="file" accept="image/*,application/pdf" onChange={e => setArchivo(e.target.files[0] || null)} />
+          <input type="file" accept="image/*,application/pdf" onChange={e => handleArchivoChange(e.target.files[0] || null)} />
         </Field>
+        {pdfMsg && (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ink-3)' }}>
+            {pdfLoading && <Spinner />}
+            {pdfMsg}
+          </span>
+        )}
         {/* Previsualización: archivo recién elegido tiene prioridad sobre el guardado */}
         {preview ? (
           <img src={preview} alt="Vista previa" style={{ maxWidth: 360, maxHeight: 260, borderRadius: 8, border: '1px solid var(--line)' }} />
@@ -138,6 +193,10 @@ export function TroquelModeloForm({ ordenId, onSaved, onLoaded }) {
           {saving ? 'Guardando…' : (modelo ? 'Actualizar modelo' : 'Guardar modelo')}
         </button>
       </div>
+
+      <style>{`
+        @keyframes troquel-spin { to { transform: rotate(360deg); } }
+      `}</style>
     </div>
   )
 }

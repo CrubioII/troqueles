@@ -16,6 +16,8 @@ from django.conf import settings
 from django.utils import timezone
 from weasyprint import HTML as WeasyprintHTML
 
+from .pdf_troquel import parse_troquel_pdf
+
 _LOGO_PATH = os.path.join(settings.BASE_DIR, "cotizaciones", "static", "cotizaciones", "logo.png")
 
 # Pre-warm WeasyPrint font engine so the first real PDF request isn't slow
@@ -41,6 +43,18 @@ def _fmt_cop(n):
         return "$ {:,.0f}".format(float(n)).replace(",", ".")
     except Exception:
         return "$ 0"
+
+
+def _fmt_num(n):
+    """Número con separador de miles por puntos (sin símbolo de moneda)."""
+    try:
+        f = float(n)
+    except Exception:
+        return "0"
+    if f == int(f):
+        return "{:,.0f}".format(f).replace(",", ".")
+    # decimales con coma, miles con punto (formato es-CO)
+    return "{:,.2f}".format(f).replace(",", "X").replace(".", ",").replace("X", ".")
 
 from .models import (
     Cliente, Papel, Cotizacion, DocumentoCliente, OrdenProduccion, OpProceso,
@@ -684,16 +698,21 @@ class RemisionViewSet(viewsets.ModelViewSet):
         return qs
 
     def _build_pdf_ctx(self, rem):
+        items = list(rem.items.all())
+        total_cantidad = sum((it.cantidad or 0) for it in items)
+        total_valor = sum((it.valor_total or 0) for it in items)
         return {
             "rem": rem,
             "items": [
                 {
                     "descripcion": item.descripcion,
-                    "cantidad": item.cantidad,
+                    "cantidad": _fmt_num(item.cantidad),
                     "valor_total": _fmt_cop(item.valor_total),
                 }
-                for item in rem.items.all()
+                for item in items
             ],
+            "total_cantidad": _fmt_num(total_cantidad),
+            "total_valor": _fmt_cop(total_valor),
             "logo_uri": _logo_data_uri(),
         }
 
@@ -720,6 +739,9 @@ class RemisionViewSet(viewsets.ModelViewSet):
         Marca estado=liquidada y estampa enviada_en/liquidada_en.
         """
         rem = self.get_object()
+        if rem.estado != "pendiente":
+            return Response(
+                {"error": "Esta remisión ya fue liquidada o consolidada."}, status=409)
 
         recipients = []
         email_cliente = request.data.get("email") or rem.cliente.email
@@ -761,6 +783,82 @@ class RemisionViewSet(viewsets.ModelViewSet):
         rem.save(update_fields=["estado", "enviada_en", "liquidada_en", "modificado"])
         return Response({"ok": True, "enviado_a": recipients, "remision": RemisionSerializer(rem).data})
 
+    def _resumen_importable(self, rem):
+        items = list(rem.items.all())
+        return {
+            "id": rem.id,
+            "numero": rem.numero,
+            "orden_numero": rem.orden.numero if rem.orden_id else "",
+            "fecha": rem.fecha,
+            "total_cantidad": sum((it.cantidad or 0) for it in items),
+            "total_valor": sum((it.valor_total or 0) for it in items),
+            "items": [
+                {"descripcion": it.descripcion, "cantidad": it.cantidad, "valor_total": it.valor_total}
+                for it in items
+            ],
+        }
+
+    @action(detail=True, methods=["get"], url_path="importables")
+    def importables(self, request, pk=None):
+        """GET /api/remisiones/{id}/importables/ — otras remisiones pendientes del mismo
+        cliente que pueden fusionarse en esta. Excluye liquidadas/consolidadas y a sí misma."""
+        rem = self.get_object()
+        qs = (
+            Remision.objects.filter(cliente=rem.cliente, estado="pendiente")
+            .exclude(pk=rem.pk)
+            .select_related("orden")
+            .prefetch_related("items")
+            .order_by("fecha", "numero")
+        )
+        return Response([self._resumen_importable(r) for r in qs])
+
+    @action(detail=True, methods=["post"], url_path="importar")
+    def importar(self, request, pk=None):
+        """POST /api/remisiones/{id}/importar/ — fusiona los ítems de las remisiones origen
+        (mismo cliente, pendientes) en esta. Cada origen pasa a estado=consolidada.
+
+        Body: { "remision_ids": [int, ...] }
+        """
+        target = self.get_object()
+        if target.estado != "pendiente":
+            return Response(
+                {"error": "Solo se puede importar a una remisión pendiente."}, status=409)
+
+        ids = request.data.get("remision_ids", [])
+        if not isinstance(ids, list) or not ids:
+            return Response({"error": "Falta remision_ids."}, status=400)
+
+        fuentes = list(
+            Remision.objects.filter(pk__in=ids).prefetch_related("items").exclude(pk=target.pk)
+        )
+        if len(fuentes) != len({i for i in ids if i != target.pk}):
+            return Response({"error": "Alguna remisión no existe."}, status=404)
+        for f in fuentes:
+            if f.cliente_id != target.cliente_id:
+                return Response({"error": "Todas las remisiones deben ser del mismo cliente."}, status=400)
+            if f.estado != "pendiente":
+                return Response({"error": f"La remisión {f.numero} ya fue enviada o consolidada."}, status=409)
+
+        now = timezone.now()
+        next_orden = (target.items.aggregate(m=Max("orden")).get("m") or 0) + 1
+        with transaction.atomic():
+            for f in fuentes:
+                for it in f.items.all():
+                    RemisionItem.objects.create(
+                        remision=target,
+                        descripcion=it.descripcion,
+                        cantidad=it.cantidad,
+                        valor_total=it.valor_total,
+                        orden=next_orden,
+                    )
+                    next_orden += 1
+                f.estado = "consolidada"
+                f.consolidada_en = now
+                f.consolidada_en_remision = target
+                f.save(update_fields=["estado", "consolidada_en", "consolidada_en_remision", "modificado"])
+        target.refresh_from_db()
+        return Response(RemisionSerializer(target).data)
+
 
 class PrecioTroquelViewSet(viewsets.ModelViewSet):
     """Precios unitarios de troquel. Solo Admin (no visibles al Operador)."""
@@ -790,6 +888,18 @@ class TroquelModeloViewSet(viewsets.ModelViewSet):
         if orden_id:
             qs = qs.filter(orden_id=orden_id)
         return qs
+
+    @action(detail=False, methods=["post"])
+    def extraer_pdf(self, request):
+        """Lee un PDF de modelo de troquel y devuelve los campos detectados (sin guardar)."""
+        archivo = request.FILES.get("archivo")
+        if not archivo:
+            return Response({"error": "Falta el archivo"}, status=400)
+        try:
+            data = parse_troquel_pdf(archivo)
+        except Exception:
+            return Response({"error": "No se pudo leer el PDF"}, status=400)
+        return Response(data)
 
 
 class FormatoCuchillasViewSet(viewsets.ModelViewSet):
