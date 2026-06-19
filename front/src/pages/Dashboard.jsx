@@ -1,6 +1,11 @@
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { ModuleCard } from '../components/core'
+import { getDashboardStats } from '../api'
+import {
+  IngresosChart, TopClientesChart, OpsAtrasadasChart,
+} from '../components/charts/DashboardCharts'
 
 const MODULES = [
   {
@@ -57,8 +62,8 @@ const MODULES = [
     key: 'clientes',
     label: 'Clientes',
     desc: 'Gestiona el directorio de clientes: contactos, historial y datos de facturación.',
-    action: 'Próximamente',
-    path: null,
+    action: 'Ver clientes',
+    path: '/clientes',
     color: '#A67012',
     soft: '#FAEAC7',
     icon: (
@@ -74,6 +79,11 @@ const MODULES = [
 export default function Dashboard() {
   const navigate = useNavigate()
   const { user } = useAuth()
+  const [stats, setStats] = useState(null)
+
+  useEffect(() => {
+    getDashboardStats().then(setStats).catch(() => setStats(null))
+  }, [])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
@@ -99,7 +109,7 @@ export default function Dashboard() {
 
       {/* Cards grid */}
       <div style={{
-        padding: 'clamp(24px, 4vw, 40px) clamp(20px, 4vw, 40px)',
+        padding: 'clamp(24px, 4vw, 40px) clamp(20px, 4vw, 40px) 0',
         display: 'grid',
         gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
         gap: 16,
@@ -113,6 +123,20 @@ export default function Dashboard() {
           />
         ))}
       </div>
+
+      {/* Gráficos financieros */}
+      {stats?.financiero && (
+        <div style={{
+          padding: 'clamp(24px, 4vw, 40px) clamp(20px, 4vw, 40px)',
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+          gap: 16,
+        }}>
+          <IngresosChart data={stats.financiero.ingresos_por_periodo} />
+          <TopClientesChart data={stats.financiero.top_clientes} />
+          <OpsAtrasadasChart data={stats.financiero.ops_atrasadas} />
+        </div>
+      )}
     </div>
   )
 }

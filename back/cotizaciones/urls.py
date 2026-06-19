@@ -6,6 +6,7 @@ from .views import (
     PrecioTroquelViewSet, TroquelModeloViewSet, FormatoCuchillasViewSet,
     RemisionViewSet,
 )
+from .dashboard_views import DashboardStatsView
 
 router = DefaultRouter()
 router.register("clientes", ClienteViewSet, basename="cliente")
@@ -19,4 +20,7 @@ router.register("troquel-modelos", TroquelModeloViewSet, basename="troquel-model
 router.register("formatos-cuchillas", FormatoCuchillasViewSet, basename="formato-cuchillas")
 router.register("precios-troquel", PrecioTroquelViewSet, basename="precio-troquel")
 
-urlpatterns = [path("", include(router.urls))]
+urlpatterns = [
+    path("dashboard/stats/", DashboardStatsView.as_view(), name="dashboard-stats"),
+    path("", include(router.urls)),
+]

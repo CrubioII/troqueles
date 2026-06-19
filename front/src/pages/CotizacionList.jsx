@@ -2,9 +2,10 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Icon } from '../components/Icons'
 import { fmtNum, STATUS_DEFS } from '../components/core'
-import { getCotizaciones, deleteCotizacion } from '../api'
+import { getCotizaciones, deleteCotizacion, getDashboardStats } from '../api'
 import { useAuth } from '../context/AuthContext'
 import { usePolling } from '../lib/usePolling'
+import { EmbudoChart } from '../components/charts/DashboardCharts'
 
 const TAB_DEFS = [
   { id: 'cotizaciones', label: 'Cotizaciones' },
@@ -54,8 +55,13 @@ export default function CotizacionList() {
   const [prevPage, setPrevPage] = useState(null)
   const [count, setCount] = useState(0)
   const [confirmDelete, setConfirmDelete] = useState(null)
+  const [embudoData, setEmbudoData] = useState(null)
   const debounceRef = useRef(null)
   const paramsRef = useRef('')
+
+  useEffect(() => {
+    getDashboardStats().then(s => setEmbudoData(s.embudo_cotizaciones)).catch(() => {})
+  }, [])
 
   const load = (params = '', initial = false) => {
     paramsRef.current = params
@@ -228,6 +234,13 @@ export default function CotizacionList() {
         {error && (
           <div className="note" style={{ marginBottom: 16, color: 'var(--danger, #c0392b)' }}>
             <Icon.Info /> Error al cargar: {error}. ¿Está el servidor corriendo?
+          </div>
+        )}
+
+        {/* Embudo de cotizaciones */}
+        {embudoData && (
+          <div style={{ marginBottom: 20 }}>
+            <EmbudoChart data={embudoData} />
           </div>
         )}
 

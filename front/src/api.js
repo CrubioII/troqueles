@@ -85,6 +85,14 @@ export const updateCliente = (id, data) =>
     body: JSON.stringify(data),
   }).then(json)
 
+// Listado de clientes con señales de re-engagement y finanzas
+export const getClientesResumen = () =>
+  apiFetch(`${BASE}/clientes/resumen/`).then(json)
+
+// Perfil completo de un cliente: datos, finanzas e historial
+export const getClientePerfil = (id) =>
+  apiFetch(`${BASE}/clientes/${id}/perfil/`).then(json)
+
 export const getCotizaciones = (params = '') =>
   apiFetch(`${BASE}/cotizaciones/${params}`).then(json)
 
@@ -366,3 +374,8 @@ export const updatePrecioTroquel = (id, precio_unitario) =>
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ precio_unitario }),
   }).then(json)
+
+// ─────────────── Dashboard ───────────────
+
+export const getDashboardStats = () =>
+  apiFetch(`${BASE}/dashboard/stats/`).then(json)

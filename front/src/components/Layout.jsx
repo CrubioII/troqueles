@@ -58,6 +58,18 @@ const NAV_LINKS = [
       </svg>
     ),
   },
+  {
+    label: 'Clientes',
+    path: '/clientes',
+    adminOnly: true,
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+        <circle cx="9" cy="7" r="3.5" stroke="currentColor" strokeWidth="1.5"/>
+        <path d="M2 20c0-4 3.13-7 7-7s7 3 7 7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+        <path d="M16 11c1.66 0 3 1.34 3 3M19 14c1.1 0 2 .9 2 2s-.9 2-2 2h-3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+      </svg>
+    ),
+  },
 ]
 
 function NavButton({ link, currentPath }) {

@@ -1,7 +1,10 @@
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { ModuleCard } from '../components/core'
 import { Icon } from '../components/Icons'
+import { getDashboardStats } from '../api'
+import { UtilizacionChart } from '../components/charts/DashboardCharts'
 
 const MODULES = [
   {
@@ -40,6 +43,11 @@ export default function ProduccionHub() {
   const navigate = useNavigate()
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
+  const [utilizacion, setUtilizacion] = useState(null)
+
+  useEffect(() => {
+    getDashboardStats().then(s => setUtilizacion(s.utilizacion_maquinas)).catch(() => {})
+  }, [])
 
   const modules = isAdmin
     ? [...MODULES, {
@@ -81,6 +89,12 @@ export default function ProduccionHub() {
           <ModuleCard key={mod.key} mod={mod} onNavigate={() => navigate(mod.path)} />
         ))}
       </div>
+
+      {utilizacion && (
+        <div style={{ padding: '0 clamp(20px, 4vw, 40px) clamp(24px, 4vw, 40px)', maxWidth: 1200, margin: '0 auto', width: '100%' }}>
+          <UtilizacionChart data={utilizacion} />
+        </div>
+      )}
     </div>
   )
 }

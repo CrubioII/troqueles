@@ -124,11 +124,111 @@ def _maybe_crear_remision(op):
         return None
 
 
+INACTIVE_DAYS = 90
+
+
+def _cliente_ultima_actividad(cliente):
+    """(fecha date|None, tipo str|None) de la actividad más reciente del cliente,
+    considerando cotizaciones, órdenes y remisiones (por fecha de negocio)."""
+    eventos = []
+    cot = cliente.cotizaciones.order_by("-fecha").first()
+    if cot:
+        eventos.append((cot.fecha, "cotizacion"))
+    orden = cliente.ordenes.order_by("-fecha").first()
+    if orden:
+        eventos.append((orden.fecha, "orden"))
+    rem = cliente.remisiones.order_by("-fecha").first()
+    if rem:
+        eventos.append((rem.fecha, "remision"))
+    if not eventos:
+        return None, None
+    fecha, tipo = max(eventos, key=lambda e: e[0])
+    return fecha, tipo
+
+
+def _cliente_finanzas(cliente):
+    """Total facturado y saldo pendiente a partir de las OPs del cliente."""
+    total_facturado = 0.0
+    saldo_pendiente = 0.0
+    for op in cliente.ordenes.all():
+        valor = _orden_valor_total_efectivo(op)
+        if valor is None:
+            continue
+        total_facturado += valor
+        saldo_pendiente += valor - float(op.abono or 0)
+    return round(total_facturado), round(saldo_pendiente)
+
+
 class ClienteViewSet(viewsets.ModelViewSet):
     queryset = Cliente.objects.all()
     serializer_class = ClienteSerializer
     filter_backends = [filters.SearchFilter]
     search_fields = ["nombre"]
+
+    @action(detail=False, methods=["get"])
+    def resumen(self, request):
+        """Listado de clientes con señales de re-engagement y finanzas."""
+        hoy = timezone.localdate()
+        qs = Cliente.objects.prefetch_related(
+            "cotizaciones", "ordenes", "ordenes__procesos", "remisiones",
+        ).order_by("nombre")
+        clientes = []
+        inactivos = 0
+        for c in qs:
+            ultima, tipo = _cliente_ultima_actividad(c)
+            dias = (hoy - ultima).days if ultima else None
+            inactivo = dias is not None and dias >= INACTIVE_DAYS
+            if inactivo:
+                inactivos += 1
+            total_facturado, saldo_pendiente = _cliente_finanzas(c)
+            clientes.append({
+                "id": c.id,
+                "nombre": c.nombre,
+                "tipo": c.tipo,
+                "email": c.email,
+                "telefono": c.telefono,
+                "ultima_actividad": ultima,
+                "ultima_actividad_tipo": tipo,
+                "dias_inactivo": dias,
+                "inactivo": inactivo,
+                "n_cotizaciones": c.cotizaciones.count(),
+                "n_ordenes": c.ordenes.count(),
+                "total_facturado": total_facturado,
+                "saldo_pendiente": saldo_pendiente,
+            })
+        return Response({"inactivos": inactivos, "clientes": clientes})
+
+    @action(detail=True, methods=["get"])
+    def perfil(self, request, pk=None):
+        """Perfil completo: datos, finanzas e historial del cliente."""
+        cliente = self.get_object()
+        hoy = timezone.localdate()
+        ultima, tipo = _cliente_ultima_actividad(cliente)
+        dias = (hoy - ultima).days if ultima else None
+        total_facturado, saldo_pendiente = _cliente_finanzas(cliente)
+
+        cotizaciones = cliente.cotizaciones.select_related("cliente").order_by("-creado")
+        ordenes = cliente.ordenes.select_related("cliente", "cotizacion").prefetch_related("procesos").order_by("-creado")
+        remisiones = cliente.remisiones.select_related("cliente", "orden").order_by("-creado")
+
+        ctx = {"request": request}
+        return Response({
+            "cliente": ClienteSerializer(cliente).data,
+            "finanzas": {
+                "total_facturado": total_facturado,
+                "saldo_pendiente": saldo_pendiente,
+                "n_cotizaciones": cotizaciones.count(),
+                "n_ordenes": ordenes.count(),
+                "n_remisiones": remisiones.count(),
+                "ultima_actividad": ultima,
+                "ultima_actividad_tipo": tipo,
+                "dias_inactivo": dias,
+                "inactivo": dias is not None and dias >= INACTIVE_DAYS,
+            },
+            "cotizaciones": CotizacionListSerializer(cotizaciones, many=True, context=ctx).data,
+            "ordenes": OrdenListSerializer(ordenes, many=True, context=ctx).data,
+            "remisiones": RemisionListSerializer(remisiones, many=True, context=ctx).data,
+        })
 
 
 class PapelViewSet(viewsets.ModelViewSet):
