@@ -69,6 +69,9 @@ if all([DB_NAME, DB_USER, DB_PASSWORD, DB_HOST]):
             "PASSWORD": DB_PASSWORD,
             "HOST": DB_HOST,
             "PORT": DB_PORT,
+            "OPTIONS": {
+                "sslmode": "require",
+            }
         }
     }
 else:
