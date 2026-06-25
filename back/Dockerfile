@@ -47,8 +47,11 @@ RUN mkdir -p /app/staticfiles /app/media
 # Recolectar archivos estáticos para WhiteNoise
 RUN SECRET_KEY=temp-secret-key-for-collectstatic python manage.py collectstatic --no-input
 
-# Exponer el puerto por defecto (Azure App Service mapea al puerto definido por $PORT, por defecto es 8000)
+# Dar permisos de ejecución al script de inicio y convertir finales de línea Windows a Unix (CRLF -> LF)
+RUN chmod +x /app/start.sh && sed -i 's/\r$//' /app/start.sh
+
+# Exponer el puerto por defecto
 EXPOSE 8000
 
-# Iniciar la aplicación usando gunicorn
-CMD gunicorn config.wsgi:application --bind 0.0.0.0:${PORT:-8000} --workers 3 --timeout 120
+# Iniciar la aplicación usando el script
+CMD ["/app/start.sh"]
