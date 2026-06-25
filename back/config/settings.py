@@ -134,6 +134,18 @@ CORS_ALLOWED_ORIGINS = os.getenv(
 ).split(",")
 CORS_ALLOW_ALL_ORIGINS = DEBUG
 
+CSRF_TRUSTED_ORIGINS = os.getenv(
+    "CSRF_TRUSTED_ORIGINS",
+    "http://localhost:3000,http://127.0.0.1:8000"
+).split(",")
+
+if not DEBUG:
+    # Confiar en los subdominios de Azure para evitar errores CSRF 403 en producción
+    CSRF_TRUSTED_ORIGINS.extend([
+        "https://*.azurewebsites.net",
+        "https://*.azurestaticapps.net"
+    ])
+
 EMAIL_BACKEND = (
     "django.core.mail.backends.console.EmailBackend"
     if DEBUG and not os.environ.get("EMAIL_HOST_USER")
