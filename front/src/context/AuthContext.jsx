@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react'
-import { refreshAccessToken } from '../api'
+import { refreshAccessToken, BASE } from '../api'
 
 const AuthContext = createContext(null)
 
@@ -33,7 +33,7 @@ export function AuthProvider({ children }) {
       }
       if (token && !isExpired(token)) {
         try {
-          const res = await fetch('/api/auth/me/', {
+          const res = await fetch(`${BASE}/auth/me/`, {
             headers: { Authorization: `Bearer ${token}` },
           })
           if (res.ok) {
@@ -56,7 +56,7 @@ export function AuthProvider({ children }) {
   }, [])
 
   const login = useCallback(async (username, password) => {
-    const res = await fetch('/api/auth/login/', {
+    const res = await fetch(`${BASE}/auth/login/`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
