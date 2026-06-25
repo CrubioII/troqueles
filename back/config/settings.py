@@ -143,7 +143,9 @@ if not DEBUG:
     # Confiar en los subdominios de Azure para evitar errores CSRF 403 en producción
     CSRF_TRUSTED_ORIGINS.extend([
         "https://*.azurewebsites.net",
-        "https://*.azurestaticapps.net"
+        "https://*.azurestaticapps.net",
+        "https://*.southcentralus-01.azurewebsites.net",
+        "https://troqueles-api-jp-g7bzdyeubshzhfc0.southcentralus-01.azurewebsites.net"
     ])
 
 EMAIL_BACKEND = (
