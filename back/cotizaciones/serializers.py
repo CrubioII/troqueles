@@ -404,19 +404,33 @@ class TroquelModeloOperadorSerializer(serializers.ModelSerializer):
 class FormatoCuchillasSerializer(serializers.ModelSerializer):
     orden_numero = serializers.CharField(source="orden.numero", read_only=True, default="")
     operador_username = serializers.CharField(source="operador.username", read_only=True, default="")
+    revisado_por_username = serializers.CharField(source="revisado_por.username", read_only=True, default="")
+    fecha_entrega = serializers.DateField(source="orden.fecha_entrega", read_only=True, default=None)
+    cliente_nombre = serializers.SerializerMethodField()
+
+    def get_cliente_nombre(self, obj):
+        # Solo el Admin ve el cliente (vista Operador sanitizada).
+        request = self.context.get("request")
+        if not (request and request.user.is_staff):
+            return ""
+        return obj.orden.cliente.nombre if (obj.orden and obj.orden.cliente) else ""
 
     class Meta:
         model = FormatoCuchillas
         fields = [
-            "id", "orden", "orden_numero",
+            "id", "orden", "orden_numero", "cliente_nombre", "fecha_entrega",
             "cuchilla_cm", "grafa_cm",
             "dos_puntos", "tres_puntos", "perfo",
             "ch", "sac", "gan",
             "caucho_cm", "desperdicio",
             "tiempo_encalado_min", "tiempo_encuchillado_min", "tiempo_encauchado_min",
             "operador", "operador_username", "fecha_hora",
+            "estado", "devolucion_motivo", "revisado_por_username", "revisado_en",
         ]
-        read_only_fields = ["id", "operador", "fecha_hora"]
+        read_only_fields = [
+            "id", "operador", "fecha_hora",
+            "estado", "devolucion_motivo", "revisado_en",
+        ]
 
 
 class OrdenOperadorSerializer(serializers.ModelSerializer):

@@ -8,7 +8,10 @@ import {
   FormatosCuchillasHistory, FormatoCuchillasForm, ModeloViewer,
   NuevaTareaTroquelModal,
 } from '../components/Troquel'
-import { getOrdenes, getFormatosCuchillas, getOrdenesPendientes, getOrdenProduccion, getTroquelModelo, updateFormatoCuchillas } from '../api'
+import {
+  getOrdenes, getFormatosCuchillas, getOrdenesPendientes, getOrdenProduccion, getTroquelModelo,
+  updateFormatoCuchillas, getFormatosPendientes,
+} from '../api'
 import { usePolling } from '../lib/usePolling'
 
 const asList = (data) => (Array.isArray(data) ? data : (data?.results || []))
@@ -58,6 +61,15 @@ function AdminTroqueles() {
   const [costRefresh, setCostRefresh] = useState(0)
   const [editFormato, setEditFormato] = useState(null)   // formato en edición (Admin)
   const [showNueva, setShowNueva] = useState(false)      // modal Nueva tarea de troquel
+  const [pendientes, setPendientes] = useState([])       // formatos esperando aprobación (contador)
+
+  const loadPendientes = () =>
+    getFormatosPendientes()
+      .then(d => setPendientes(asList(d)))
+      .catch(() => setPendientes([]))
+
+  useEffect(() => { loadPendientes() }, [])
+  usePolling(loadPendientes, { enabled: true })
 
   const loadOrdenes = () => {
     setLoading(true)
@@ -92,6 +104,21 @@ function AdminTroqueles() {
     <>
       <Section title="Precios unitarios de troquel">
         <PreciosTroquelPanel onChanged={() => setCostRefresh(k => k + 1)} />
+      </Section>
+
+      <Section
+        title={`Troqueles por aprobar${pendientes.length ? ` (${pendientes.length})` : ''}`}
+        actions={
+          <button className="btn sm primary" onClick={() => navigate('/produccion/troqueles/revision')}>
+            Revisar troqueles
+          </button>
+        }
+      >
+        <div style={{ padding: '14px 16px', fontSize: 13, color: 'var(--ink-2)' }}>
+          {pendientes.length === 0
+            ? 'No hay troqueles esperando aprobación.'
+            : <>Hay <strong>{pendientes.length}</strong> {pendientes.length === 1 ? 'troquel terminado esperando' : 'troqueles terminados esperando'} tu aprobación antes de pasar a remisión.</>}
+        </div>
       </Section>
 
       <Section
@@ -283,9 +310,34 @@ function OperadorTroqueles() {
             </Section>
           )}
 
-          {formatos.length > 0 && (
+          {formatos.length > 0 && formatos[0].estado === 'pendiente' && (
             <div style={{ marginTop: 16, padding: '12px 16px', borderRadius: 8, background: 'var(--warn-soft, #fef6e7)', border: '1px solid var(--warn, #e0a800)', fontSize: 13, color: 'var(--ink-2)' }}>
-              🔒 El formato de cuchillas de esta OP ya fue registrado y quedó bloqueado.
+              ⏳ El formato de cuchillas fue enviado y está <strong>esperando aprobación del administrador</strong>.
+              No puedes modificarlo mientras se revisa.
+            </div>
+          )}
+
+          {formatos.length > 0 && formatos[0].estado === 'devuelto' && (
+            <>
+              <div style={{ marginTop: 16, padding: '12px 16px', borderRadius: 8, background: 'var(--danger-soft, #fdecea)', border: '1px solid var(--danger, #c0392b)', fontSize: 13, color: 'var(--ink-2)' }}>
+                ↩ El administrador <strong>devolvió</strong> el formato de cuchillas.
+                {formatos[0].devolucion_motivo && <> Motivo: <strong>{formatos[0].devolucion_motivo}</strong>.</>}
+                {' '}Corrige los datos y reenvíalo.
+              </div>
+              <Section title="Corregir y reenviar formato de cuchillas">
+                <FormatoCuchillasForm
+                  resubmit
+                  formato={formatos[0]}
+                  ordenId={orden.id}
+                  onCreated={() => loadFormatos(orden.id)}
+                />
+              </Section>
+            </>
+          )}
+
+          {formatos.length > 0 && formatos[0].estado === 'aprobado' && (
+            <div style={{ marginTop: 16, padding: '12px 16px', borderRadius: 8, background: 'var(--warn-soft, #fef6e7)', border: '1px solid var(--warn, #e0a800)', fontSize: 13, color: 'var(--ink-2)' }}>
+              🔒 El formato de cuchillas de esta OP ya fue registrado y aprobado.
               Si necesitas un cambio, contacta al administrador.
             </div>
           )}

@@ -356,12 +356,26 @@ export const createFormatoCuchillas = (data) =>
     body: JSON.stringify(data),
   }).then(json)
 
-// Editar formato existente — solo Admin (backend exige is_staff)
+// Editar formato existente — Admin, o el Operador reenviando uno devuelto
 export const updateFormatoCuchillas = (id, data) =>
   apiFetch(`${BASE}/formatos-cuchillas/${id}/`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
+  }).then(json)
+
+// Cola de aprobación de troqueles (Admin)
+export const getFormatosPendientes = () =>
+  apiFetch(`${BASE}/formatos-cuchillas/?estado=pendiente`).then(json)
+
+export const aprobarFormatoCuchillas = (id) =>
+  apiFetch(`${BASE}/formatos-cuchillas/${id}/aprobar/`, { method: 'POST' }).then(json)
+
+export const devolverFormatoCuchillas = (id, motivo = '') =>
+  apiFetch(`${BASE}/formatos-cuchillas/${id}/devolver/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ motivo }),
   }).then(json)
 
 // Precios unitarios (Admin)

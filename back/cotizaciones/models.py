@@ -393,6 +393,19 @@ class FormatoCuchillas(models.Model):
         related_name="formatos_cuchillas",
     )
     fecha_hora = models.DateTimeField(auto_now_add=True)
+    # Aprobación admin: el troquel no se completa (ni genera remisión) hasta aprobar.
+    ESTADO_CHOICES = [
+        ("pendiente", "Pendiente de aprobación"),
+        ("aprobado", "Aprobado"),
+        ("devuelto", "Devuelto al operador"),
+    ]
+    estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default="pendiente")
+    devolucion_motivo = models.CharField(max_length=300, blank=True, default="")
+    revisado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="formatos_cuchillas_revisados",
+    )
+    revisado_en = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-fecha_hora"]

@@ -651,7 +651,13 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         proceso.completado_en = timezone.now() if completado else None
         proceso.save(update_fields=["completado", "completado_en"])
         if completado:
-            _maybe_crear_remision(op)
+            if proceso_id == "troquel":
+                # Completar troquel manualmente equivale a aprobar los formatos en cola.
+                op.formatos_cuchillas.filter(estado="pendiente").update(
+                    estado="aprobado", revisado_por=request.user, revisado_en=timezone.now()
+                )
+            # OP fresca: el prefetch de procesos quedó desactualizado tras el save.
+            _maybe_crear_remision(OrdenProduccion.objects.get(pk=op.pk))
         return Response(OpProcesoSerializer(proceso).data)
 
     @action(detail=True, methods=["get"], url_path="produccion")
@@ -695,6 +701,10 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
                 procesos__active=True,
                 procesos__completado=False,
             ).distinct()
+            if proceso_id == "troquel":
+                # OPs con formato esperando aprobación del Admin no están
+                # pendientes para el Operador (los devueltos sí reaparecen).
+                qs = qs.exclude(formatos_cuchillas__estado="pendiente")
         qs = qs.order_by(F("fecha_entrega").asc(nulls_last=True), "creado")
         data = OrdenOperadorSerializer(qs, many=True, context={"request": request}).data
         return Response(data)
@@ -1018,6 +1028,9 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
         orden_id = self.request.query_params.get("orden")
         if orden_id:
             qs = qs.filter(orden_id=orden_id)
+        estado = self.request.query_params.get("estado")
+        if estado:
+            qs = qs.filter(estado=estado)
         return qs
 
     def perform_create(self, serializer):
@@ -1029,22 +1042,78 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
                 "Esta OP ya tiene un formato de cuchillas registrado. "
                 "Solo el administrador puede modificarlo."
             )
-        formato = serializer.save(operador=self.request.user)
-        # Registrar el formato finaliza el troquel: marca el proceso como completado.
+        # El formato queda pendiente de aprobación: el troquel solo se completa
+        # (y puede generar remisión) cuando el Admin lo aprueba.
+        serializer.save(operador=self.request.user)
+
+    def update(self, request, *args, **kwargs):
+        self._check_update_permission(request)
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        self._check_update_permission(request)
+        return super().partial_update(request, *args, **kwargs)
+
+    def _check_update_permission(self, request):
+        # Operador solo puede editar (reenviar) un formato devuelto por el Admin.
+        if request.user.is_staff:
+            return
+        if self.get_object().estado != "devuelto":
+            raise PermissionDenied("Solo administradores pueden realizar esta acción.")
+
+    def perform_update(self, serializer):
+        if self.request.user.is_staff:
+            serializer.save()
+            return
+        # Reenvío del Operador: vuelve a la cola de aprobación.
+        serializer.save(
+            operador=self.request.user,
+            estado="pendiente",
+            devolucion_motivo="",
+        )
+
+    def destroy(self, request, *args, **kwargs):
+        _require_admin(request)
+        return super().destroy(request, *args, **kwargs)
+
+    @action(detail=True, methods=["post"], url_path="aprobar")
+    def aprobar(self, request, pk=None):
+        """POST /api/formatos-cuchillas/{id}/aprobar/ — Admin aprueba el formato.
+
+        Completa el proceso troquel de la OP y dispara la creación de remisión
+        si la OP queda al 100%.
+        """
+        _require_admin(request)
+        formato = self.get_object()
+        formato.estado = "aprobado"
+        formato.devolucion_motivo = ""
+        formato.revisado_por = request.user
+        formato.revisado_en = timezone.now()
+        formato.save(update_fields=["estado", "devolucion_motivo", "revisado_por", "revisado_en"])
         if formato.orden_id:
             formato.orden.procesos.filter(proceso_id="troquel").update(
                 completado=True, completado_en=timezone.now()
             )
             _maybe_crear_remision(formato.orden)
+        return Response(self.get_serializer(formato).data)
 
-    def update(self, request, *args, **kwargs):
-        _require_admin(request)
-        return super().update(request, *args, **kwargs)
+    @action(detail=True, methods=["post"], url_path="devolver")
+    def devolver(self, request, pk=None):
+        """POST /api/formatos-cuchillas/{id}/devolver/ — Body: { motivo }.
 
-    def partial_update(self, request, *args, **kwargs):
+        Devuelve el formato al Operador: el proceso troquel vuelve a pendiente
+        y la OP reaparece en su lista. Si ya existía remisión, no se elimina;
+        una re-aprobación no la duplica (creación idempotente).
+        """
         _require_admin(request)
-        return super().partial_update(request, *args, **kwargs)
-
-    def destroy(self, request, *args, **kwargs):
-        _require_admin(request)
-        return super().destroy(request, *args, **kwargs)
+        formato = self.get_object()
+        formato.estado = "devuelto"
+        formato.devolucion_motivo = (request.data.get("motivo") or "").strip()[:300]
+        formato.revisado_por = request.user
+        formato.revisado_en = timezone.now()
+        formato.save(update_fields=["estado", "devolucion_motivo", "revisado_por", "revisado_en"])
+        if formato.orden_id:
+            formato.orden.procesos.filter(proceso_id="troquel").update(
+                completado=False, completado_en=None
+            )
+        return Response(self.get_serializer(formato).data)

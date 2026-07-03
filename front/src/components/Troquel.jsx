@@ -291,9 +291,9 @@ const fmtMin = (m) => {
   return h ? `${h}h ${min}m` : `${min}m`
 }
 
-export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, onCancel }) {
-  const isEdit = !!formato
-  const [form, setForm] = useState(() => isEdit ? { ...EMPTY_FORMATO, ...formato } : EMPTY_FORMATO)
+export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, onCancel, resubmit = false }) {
+  const isEdit = !!formato && !resubmit
+  const [form, setForm] = useState(() => formato ? { ...EMPTY_FORMATO, ...formato } : EMPTY_FORMATO)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
   const [okMsg, setOkMsg] = useState(false)
@@ -309,10 +309,13 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
       .finally(() => setSaving(false))
   }
 
-  // Registro (Operador): se confirma en el modal y es irreversible.
+  // Registro (Operador): se confirma en el modal y queda pendiente de aprobación.
   const submitCreate = () => {
     setSaving(true); setError(null); setOkMsg(false)
-    createFormatoCuchillas({ orden: ordenId, ...form })
+    const req = resubmit
+      ? updateFormatoCuchillas(formato.id, form)
+      : createFormatoCuchillas({ orden: ordenId, ...form })
+    req
       .then(() => {
         setForm(EMPTY_FORMATO)
         setConfirming(false)
@@ -374,7 +377,7 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
           </>
         ) : (
           <button className="btn primary" onClick={() => { setError(null); setConfirming(true) }} disabled={saving}>
-            Registrar formato
+            {resubmit ? 'Reenviar formato' : 'Registrar formato'}
           </button>
         )}
       </div>
@@ -385,16 +388,17 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
           display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
         }}>
           <div style={{ background: 'var(--surface)', borderRadius: 12, maxWidth: 420, width: '100%', padding: 24, boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
-            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>⚠ Confirmar registro del formato</div>
+            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>
+              {resubmit ? '⚠ Confirmar reenvío del formato' : '⚠ Confirmar registro del formato'}
+            </div>
             <div style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5, marginBottom: 18 }}>
-              ¿La información registrada es correcta? Este es el <strong>único</strong> formato de cuchillas
-              que se guardará para esta OP y <strong>no podrás revertir los cambios</strong>. Solo el
-              administrador podrá modificarlo después.
+              ¿La información registrada es correcta? El formato quedará <strong>pendiente de
+              aprobación del administrador</strong> y no podrás modificarlo mientras se revisa.
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <button className="btn" onClick={() => setConfirming(false)} disabled={saving}>Cancelar</button>
               <button className="btn primary" onClick={submitCreate} disabled={saving}>
-                {saving ? 'Guardando…' : 'Sí, registrar'}
+                {saving ? 'Guardando…' : (resubmit ? 'Sí, reenviar' : 'Sí, registrar')}
               </button>
             </div>
           </div>
@@ -411,10 +415,25 @@ const fmtFecha = (s) => {
   catch { return s }
 }
 
+const ESTADO_BADGE = {
+  pendiente: { label: 'Pendiente', bg: 'var(--warn-soft, #fef6e7)', color: 'var(--warn, #e0a800)' },
+  aprobado: { label: 'Aprobado', bg: 'var(--ok-soft, #e8f6ec)', color: 'var(--ok, #2e8b57)' },
+  devuelto: { label: 'Devuelto', bg: 'var(--danger-soft, #fdecea)', color: 'var(--danger, #c0392b)' },
+}
+
+export function EstadoFormatoBadge({ estado }) {
+  const b = ESTADO_BADGE[estado] || ESTADO_BADGE.pendiente
+  return (
+    <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 700, background: b.bg, color: b.color, border: `1px solid ${b.color}` }}>
+      {b.label}
+    </span>
+  )
+}
+
 export function FormatosCuchillasHistory({ formatos, loading, onEdit }) {
   if (loading) return <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Cargando…</div>
   if (!formatos.length) return <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Sin formatos registrados.</div>
-  const headers = ['Fecha / Hora', 'Operador', 'Cuchilla', 'Grafa', 'Caucho', 'Puntos', 'ch / sac / gan', 'Tiempos (enc/cuch/cauch)']
+  const headers = ['Fecha / Hora', 'Estado', 'Operador', 'Cuchilla', 'Grafa', 'Caucho', 'Puntos', 'ch / sac / gan', 'Tiempos (enc/cuch/cauch)']
   if (onEdit) headers.push('')
   return (
     <div style={{ overflowX: 'auto' }}>
@@ -432,6 +451,7 @@ export function FormatosCuchillasHistory({ formatos, loading, onEdit }) {
             return (
               <tr key={f.id} style={{ borderBottom: '1px solid var(--line)', background: idx % 2 ? 'var(--surface-2)' : 'var(--surface)' }}>
                 <td style={{ padding: '8px 12px', fontFamily: 'JetBrains Mono, monospace', fontSize: 11, whiteSpace: 'nowrap' }}>{fmtFecha(f.fecha_hora)}</td>
+                <td style={{ padding: '8px 12px' }}><EstadoFormatoBadge estado={f.estado} /></td>
                 <td style={{ padding: '8px 12px', fontWeight: 600 }}>{f.operador_username || '—'}</td>
                 <td style={{ padding: '8px 12px' }}>{fmtNum(f.cuchilla_cm, 2)}</td>
                 <td style={{ padding: '8px 12px' }}>{fmtNum(f.grafa_cm, 2)}</td>
