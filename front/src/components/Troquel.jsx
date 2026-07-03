@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { fmtCOP, fmtNum, NumField, Checkbox, MoneyInput } from './core'
 import {
   getTroquelModelo, saveTroquelModelo, getTroquelCostos, extraerPdfTroquel,
   getFormatosCuchillas, createFormatoCuchillas, updateFormatoCuchillas,
   getPreciosTroquel, updatePrecioTroquel,
+  getClientes, createCliente, createOrden,
 } from '../api'
 
 const asList = (data) => (Array.isArray(data) ? data : (data?.results || []))
@@ -193,10 +195,6 @@ export function TroquelModeloForm({ ordenId, onSaved, onLoaded }) {
           {saving ? 'Guardando…' : (modelo ? 'Actualizar modelo' : 'Guardar modelo')}
         </button>
       </div>
-
-      <style>{`
-        @keyframes troquel-spin { to { transform: rotate(360deg); } }
-      `}</style>
     </div>
   )
 }
@@ -575,5 +573,285 @@ export function PreciosTroquelPanel({ onChanged }) {
         {okMsg && <span style={{ fontSize: 12, color: 'var(--accent)' }}>Precios guardados ✓</span>}
       </div>
     </div>
+  )
+}
+
+// ────────── Nueva tarea de troquel (Admin) ──────────
+// Crea una OP directa (sin cotización) con el proceso "troquel" activo y le
+// adjunta el modelo (PDF/imagen + campos técnicos) en un solo flujo.
+
+const EMPTY_TAREA_MODELO = {
+  troquel_numero: '', pinza: '', madera: '', cuchilla_puntos: '', material: '',
+  espejo: false, instrucciones: '',
+  corte_cm: 0, score_cm: 0, hendido_cm: 0,
+}
+
+export function NuevaTareaTroquelModal({ onClose, onCreated }) {
+  const [op, setOp] = useState({ cliente: '', clienteId: null, referencia: '', cantidad: 0, fechaEntrega: '' })
+  const [modelo, setModelo] = useState(EMPTY_TAREA_MODELO)
+  const [archivo, setArchivo] = useState(null)
+  const [preview, setPreview] = useState(null)
+  const [pdfMsg, setPdfMsg] = useState(null)
+  const [pdfLoading, setPdfLoading] = useState(false)
+  const [suggestions, setSuggestions] = useState([])
+  const [showSugg, setShowSugg] = useState(false)
+  const searchRef = useRef(null)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
+  const [createdOrden, setCreatedOrden] = useState(null)  // OP ya creada: el reintento solo re-envía el modelo
+
+  const setM = (k, v) => setModelo(m => ({ ...m, [k]: v }))
+
+  useEffect(() => {
+    if (archivo && archivo.type?.startsWith('image/')) {
+      const url = URL.createObjectURL(archivo)
+      setPreview(url)
+      return () => URL.revokeObjectURL(url)
+    }
+    setPreview(null)
+  }, [archivo])
+
+  const handleClienteChange = (v) => {
+    setOp(o => ({ ...o, cliente: v, clienteId: null }))
+    clearTimeout(searchRef.current)
+    if (!v.trim()) { setSuggestions([]); setShowSugg(false); return }
+    searchRef.current = setTimeout(() => {
+      getClientes(v).then(data => {
+        const results = data.results || data
+        setSuggestions(results)
+        setShowSugg(results.length > 0)
+      }).catch(() => {})
+    }, 250)
+  }
+
+  const selectCliente = (c) => {
+    setOp(o => ({ ...o, cliente: c.nombre, clienteId: c.id }))
+    setSuggestions([])
+    setShowSugg(false)
+  }
+
+  const handleArchivoChange = (file) => {
+    setArchivo(file)
+    if (!file || file.type !== 'application/pdf') { setPdfMsg(null); setPdfLoading(false); return }
+    setPdfMsg('Leyendo PDF…')
+    setPdfLoading(true)
+    extraerPdfTroquel(file)
+      .then(data => {
+        const hayDatos = ['referencia', 'troquel', 'pinza', 'madera', 'cuchilla', 'material'].some(k => data[k])
+          || data.espejo != null || data.corte_cm != null || data.score_cm != null || data.hendido_cm != null
+        if (data.referencia) setOp(o => (o.referencia ? o : { ...o, referencia: data.referencia }))
+        setModelo(m => {
+          const next = { ...m }
+          if (data.troquel) next.troquel_numero = data.troquel
+          if (data.pinza) next.pinza = data.pinza
+          if (data.madera) next.madera = data.madera
+          if (data.cuchilla) next.cuchilla_puntos = data.cuchilla
+          if (data.material) next.material = data.material
+          if (data.espejo != null) next.espejo = !!data.espejo
+          if (data.corte_cm != null) next.corte_cm = data.corte_cm
+          if (data.score_cm != null) next.score_cm = data.score_cm
+          if (data.hendido_cm != null) next.hendido_cm = data.hendido_cm
+          return next
+        })
+        setPdfMsg(hayDatos ? 'Datos leídos del PDF ✓ — revisa antes de crear' : 'No se detectaron datos en el PDF, completa manualmente')
+      })
+      .catch(() => setPdfMsg('No se pudo leer el PDF, completa manualmente'))
+      .finally(() => setPdfLoading(false))
+  }
+
+  const hasModeloData = () =>
+    ['troquel_numero', 'pinza', 'madera', 'cuchilla_puntos', 'material', 'instrucciones'].some(k => String(modelo[k] || '').trim())
+    || modelo.espejo || Number(modelo.corte_cm) > 0 || Number(modelo.score_cm) > 0 || Number(modelo.hendido_cm) > 0
+
+  // El visor del operador solo muestra instrucciones + archivo: si no se
+  // escribieron instrucciones, se componen desde los campos técnicos.
+  const composedInstrucciones = () => {
+    if (modelo.instrucciones.trim()) return modelo.instrucciones
+    const campos = [
+      ['Troquel', modelo.troquel_numero],
+      ['Pinza', modelo.pinza],
+      ['Madera', modelo.madera],
+      ['Cuchilla', modelo.cuchilla_puntos],
+      ['Material', modelo.material],
+    ].filter(([, v]) => String(v || '').trim())
+    if (!campos.length) return ''
+    return campos.map(([k, v]) => `${k}: ${v}`).join('\n') + (modelo.espejo ? '' : '\n(NO Hacer espejo)')
+  }
+
+  const submit = async () => {
+    setError(null)
+    if (!createdOrden) {
+      if (!op.cliente.trim()) { setError('El campo Cliente es obligatorio'); return }
+      if (!op.referencia.trim()) { setError('El campo Referencia es obligatorio'); return }
+      if (!(Number(op.cantidad) > 0)) { setError('La cantidad debe ser mayor a 0'); return }
+    }
+    setSaving(true)
+    try {
+      let orden = createdOrden
+      if (!orden) {
+        let clienteId = op.clienteId
+        if (!clienteId) {
+          const nuevo = await createCliente({ nombre: op.cliente.trim(), tipo: 'final' })
+          clienteId = nuevo.id
+          setOp(o => ({ ...o, clienteId }))
+        }
+        orden = await createOrden({
+          fecha: new Date().toISOString().slice(0, 10),
+          fecha_entrega: op.fechaEntrega || null,
+          cliente: clienteId,
+          referencia: op.referencia.trim(),
+          cantidad: Number(op.cantidad),
+          procesos: [{ proceso_id: 'troquel', active: true }],
+        })
+        setCreatedOrden(orden)
+      }
+      if (archivo || hasModeloData()) {
+        const fd = new FormData()
+        fd.append('orden', orden.id)
+        ;['troquel_numero', 'pinza', 'madera', 'cuchilla_puntos', 'material'].forEach(k => fd.append(k, modelo[k] ?? ''))
+        fd.append('instrucciones', composedInstrucciones())
+        fd.append('espejo', modelo.espejo ? 'true' : 'false')
+        ;['corte_cm', 'score_cm', 'hendido_cm'].forEach(k => fd.append(k, modelo[k] ?? 0))
+        if (archivo) fd.append('archivo', archivo)
+        await saveTroquelModelo(null, fd)
+      }
+      onCreated(orden)
+    } catch (e) {
+      setError(createdOrden
+        ? `La OP ${createdOrden.numero} se creó, pero el modelo no se pudo guardar. Reintenta o adjúntalo después desde la lista.`
+        : (e?.message || 'No se pudo crear la tarea'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const opLocked = !!createdOrden
+
+  return createPortal(
+    <div
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 9999,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+      }}
+      onMouseDown={e => { if (e.target === e.currentTarget && !saving) onClose() }}
+    >
+      <div style={{
+        background: 'var(--surface)', borderRadius: 12, maxWidth: 680, width: '100%',
+        padding: 24, maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+        display: 'flex', flexDirection: 'column', gap: 16,
+      }}>
+        <div style={{ fontSize: 15, fontWeight: 700 }}>Nueva tarea de troquel</div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <Field label="Archivo del modelo (imagen / PDF) — el PDF autorrellena los campos" full>
+            <input type="file" accept="image/*,application/pdf" onChange={e => handleArchivoChange(e.target.files[0] || null)} />
+          </Field>
+          {pdfMsg && (
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ink-3)' }}>
+              {pdfLoading && <Spinner />}
+              {pdfMsg}
+            </span>
+          )}
+          {preview ? (
+            <img src={preview} alt="Vista previa" style={{ maxWidth: 360, maxHeight: 220, borderRadius: 8, border: '1px solid var(--line)' }} />
+          ) : archivo ? (
+            <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>📄 {archivo.name}</span>
+          ) : null}
+        </div>
+
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
+            Datos del troquel
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+            <Field label="N° troquel"><input className="input" value={modelo.troquel_numero} onChange={e => setM('troquel_numero', e.target.value)} /></Field>
+            <Field label="Pinza"><input className="input" value={modelo.pinza} onChange={e => setM('pinza', e.target.value)} /></Field>
+            <Field label="Madera"><input className="input" value={modelo.madera} onChange={e => setM('madera', e.target.value)} /></Field>
+            <Field label="Cuchilla (puntos)"><input className="input" value={modelo.cuchilla_puntos} onChange={e => setM('cuchilla_puntos', e.target.value)} /></Field>
+            <Field label="Material"><input className="input" value={modelo.material} onChange={e => setM('material', e.target.value)} /></Field>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
+            <Checkbox checked={modelo.espejo} onChange={() => setM('espejo', !modelo.espejo)} />
+            <span style={{ fontSize: 12, color: 'var(--ink-2)' }}>Hacer espejo <span style={{ color: 'var(--ink-3)' }}>(sin marcar = NO hacer espejo)</span></span>
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 10 }}>
+            <Field label="Corte (cm)"><NumField value={modelo.corte_cm} onChange={v => setM('corte_cm', v)} /></Field>
+            <Field label="Score (cm)"><NumField value={modelo.score_cm} onChange={v => setM('score_cm', v)} /></Field>
+            <Field label="C. Hendido (cm)"><NumField value={modelo.hendido_cm} onChange={v => setM('hendido_cm', v)} /></Field>
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 10 }}>
+            <Field label="Instrucciones adicionales (visibles al operador)" full>
+              <textarea className="input" rows={3} value={modelo.instrucciones} onChange={e => setM('instrucciones', e.target.value)} />
+            </Field>
+          </div>
+        </div>
+
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
+            Datos de la OP
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+            <Field label={
+              <>Cliente *
+                {op.clienteId && <span style={{ marginLeft: 6, color: 'var(--ok, #27ae60)' }}>✓ vinculado</span>}
+                {!op.clienteId && op.cliente && <span style={{ marginLeft: 6, color: 'var(--ink-3)' }}>· se creará nuevo</span>}
+              </>
+            } full>
+              <div style={{ position: 'relative' }}>
+                <input
+                  className="input"
+                  style={{ width: '100%' }}
+                  placeholder="Buscar cliente existente o escribir nuevo…"
+                  value={op.cliente}
+                  disabled={opLocked}
+                  onChange={e => handleClienteChange(e.target.value)}
+                  onBlur={() => setTimeout(() => setShowSugg(false), 150)}
+                  onFocus={() => suggestions.length > 0 && setShowSugg(true)}
+                />
+                {showSugg && (
+                  <div style={{
+                    position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 200,
+                    background: 'var(--surface)', border: '1px solid var(--border)',
+                    borderRadius: 6, boxShadow: '0 4px 16px rgba(0,0,0,0.12)', marginTop: 2,
+                  }}>
+                    {suggestions.map(c => (
+                      <div
+                        key={c.id}
+                        onMouseDown={() => selectCliente(c)}
+                        style={{ padding: '9px 12px', cursor: 'pointer', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                      >
+                        <span style={{ flex: 1 }}>{c.nombre}</span>
+                        {c.tipo === 'terciario' && <span style={{ fontSize: 10, color: 'var(--ink-3)' }}>Terciario</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </Field>
+            <Field label="Referencia *">
+              <input className="input" value={op.referencia} disabled={opLocked} onChange={e => setOp(o => ({ ...o, referencia: e.target.value }))} />
+            </Field>
+            <Field label="Cantidad *">
+              <input className="input" type="number" min="1" value={op.cantidad || ''} disabled={opLocked} onChange={e => setOp(o => ({ ...o, cantidad: e.target.value }))} />
+            </Field>
+            <Field label="Fecha de entrega">
+              <input className="input" type="date" value={op.fechaEntrega} disabled={opLocked} onChange={e => setOp(o => ({ ...o, fechaEntrega: e.target.value }))} />
+            </Field>
+          </div>
+        </div>
+
+        {error && <div style={{ color: 'var(--danger, #c0392b)', fontSize: 12 }}>{error}</div>}
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button className="btn" onClick={onClose} disabled={saving}>Cancelar</button>
+          <button className="btn primary" onClick={submit} disabled={saving}>
+            {saving ? 'Creando…' : (opLocked ? 'Reintentar modelo' : 'Crear tarea')}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   )
 }

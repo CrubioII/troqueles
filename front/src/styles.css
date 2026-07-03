@@ -1149,3 +1149,5 @@ input.input[type="number"]::-webkit-inner-spin-button {
   .badge { border: 1px solid #aaa !important; color: #333 !important; background: none !important; }
   .badge .dot { display: none !important; }
 }
+
+@keyframes troquel-spin { to { transform: rotate(360deg); } }

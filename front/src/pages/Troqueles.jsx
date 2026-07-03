@@ -6,6 +6,7 @@ import { Icon } from '../components/Icons'
 import {
   TroquelCostos, PreciosTroquelPanel, ModeloTroquelGestion,
   FormatosCuchillasHistory, FormatoCuchillasForm, ModeloViewer,
+  NuevaTareaTroquelModal,
 } from '../components/Troquel'
 import { getOrdenes, getFormatosCuchillas, getOrdenesPendientes, getOrdenProduccion, getTroquelModelo, updateFormatoCuchillas } from '../api'
 import { usePolling } from '../lib/usePolling'
@@ -33,10 +34,13 @@ const byEntrega = (a, b) => {
   return a.fecha_entrega < b.fecha_entrega ? -1 : (a.fecha_entrega > b.fecha_entrega ? 1 : 0)
 }
 
-function Section({ title, children, style }) {
+function Section({ title, children, style, actions }) {
   return (
     <div className="section" style={{ marginTop: 16, ...style }}>
-      <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)', fontWeight: 700, fontSize: 13 }}>{title}</div>
+      <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)', fontWeight: 700, fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+        <span>{title}</span>
+        {actions}
+      </div>
       {children}
     </div>
   )
@@ -53,14 +57,21 @@ function AdminTroqueles() {
   const [loadingFormatos, setLoadingFormatos] = useState(false)
   const [costRefresh, setCostRefresh] = useState(0)
   const [editFormato, setEditFormato] = useState(null)   // formato en edición (Admin)
+  const [showNueva, setShowNueva] = useState(false)      // modal Nueva tarea de troquel
 
-  useEffect(() => {
+  const loadOrdenes = () => {
     setLoading(true)
-    getOrdenes('?proceso=troquel')
-      .then(d => setOrdenes(asList(d).sort(byEntrega)))
-      .catch(() => {})
+    return getOrdenes('?proceso=troquel')
+      .then(d => {
+        const list = asList(d).sort(byEntrega)
+        setOrdenes(list)
+        return list
+      })
+      .catch(() => [])
       .finally(() => setLoading(false))
-  }, [])
+  }
+
+  useEffect(() => { loadOrdenes() }, [])
 
   const loadFormatos = (ordenId) => {
     setLoadingFormatos(true)
@@ -83,7 +94,10 @@ function AdminTroqueles() {
         <PreciosTroquelPanel onChanged={() => setCostRefresh(k => k + 1)} />
       </Section>
 
-      <Section title="OPs en Troquel">
+      <Section
+        title="OPs en Troquel"
+        actions={<button className="btn sm primary" onClick={() => setShowNueva(true)}>+ Nueva tarea de troquel</button>}
+      >
         {loading ? (
           <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Cargando…</div>
         ) : ordenes.length === 0 ? (
@@ -150,6 +164,19 @@ function AdminTroqueles() {
             )}
           </Section>
         </>
+      )}
+
+      {showNueva && (
+        <NuevaTareaTroquelModal
+          onClose={() => setShowNueva(false)}
+          onCreated={(orden) => {
+            setShowNueva(false)
+            loadOrdenes().then(list => {
+              const row = list.find(o => o.id === orden.id)
+              if (row) selectOrden(row)
+            })
+          }}
+        />
       )}
     </>
   )
