@@ -65,6 +65,15 @@ const ok = (r) => {
   if (!r.ok) throw new Error(`HTTP ${r.status}`)
 }
 
+// Como `json`, pero propaga el mensaje de error del servidor ({ error } o { detail })
+const jsonConError = async (r) => {
+  if (!r.ok) {
+    const body = await r.json().catch(() => null)
+    throw new Error(body?.error || body?.detail || `HTTP ${r.status}`)
+  }
+  return r.json()
+}
+
 export const getPapeles = () =>
   apiFetch(`${BASE}/papel/`).then(json)
 
@@ -310,9 +319,9 @@ export const createRegistroMaquina = (data) =>
     body: JSON.stringify(data),
   }).then(json)
 
-// ─────────────── Troqueles: modelo, formato de cuchillas, precios, costos ───────────────
+// ─────────────── Troqueles: modelo, formato de cuchillas, costos ───────────────
 
-// OP sanitizada para el Operador (sin cliente ni dinero)
+// OP sanitizada para el Operador (sin dinero; incluye cliente)
 export const getOrdenProduccion = (id) =>
   apiFetch(`${BASE}/ordenes/${id}/produccion/`).then(json)
 
@@ -369,25 +378,18 @@ export const getFormatosPendientes = () =>
   apiFetch(`${BASE}/formatos-cuchillas/?estado=pendiente`).then(json)
 
 export const aprobarFormatoCuchillas = (id) =>
-  apiFetch(`${BASE}/formatos-cuchillas/${id}/aprobar/`, { method: 'POST' }).then(json)
+  apiFetch(`${BASE}/formatos-cuchillas/${id}/aprobar/`, { method: 'POST' }).then(jsonConError)
 
 export const devolverFormatoCuchillas = (id, motivo = '') =>
   apiFetch(`${BASE}/formatos-cuchillas/${id}/devolver/`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ motivo }),
-  }).then(json)
+  }).then(jsonConError)
 
-// Precios unitarios (Admin)
-export const getPreciosTroquel = () =>
-  apiFetch(`${BASE}/precios-troquel/`).then(json)
-
-export const updatePrecioTroquel = (id, precio_unitario) =>
-  apiFetch(`${BASE}/precios-troquel/${id}/`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ precio_unitario }),
-  }).then(json)
+// El Operador cancela un formato enviado (pendiente → borrador) para editarlo
+export const cancelarEnvioFormato = (id) =>
+  apiFetch(`${BASE}/formatos-cuchillas/${id}/cancelar_envio/`, { method: 'POST' }).then(jsonConError)
 
 // ─────────────── Dashboard ───────────────
 

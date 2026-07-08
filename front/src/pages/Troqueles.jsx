@@ -4,13 +4,13 @@ import { useAuth } from '../context/AuthContext'
 import { ProgressBar } from '../components/core'
 import { Icon } from '../components/Icons'
 import {
-  TroquelCostos, PreciosTroquelPanel, ModeloTroquelGestion,
+  TroquelCostos, ModeloTroquelGestion,
   FormatosCuchillasHistory, FormatoCuchillasForm, ModeloViewer,
   NuevaTareaTroquelModal,
 } from '../components/Troquel'
 import {
   getOrdenes, getFormatosCuchillas, getOrdenesPendientes, getOrdenProduccion, getTroquelModelo,
-  updateFormatoCuchillas, getFormatosPendientes,
+  updateFormatoCuchillas, getFormatosPendientes, cancelarEnvioFormato,
 } from '../api'
 import { usePolling } from '../lib/usePolling'
 
@@ -102,10 +102,6 @@ function AdminTroqueles() {
 
   return (
     <>
-      <Section title="Precios unitarios de troquel">
-        <PreciosTroquelPanel onChanged={() => setCostRefresh(k => k + 1)} />
-      </Section>
-
       <Section
         title={`Troqueles por aprobar${pendientes.length ? ` (${pendientes.length})` : ''}`}
         actions={
@@ -218,6 +214,8 @@ function OperadorTroqueles() {
   const [opening, setOpening] = useState(false)
   const [formatos, setFormatos] = useState([])
   const [loadingFormatos, setLoadingFormatos] = useState(false)
+  const [cancelando, setCancelando] = useState(false)
+  const [cancelError, setCancelError] = useState(null)
 
   const loadLista = (silent = false) => {
     if (!silent) setLoadingLista(true)
@@ -242,10 +240,25 @@ function OperadorTroqueles() {
 
   const abrir = (op) => {
     setOpening(true)
+    setCancelError(null)
     getOrdenProduccion(op.id)
       .then(full => { setOrden(full); loadFormatos(full.id) })
       .catch(() => {})
       .finally(() => setOpening(false))
+  }
+
+  // Cancelar el envío del formato pendiente para volver a editarlo (→ borrador).
+  // Si el Admin ya lo revisó (409), se muestra el motivo y se refresca el estado real.
+  const cancelarEnvio = (formatoId) => {
+    if (!window.confirm('¿Cancelar el envío del formato para volver a editarlo?')) return
+    setCancelando(true)
+    setCancelError(null)
+    cancelarEnvioFormato(formatoId)
+      .catch(e => setCancelError(e?.message || 'No se pudo cancelar el envío'))
+      .finally(() => {
+        setCancelando(false)
+        loadFormatos(orden.id)
+      })
   }
 
   const volver = () => { setOrden(null); setFormatos([]); loadLista() }
@@ -261,7 +274,7 @@ function OperadorTroqueles() {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ borderBottom: '2px solid var(--line)' }}>
-                {['OP #', 'Entrega', 'Referencia', 'Cantidad', ''].map((h, i) => (
+                {['OP #', 'Entrega', 'Cliente', 'Referencia', 'Cantidad', ''].map((h, i) => (
                   <th key={i} style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--ink-3)', background: 'var(--surface-2)' }}>{h}</th>
                 ))}
               </tr>
@@ -275,6 +288,7 @@ function OperadorTroqueles() {
                     onClick={() => !opening && abrir(op)}>
                     <td style={{ padding: '12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 13 }}>{op.numero}</td>
                     <td style={{ padding: '12px', fontSize: 12, fontWeight: 600, color: ent.color }}>{ent.txt}</td>
+                    <td style={{ padding: '12px', fontWeight: 600 }}>{op.cliente_nombre || '—'}</td>
                     <td style={{ padding: '12px', color: 'var(--ink-2)' }}>{op.referencia}</td>
                     <td style={{ padding: '12px', fontFamily: 'JetBrains Mono, monospace', color: 'var(--ink-2)' }}>{op.cantidad}</td>
                     <td style={{ padding: '12px' }}>
@@ -297,6 +311,7 @@ function OperadorTroqueles() {
         <>
           <div style={{ marginTop: 16, fontSize: 13, fontWeight: 700, color: 'var(--ink-2)' }}>
             <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{orden.numero}</span> — {orden.referencia}
+            {orden.cliente_nombre && <span style={{ marginLeft: 12 }}>Cliente: {orden.cliente_nombre}</span>}
             <span style={{ marginLeft: 12, fontWeight: 400, color: 'var(--ink-3)' }}>Cantidad: {orden.cantidad}</span>
           </div>
 
@@ -312,9 +327,33 @@ function OperadorTroqueles() {
 
           {formatos.length > 0 && formatos[0].estado === 'pendiente' && (
             <div style={{ marginTop: 16, padding: '12px 16px', borderRadius: 8, background: 'var(--warn-soft, #fef6e7)', border: '1px solid var(--warn, #e0a800)', fontSize: 13, color: 'var(--ink-2)' }}>
-              ⏳ El formato de cuchillas fue enviado y está <strong>esperando aprobación del administrador</strong>.
-              No puedes modificarlo mientras se revisa.
+              <div>
+                ⏳ El formato de cuchillas fue enviado y está <strong>esperando aprobación del administrador</strong>.
+                Si necesitas corregirlo, cancela el envío para volver a editarlo.
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
+                <button className="btn sm" disabled={cancelando} onClick={() => cancelarEnvio(formatos[0].id)}>
+                  {cancelando ? 'Cancelando…' : 'Cancelar envío'}
+                </button>
+                {cancelError && <span style={{ fontSize: 12, color: 'var(--danger, #c0392b)' }}>{cancelError}</span>}
+              </div>
             </div>
+          )}
+
+          {formatos.length > 0 && formatos[0].estado === 'borrador' && (
+            <>
+              <div style={{ marginTop: 16, padding: '12px 16px', borderRadius: 8, background: 'var(--surface-2, #f2f2f2)', border: '1px solid var(--line)', fontSize: 13, color: 'var(--ink-2)' }}>
+                ✏️ Cancelaste el envío del formato de cuchillas. Edítalo y reenvíalo cuando esté listo.
+              </div>
+              <Section title="Editar y reenviar formato de cuchillas">
+                <FormatoCuchillasForm
+                  resubmit
+                  formato={formatos[0]}
+                  ordenId={orden.id}
+                  onCreated={() => loadFormatos(orden.id)}
+                />
+              </Section>
+            </>
           )}
 
           {formatos.length > 0 && formatos[0].estado === 'devuelto' && (

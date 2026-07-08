@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Cliente, Papel, Cotizacion, CotizacionProceso, DocumentoCliente, DocumentoClienteItem, OrdenProduccion, OpProceso, RegistroMaquina, PrecioTroquel, TroquelModelo, FormatoCuchillas, Remision, RemisionItem
+from .models import Cliente, Papel, Cotizacion, CotizacionProceso, DocumentoCliente, DocumentoClienteItem, OrdenProduccion, OpProceso, RegistroMaquina, TroquelModelo, FormatoCuchillas, Remision, RemisionItem
 
 
 class ClienteSerializer(serializers.ModelSerializer):
@@ -365,13 +365,6 @@ class RegistroMaquinaSerializer(serializers.ModelSerializer):
 # ─────────────── Troqueles ───────────────
 
 
-class PrecioTroquelSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = PrecioTroquel
-        fields = ["id", "tipo", "precio_unitario", "modificado"]
-        read_only_fields = ["id", "tipo", "modificado"]
-
-
 class TroquelModeloSerializer(serializers.ModelSerializer):
     """Vista completa del modelo (solo Admin): incluye los CM de cobro."""
 
@@ -384,6 +377,7 @@ class TroquelModeloSerializer(serializers.ModelSerializer):
             "troquel_numero", "pinza", "madera", "cuchilla_puntos", "material",
             "espejo", "instrucciones",
             "corte_cm", "score_cm", "hendido_cm",
+            "precio_corte", "precio_score", "precio_hendido", "precio_caucho",
             "creado", "modificado",
         ]
         read_only_fields = ["id", "creado", "modificado"]
@@ -409,26 +403,40 @@ class FormatoCuchillasSerializer(serializers.ModelSerializer):
     cliente_nombre = serializers.SerializerMethodField()
 
     def get_cliente_nombre(self, obj):
-        # Solo el Admin ve el cliente (vista Operador sanitizada).
-        request = self.context.get("request")
-        if not (request and request.user.is_staff):
-            return ""
         return obj.orden.cliente.nombre if (obj.orden and obj.orden.cliente) else ""
+
+    def validate_cauchos(self, value):
+        tipos_validos = dict(FormatoCuchillas.CAUCHO_TIPO_CHOICES)
+        if not isinstance(value, list):
+            raise serializers.ValidationError("Debe ser una lista de filas {tipo, cm}.")
+        filas = []
+        for fila in value:
+            try:
+                tipo = fila.get("tipo")
+                cm = float(fila.get("cm") or 0)
+            except (AttributeError, TypeError, ValueError):
+                raise serializers.ValidationError("Cada fila de caucho requiere tipo válido y cm ≥ 0.")
+            if tipo not in tipos_validos or cm < 0:
+                raise serializers.ValidationError("Cada fila de caucho requiere tipo válido y cm ≥ 0.")
+            filas.append({"tipo": tipo, "cm": cm})
+        return filas
 
     class Meta:
         model = FormatoCuchillas
         fields = [
             "id", "orden", "orden_numero", "cliente_nombre", "fecha_entrega",
             "cuchilla_cm", "grafa_cm",
-            "dos_puntos", "tres_puntos", "perfo",
-            "ch", "sac", "gan",
-            "caucho_cm", "desperdicio",
+            "dos_puntos", "tres_puntos",
+            "ch_cm", "ch_medida", "sac_cm", "sac_medida", "perfo_cm", "perfo_medida",
+            "desperdicio_mm", "cauchos", "gan",
+            "perfo", "ch", "sac", "desperdicio",  # legacy, solo lectura
             "tiempo_encalado_min", "tiempo_encuchillado_min", "tiempo_encauchado_min",
             "operador", "operador_username", "fecha_hora",
             "estado", "devolucion_motivo", "revisado_por_username", "revisado_en",
         ]
         read_only_fields = [
             "id", "operador", "fecha_hora",
+            "perfo", "ch", "sac", "desperdicio",
             "estado", "devolucion_motivo", "revisado_en",
         ]
 
@@ -436,16 +444,17 @@ class FormatoCuchillasSerializer(serializers.ModelSerializer):
 class OrdenOperadorSerializer(serializers.ModelSerializer):
     """Vista sanitizada de la OP para el Operador.
 
-    Sin cliente ni valores monetarios. Solo lo necesario para producir:
-    referencia, cantidad, procesos activos y el modelo del troquel sanitizado.
+    Sin valores monetarios. Incluye cliente, referencia, cantidad,
+    procesos activos y el modelo del troquel sanitizado.
     """
 
     procesos = serializers.SerializerMethodField()
     troquel_modelo = serializers.SerializerMethodField()
+    cliente_nombre = serializers.CharField(source="cliente.nombre", read_only=True, default="")
 
     class Meta:
         model = OrdenProduccion
-        fields = ["id", "numero", "fecha_entrega", "referencia", "cantidad", "procesos", "troquel_modelo"]
+        fields = ["id", "numero", "fecha_entrega", "cliente_nombre", "referencia", "cantidad", "procesos", "troquel_modelo"]
 
     def get_procesos(self, obj):
         return [

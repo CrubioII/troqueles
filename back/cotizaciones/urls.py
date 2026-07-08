@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     ClienteViewSet, PapelViewSet, CotizacionViewSet, DocumentoClienteViewSet,
     OrdenProduccionViewSet, RegistroMaquinaViewSet,
-    PrecioTroquelViewSet, TroquelModeloViewSet, FormatoCuchillasViewSet,
+    TroquelModeloViewSet, FormatoCuchillasViewSet,
     RemisionViewSet,
 )
 from .dashboard_views import DashboardStatsView
@@ -18,7 +18,6 @@ router.register("remisiones", RemisionViewSet, basename="remision")
 router.register("registros-maquina", RegistroMaquinaViewSet, basename="registro-maquina")
 router.register("troquel-modelos", TroquelModeloViewSet, basename="troquel-modelo")
 router.register("formatos-cuchillas", FormatoCuchillasViewSet, basename="formato-cuchillas")
-router.register("precios-troquel", PrecioTroquelViewSet, basename="precio-troquel")
 
 urlpatterns = [
     path("dashboard/stats/", DashboardStatsView.as_view(), name="dashboard-stats"),

@@ -1,7 +1,7 @@
 from django.contrib import admin
 from .models import (
     Cliente, Papel, Cotizacion, CotizacionProceso, OrdenProduccion, OpProceso,
-    PrecioTroquel, TroquelModelo, FormatoCuchillas, Remision, RemisionItem,
+    TroquelModelo, FormatoCuchillas, Remision, RemisionItem,
 )
 
 
@@ -64,12 +64,6 @@ class OrdenProduccionAdmin(admin.ModelAdmin):
     ]
 
 
-@admin.register(PrecioTroquel)
-class PrecioTroquelAdmin(admin.ModelAdmin):
-    list_display = ["tipo", "precio_unitario", "modificado"]
-    list_editable = ["precio_unitario"]
-
-
 @admin.register(TroquelModelo)
 class TroquelModeloAdmin(admin.ModelAdmin):
     list_display = ["troquel_numero", "orden", "material", "creado"]
@@ -79,7 +73,7 @@ class TroquelModeloAdmin(admin.ModelAdmin):
 
 @admin.register(FormatoCuchillas)
 class FormatoCuchillasAdmin(admin.ModelAdmin):
-    list_display = ["orden", "operador", "caucho_cm", "fecha_hora"]
+    list_display = ["orden", "operador", "estado", "fecha_hora"]
     search_fields = ["orden__numero"]
     readonly_fields = ["fecha_hora"]
 

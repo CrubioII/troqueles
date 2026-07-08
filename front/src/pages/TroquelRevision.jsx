@@ -107,11 +107,13 @@ function RevisionDetalle({ formato, onVolver, onResuelto }) {
       .finally(() => setLoadingInfo(false))
   }, [formato.orden])
 
+  // El 409 llega si el operador canceló el envío mientras se revisaba:
+  // se muestra el mensaje del servidor en lugar de uno genérico.
   const aprobar = () => {
     setBusy(true); setError(null)
     aprobarFormatoCuchillas(formato.id)
       .then(() => { setConfirmando(false); onResuelto() })
-      .catch(() => { setConfirmando(false); setError('No se pudo aprobar el formato') })
+      .catch((e) => { setConfirmando(false); setError(e?.message || 'No se pudo aprobar el formato') })
       .finally(() => setBusy(false))
   }
 
@@ -119,7 +121,7 @@ function RevisionDetalle({ formato, onVolver, onResuelto }) {
     setBusy(true); setError(null)
     devolverFormatoCuchillas(formato.id, motivo)
       .then(() => { setDevolviendo(false); onResuelto() })
-      .catch(() => { setDevolviendo(false); setError('No se pudo devolver el formato') })
+      .catch((e) => { setDevolviendo(false); setError(e?.message || 'No se pudo devolver el formato') })
       .finally(() => setBusy(false))
   }
 

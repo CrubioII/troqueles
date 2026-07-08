@@ -58,7 +58,7 @@ def _fmt_num(n):
 
 from .models import (
     Cliente, Papel, Cotizacion, DocumentoCliente, OrdenProduccion, OpProceso,
-    RegistroMaquina, PrecioTroquel, TroquelModelo, FormatoCuchillas,
+    RegistroMaquina, TroquelModelo, FormatoCuchillas,
     Remision, RemisionItem,
 )
 from .serializers import (
@@ -72,7 +72,6 @@ from .serializers import (
     OrdenListSerializer,
     OpProcesoSerializer,
     RegistroMaquinaSerializer,
-    PrecioTroquelSerializer,
     TroquelModeloSerializer,
     FormatoCuchillasSerializer,
     OrdenOperadorSerializer,
@@ -653,6 +652,7 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         if completado:
             if proceso_id == "troquel":
                 # Completar troquel manualmente equivale a aprobar los formatos en cola.
+                # Los borradores no se aprueban: el operador retiró ese envío a propósito.
                 op.formatos_cuchillas.filter(estado="pendiente").update(
                     estado="aprobado", revisado_por=request.user, revisado_en=timezone.now()
                 )
@@ -691,10 +691,10 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
 
         OPs con un proceso activo pendiente (no completado), ordenadas por fecha de
         entrega ascendente (las más próximas a vencer primero; sin fecha al final).
-        Vista sanitizada: sin cliente ni valores monetarios.
+        Vista sanitizada: sin valores monetarios (el cliente sí es visible).
         """
         proceso_id = (request.query_params.get("proceso") or "").strip()
-        qs = OrdenProduccion.objects.all()
+        qs = OrdenProduccion.objects.select_related("cliente")
         if proceso_id:
             qs = qs.filter(
                 procesos__proceso_id=proceso_id,
@@ -713,16 +713,26 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
     def troquel_costos(self, request, pk=None):
         """GET /api/ordenes/{id}/troquel_costos/ — subtotales y total (solo Admin).
 
-        subtotal = cm × precio_unitario. CORTE/SCORE/HENDIDO vienen del modelo;
-        el caucho suma los caucho_cm registrados por el Operador.
+        subtotal = cm × precio unitario de la OP (definido en su TroquelModelo).
+        CORTE/SCORE/HENDIDO vienen del modelo; el caucho suma las filas
+        registradas por el Operador en los formatos de cuchillas.
         """
         op = self.get_object()
-        precios = {p.tipo: float(p.precio_unitario) for p in PrecioTroquel.objects.all()}
         modelo = getattr(op, "troquel_modelo", None)
+        precios = {
+            "corte": float(modelo.precio_corte) if modelo else 0,
+            "score": float(modelo.precio_score) if modelo else 0,
+            "hendido": float(modelo.precio_hendido) if modelo else 0,
+            "caucho": float(modelo.precio_caucho) if modelo else 0,
+        }
         corte_cm = float(modelo.corte_cm) if modelo else 0
         score_cm = float(modelo.score_cm) if modelo else 0
         hendido_cm = float(modelo.hendido_cm) if modelo else 0
-        caucho_cm = float(sum(f.caucho_cm for f in op.formatos_cuchillas.all()))
+        caucho_cm = sum(
+            float(fila.get("cm") or 0)
+            for f in op.formatos_cuchillas.all()
+            for fila in (f.cauchos or [])
+        )
         cm = {"corte": corte_cm, "score": score_cm, "hendido": hendido_cm, "caucho": caucho_cm}
         subtotales = {tipo: round(cm[tipo] * precios.get(tipo, 0), 2) for tipo in cm}
         total = round(sum(subtotales.values()), 2)
@@ -970,17 +980,6 @@ class RemisionViewSet(viewsets.ModelViewSet):
         return Response(RemisionSerializer(target).data)
 
 
-class PrecioTroquelViewSet(viewsets.ModelViewSet):
-    """Precios unitarios de troquel. Solo Admin (no visibles al Operador)."""
-
-    queryset = PrecioTroquel.objects.all().order_by("tipo")
-    serializer_class = PrecioTroquelSerializer
-
-    def initial(self, request, *args, **kwargs):
-        super().initial(request, *args, **kwargs)
-        _require_admin(request)
-
-
 class TroquelModeloViewSet(viewsets.ModelViewSet):
     """Modelo del troquel asociado a una OP. CRUD solo Admin (subida de archivo)."""
 
@@ -1055,10 +1054,11 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
         return super().partial_update(request, *args, **kwargs)
 
     def _check_update_permission(self, request):
-        # Operador solo puede editar (reenviar) un formato devuelto por el Admin.
+        # Operador solo puede editar (reenviar) un formato devuelto por el Admin
+        # o un borrador propio (envío cancelado con cancelar_envio).
         if request.user.is_staff:
             return
-        if self.get_object().estado != "devuelto":
+        if self.get_object().estado not in ("devuelto", "borrador"):
             raise PermissionDenied("Solo administradores pueden realizar esta acción.")
 
     def perform_update(self, serializer):
@@ -1076,6 +1076,23 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
         _require_admin(request)
         return super().destroy(request, *args, **kwargs)
 
+    @action(detail=True, methods=["post"], url_path="cancelar_envio")
+    def cancelar_envio(self, request, pk=None):
+        """POST /api/formatos-cuchillas/{id}/cancelar_envio/ — el Operador dueño
+        retira un formato pendiente para volver a editarlo (→ borrador)."""
+        formato = self.get_object()
+        if not request.user.is_staff and formato.operador_id != request.user.id:
+            raise PermissionDenied("Solo el operador que envió el formato puede cancelarlo.")
+        # UPDATE condicional atómico: si el Admin lo revisó un instante antes,
+        # no actualiza ninguna fila y respondemos 409.
+        updated = FormatoCuchillas.objects.filter(pk=formato.pk, estado="pendiente").update(
+            estado="borrador", devolucion_motivo=""
+        )
+        if not updated:
+            return Response({"error": "El formato ya fue revisado por el administrador."}, status=409)
+        formato.refresh_from_db()
+        return Response(self.get_serializer(formato).data)
+
     @action(detail=True, methods=["post"], url_path="aprobar")
     def aprobar(self, request, pk=None):
         """POST /api/formatos-cuchillas/{id}/aprobar/ — Admin aprueba el formato.
@@ -1085,6 +1102,8 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
         """
         _require_admin(request)
         formato = self.get_object()
+        if formato.estado == "borrador":
+            return Response({"error": "El operador canceló el envío de este formato."}, status=409)
         formato.estado = "aprobado"
         formato.devolucion_motivo = ""
         formato.revisado_por = request.user
@@ -1107,6 +1126,8 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
         """
         _require_admin(request)
         formato = self.get_object()
+        if formato.estado == "borrador":
+            return Response({"error": "El operador canceló el envío de este formato."}, status=409)
         formato.estado = "devuelto"
         formato.devolucion_motivo = (request.data.get("motivo") or "").strip()[:300]
         formato.revisado_por = request.user

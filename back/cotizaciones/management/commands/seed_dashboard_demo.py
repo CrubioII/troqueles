@@ -152,7 +152,7 @@ class Command(BaseCommand):
                     orden=op,
                     cuchilla_cm=random.uniform(50, 300),
                     grafa_cm=random.uniform(10, 80),
-                    caucho_cm=random.uniform(20, 150),
+                    cauchos=[{"tipo": "verde", "cm": round(random.uniform(20, 150), 1)}],
                     tiempo_encalado_min=random.randint(5, 25),
                     tiempo_encuchillado_min=random.randint(15, 60),
                     tiempo_encauchado_min=random.randint(8, 30),

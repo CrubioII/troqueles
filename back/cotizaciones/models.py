@@ -309,27 +309,6 @@ class RegistroMaquina(models.Model):
         return f"{self.orden.numero} · {self.maquina} · {self.fecha_hora:%Y-%m-%d %H:%M}"
 
 
-class PrecioTroquel(models.Model):
-    """Precio unitario por tipo de cobro de troquel (COP por cm lineal).
-
-    Gestionado por el Admin. Defaults sembrados en migración.
-    """
-
-    TIPO_CHOICES = [
-        ("corte", "Corte"),
-        ("score", "Score"),
-        ("hendido", "C. Hendido"),
-        ("caucho", "Caucho"),
-    ]
-
-    tipo = models.CharField(max_length=20, choices=TIPO_CHOICES, unique=True)
-    precio_unitario = models.DecimalField(max_digits=12, decimal_places=4, default=0, help_text="COP por cm")
-    modificado = models.DateTimeField(auto_now=True)
-
-    def __str__(self):
-        return f"{self.get_tipo_display()}: {self.precio_unitario}"
-
-
 class TroquelModelo(models.Model):
     """Modelo del troquel asociado a una OP. Cargado por el Admin.
 
@@ -356,6 +335,11 @@ class TroquelModelo(models.Model):
     corte_cm = models.DecimalField(max_digits=12, decimal_places=3, default=0)
     score_cm = models.DecimalField(max_digits=12, decimal_places=3, default=0)
     hendido_cm = models.DecimalField(max_digits=12, decimal_places=3, default=0)
+    # Precios unitarios por OP (COP por cm, definidos por el Admin)
+    precio_corte = models.DecimalField(max_digits=12, decimal_places=4, default=0)
+    precio_score = models.DecimalField(max_digits=12, decimal_places=4, default=0)
+    precio_hendido = models.DecimalField(max_digits=12, decimal_places=4, default=0)
+    precio_caucho = models.DecimalField(max_digits=12, decimal_places=4, default=0)
     creado = models.DateTimeField(auto_now_add=True)
     modificado = models.DateTimeField(auto_now=True)
 
@@ -371,6 +355,21 @@ class FormatoCuchillas(models.Model):
     cada uno con fecha/hora y operador estampados server-side (trazabilidad).
     """
 
+    CH_MEDIDA_CHOICES = [(v, v) for v in ["3x3", "4x4", "6x6", "8x8", "10x10"]]
+    SAC_MEDIDA_CHOICES = (
+        [(str(n), f"{n} (extensor)") for n in range(1, 11)]
+        + [(str(n), f"{n} (tubo)") for n in range(11, 16)]
+    )
+    PERFO_MEDIDA_CHOICES = [
+        (v, v)
+        for v in ["1x1", "2x1", "2x2", "3x1", "3x2", "3x3", "4x1", "4x2", "4x3", "4x4", "6x6", "10x10"]
+    ]
+    CAUCHO_TIPO_CHOICES = [
+        ("verde", "Caucho Verde"),
+        ("profigumi", "Profigumi"),
+        ("grupolam", "Grupolam"),
+    ]
+
     orden = models.ForeignKey(
         OrdenProduccion, on_delete=models.CASCADE, related_name="formatos_cuchillas"
     )
@@ -378,11 +377,20 @@ class FormatoCuchillas(models.Model):
     grafa_cm = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     dos_puntos = models.BooleanField(default=False)
     tres_puntos = models.BooleanField(default=False)
+    ch_cm = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    ch_medida = models.CharField(max_length=10, choices=CH_MEDIDA_CHOICES, blank=True, default="")
+    sac_cm = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    sac_medida = models.CharField(max_length=5, choices=SAC_MEDIDA_CHOICES, blank=True, default="")
+    perfo_cm = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    perfo_medida = models.CharField(max_length=10, choices=PERFO_MEDIDA_CHOICES, blank=True, default="")
+    desperdicio_mm = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    # Filas de caucho: [{"tipo": "verde"|"profigumi"|"grupolam", "cm": <number>}, ...]
+    cauchos = models.JSONField(default=list, blank=True)
+    gan = models.CharField(max_length=100, blank=True, default="")
+    # Legacy (solo lectura, formatos anteriores al formulario estructurado)
     perfo = models.BooleanField(default=False)
     ch = models.CharField(max_length=100, blank=True, default="")
     sac = models.CharField(max_length=100, blank=True, default="")
-    gan = models.CharField(max_length=100, blank=True, default="")
-    caucho_cm = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     desperdicio = models.CharField(max_length=200, blank=True, default="")
     # Tiempos por fase en minutos enteros (analizable: promedios, sumas, gráficos)
     tiempo_encalado_min = models.PositiveIntegerField(default=0)
@@ -398,6 +406,7 @@ class FormatoCuchillas(models.Model):
         ("pendiente", "Pendiente de aprobación"),
         ("aprobado", "Aprobado"),
         ("devuelto", "Devuelto al operador"),
+        ("borrador", "Borrador (envío cancelado)"),
     ]
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default="pendiente")
     devolucion_motivo = models.CharField(max_length=300, blank=True, default="")

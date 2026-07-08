@@ -4,7 +4,6 @@ import { fmtCOP, fmtNum, NumField, Checkbox, MoneyInput } from './core'
 import {
   getTroquelModelo, saveTroquelModelo, getTroquelCostos, extraerPdfTroquel,
   getFormatosCuchillas, createFormatoCuchillas, updateFormatoCuchillas,
-  getPreciosTroquel, updatePrecioTroquel,
   getClientes, createCliente, createOrden,
 } from '../api'
 
@@ -13,14 +12,40 @@ const asList = (data) => (Array.isArray(data) ? data : (data?.results || []))
 const PRECIO_LABELS = { corte: 'Corte', score: 'Score', hendido: 'C. Hendido', caucho: 'Caucho' }
 const IMG_RE = /\.(png|jpe?g|gif|webp|bmp|svg)$/i
 
+// Tamaños disponibles en el formato de cuchillas (deben coincidir con el backend)
+const CH_SIZES = ['3x3', '4x4', '6x6', '8x8', '10x10']
+const SAC_SIZES = [
+  ...Array.from({ length: 10 }, (_, i) => ({ value: String(i + 1), label: `${i + 1} (extensor)` })),
+  ...Array.from({ length: 5 }, (_, i) => ({ value: String(i + 11), label: `${i + 11} (tubo)` })),
+]
+const PERFO_SIZES = ['1x1', '2x1', '2x2', '3x1', '3x2', '3x3', '4x1', '4x2', '4x3', '4x4', '6x6', '10x10']
+const CAUCHO_TIPOS = [
+  { value: 'verde', label: 'Caucho Verde' },
+  { value: 'profigumi', label: 'Profigumi' },
+  { value: 'grupolam', label: 'Grupolam' },
+]
+const CAUCHO_TIPO_LABELS = Object.fromEntries(CAUCHO_TIPOS.map(t => [t.value, t.label]))
+
 // ────────── helpers de presentación ──────────
 
-function Field({ label, children, full }) {
+// `w`: ancho fijo compacto (campos numéricos/selects cortos); sin `w` el campo crece.
+function Field({ label, children, full, w }) {
+  const flex = full ? '1 1 100%' : (w ? '0 0 auto' : '1 1 160px')
   return (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: full ? '1 1 100%' : '1 1 160px', minWidth: 0 }}>
-      <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-3)' }}>{label}</span>
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 4, flex, width: w, minWidth: 0 }}>
+      {label ? <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-3)', whiteSpace: 'nowrap' }}>{label}</span> : null}
       {children}
     </label>
+  )
+}
+
+// Grupo visual de campos relacionados (p.ej. cm + tamaño de un mismo concepto)
+function FieldGroup({ title, children }) {
+  return (
+    <fieldset style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '6px 12px 10px', margin: 0, display: 'flex', gap: 10 }}>
+      <legend style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink-3)', padding: '0 4px' }}>{title}</legend>
+      {children}
+    </fieldset>
   )
 }
 
@@ -47,6 +72,7 @@ function SectionHeader({ children }) {
 const EMPTY_MODELO = {
   instrucciones: '',
   corte_cm: 0, score_cm: 0, hendido_cm: 0,
+  precio_corte: 0, precio_score: 0, precio_hendido: 0, precio_caucho: 0,
 }
 
 export function TroquelModeloForm({ ordenId, onSaved, onLoaded }) {
@@ -128,7 +154,8 @@ export function TroquelModeloForm({ ordenId, onSaved, onLoaded }) {
     const fd = new FormData()
     fd.append('orden', ordenId)
     fd.append('instrucciones', form.instrucciones ?? '')
-    ;['corte_cm', 'score_cm', 'hendido_cm'].forEach(k => fd.append(k, form[k] ?? 0))
+    ;['corte_cm', 'score_cm', 'hendido_cm',
+      'precio_corte', 'precio_score', 'precio_hendido', 'precio_caucho'].forEach(k => fd.append(k, form[k] ?? 0))
     if (archivo) fd.append('archivo', archivo)
     saveTroquelModelo(modelo?.id, fd)
       .then(saved => {
@@ -159,9 +186,21 @@ export function TroquelModeloForm({ ordenId, onSaved, onLoaded }) {
           CM Lineales (alimentan el cálculo de costos)
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
-          <Field label="Corte (cm)"><NumField value={form.corte_cm} onChange={v => set('corte_cm', v)} /></Field>
-          <Field label="Score (cm)"><NumField value={form.score_cm} onChange={v => set('score_cm', v)} /></Field>
-          <Field label="C. Hendido (cm)"><NumField value={form.hendido_cm} onChange={v => set('hendido_cm', v)} /></Field>
+          <Field label="Corte (cm)" w={110}><NumField value={form.corte_cm} onChange={v => set('corte_cm', v)} /></Field>
+          <Field label="Score (cm)" w={110}><NumField value={form.score_cm} onChange={v => set('score_cm', v)} /></Field>
+          <Field label="C. Hendido (cm)" w={110}><NumField value={form.hendido_cm} onChange={v => set('hendido_cm', v)} /></Field>
+        </div>
+      </div>
+
+      <div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
+          Precios unitarios de esta OP (COP/cm)
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+          <Field label="Corte" w={130}><MoneyInput value={Number(form.precio_corte) || 0} onChange={v => set('precio_corte', v)} suffix="" /></Field>
+          <Field label="Score" w={130}><MoneyInput value={Number(form.precio_score) || 0} onChange={v => set('precio_score', v)} suffix="" /></Field>
+          <Field label="C. Hendido" w={130}><MoneyInput value={Number(form.precio_hendido) || 0} onChange={v => set('precio_hendido', v)} suffix="" /></Field>
+          <Field label="Caucho" w={130}><MoneyInput value={Number(form.precio_caucho) || 0} onChange={v => set('precio_caucho', v)} suffix="" /></Field>
         </div>
       </div>
 
@@ -261,10 +300,27 @@ export function ModeloTroquelGestion({ ordenId, onSaved }) {
 
 const EMPTY_FORMATO = {
   cuchilla_cm: 0, grafa_cm: 0,
-  dos_puntos: false, tres_puntos: false, perfo: false,
-  ch: '', sac: '', gan: '',
-  caucho_cm: 0, desperdicio: '',
+  dos_puntos: false, tres_puntos: false,
+  ch_cm: 0, ch_medida: '',
+  sac_cm: 0, sac_medida: '',
+  perfo_cm: 0, perfo_medida: '',
+  gan: '',
+  cauchos: [{ tipo: 'verde', cm: 0 }],
+  desperdicio_mm: 0,
   tiempo_encalado_min: 0, tiempo_encuchillado_min: 0, tiempo_encauchado_min: 0,
+}
+
+// Payload explícito: los campos legacy (ch, sac, perfo, desperdicio…) que llegan
+// al cargar un formato existente son de solo lectura y no deben reenviarse.
+const formatoPayload = (form) =>
+  Object.fromEntries(Object.keys(EMPTY_FORMATO).map(k => [k, form[k]]))
+
+const initFormato = (formato) => {
+  if (!formato) return EMPTY_FORMATO
+  const f = { ...EMPTY_FORMATO }
+  Object.keys(EMPTY_FORMATO).forEach(k => { if (formato[k] != null) f[k] = formato[k] })
+  if (!Array.isArray(f.cauchos) || !f.cauchos.length) f.cauchos = [{ tipo: 'verde', cm: 0 }]
+  return f
 }
 
 // Entrada de duración: horas + minutos → guarda minutos enteros (analizable)
@@ -293,17 +349,21 @@ const fmtMin = (m) => {
 
 export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, onCancel, resubmit = false }) {
   const isEdit = !!formato && !resubmit
-  const [form, setForm] = useState(() => formato ? { ...EMPTY_FORMATO, ...formato } : EMPTY_FORMATO)
+  const [form, setForm] = useState(() => initFormato(formato))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
   const [okMsg, setOkMsg] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+  const setCaucho = (idx, k, v) =>
+    setForm(f => ({ ...f, cauchos: f.cauchos.map((row, i) => (i === idx ? { ...row, [k]: v } : row)) }))
+  const addCaucho = () => setForm(f => ({ ...f, cauchos: [...f.cauchos, { tipo: 'verde', cm: 0 }] }))
+  const removeCaucho = (idx) => setForm(f => ({ ...f, cauchos: f.cauchos.filter((_, i) => i !== idx) }))
 
   // Edición (Admin): PATCH directo, sin popup de irreversibilidad.
   const submitEdit = () => {
     setSaving(true); setError(null); setOkMsg(false)
-    updateFormatoCuchillas(formato.id, form)
+    updateFormatoCuchillas(formato.id, formatoPayload(form))
       .then(() => { setOkMsg(true); onUpdated && onUpdated() })
       .catch(() => setError('No se pudo actualizar el formato'))
       .finally(() => setSaving(false))
@@ -313,8 +373,8 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
   const submitCreate = () => {
     setSaving(true); setError(null); setOkMsg(false)
     const req = resubmit
-      ? updateFormatoCuchillas(formato.id, form)
-      : createFormatoCuchillas({ orden: ordenId, ...form })
+      ? updateFormatoCuchillas(formato.id, formatoPayload(form))
+      : createFormatoCuchillas({ orden: ordenId, ...formatoPayload(form) })
     req
       .then(() => {
         setForm(EMPTY_FORMATO)
@@ -331,26 +391,77 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
 
   return (
     <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
-        <Field label="Cuchilla (cm)"><NumField value={form.cuchilla_cm} onChange={v => set('cuchilla_cm', v)} /></Field>
-        <Field label="Grafa (cm)"><NumField value={form.grafa_cm} onChange={v => set('grafa_cm', v)} /></Field>
-        <Field label="Caucho (cm)"><NumField value={form.caucho_cm} onChange={v => set('caucho_cm', v)} /></Field>
-      </div>
-
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 18 }}>
-        {[['dos_puntos', '2 puntos'], ['tres_puntos', '3 puntos'], ['perfo', 'Perfo']].map(([k, label]) => (
-          <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-end' }}>
+        <Field label="Cuchilla (cm)" w={110}><NumField value={form.cuchilla_cm} onChange={v => set('cuchilla_cm', v)} /></Field>
+        <Field label="Grafa (cm)" w={110}><NumField value={form.grafa_cm} onChange={v => set('grafa_cm', v)} /></Field>
+        {[['dos_puntos', '2 puntos'], ['tres_puntos', '3 puntos']].map(([k, label]) => (
+          <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, paddingBottom: 8 }}>
             <Checkbox checked={form[k]} onChange={() => set(k, !form[k])} />
             <span style={{ fontSize: 12, color: 'var(--ink-2)' }}>{label}</span>
           </div>
         ))}
       </div>
 
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
-        <Field label="ch"><input className="input" value={form.ch} onChange={e => set('ch', e.target.value)} /></Field>
-        <Field label="sac"><input className="input" value={form.sac} onChange={e => set('sac', e.target.value)} /></Field>
-        <Field label="gan"><input className="input" value={form.gan} onChange={e => set('gan', e.target.value)} /></Field>
-        <Field label="Desperdicio"><input className="input" value={form.desperdicio} onChange={e => set('desperdicio', e.target.value)} /></Field>
+      {/* Pares cm + tamaño agrupados por concepto */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 28, rowGap: 14 }}>
+        <FieldGroup title="CH">
+          <Field label="cm" w={90}><NumField value={form.ch_cm} onChange={v => set('ch_cm', v)} /></Field>
+          <Field label="Tamaño" w={100}>
+            <select className="input" value={form.ch_medida} onChange={e => set('ch_medida', e.target.value)}>
+              <option value="">—</option>
+              {CH_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </Field>
+        </FieldGroup>
+        <FieldGroup title="Sacabocados">
+          <Field label="cm" w={90}><NumField value={form.sac_cm} onChange={v => set('sac_cm', v)} /></Field>
+          <Field label="Tamaño" w={130}>
+            <select className="input" value={form.sac_medida} onChange={e => set('sac_medida', e.target.value)}>
+              <option value="">—</option>
+              {SAC_SIZES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+            </select>
+          </Field>
+        </FieldGroup>
+        <FieldGroup title="Perforaciones">
+          <Field label="cm" w={90}><NumField value={form.perfo_cm} onChange={v => set('perfo_cm', v)} /></Field>
+          <Field label="Tamaño" w={100}>
+            <select className="input" value={form.perfo_medida} onChange={e => set('perfo_medida', e.target.value)}>
+              <option value="">—</option>
+              {PERFO_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </Field>
+        </FieldGroup>
+      </div>
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
+        <Field label="gan" w={140}><input className="input" value={form.gan} onChange={e => set('gan', e.target.value)} /></Field>
+        <Field label="Desperdicio (mm)" w={110}><NumField value={form.desperdicio_mm} onChange={v => set('desperdicio_mm', v)} /></Field>
+      </div>
+
+      <div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
+          Caucho — tipo(s) usados y cm de cada uno
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {form.cauchos.map((row, idx) => (
+            <div key={idx} style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-end' }}>
+              <Field label={idx === 0 ? 'Tipo de caucho' : ''} w={170}>
+                <select className="input" value={row.tipo} onChange={e => setCaucho(idx, 'tipo', e.target.value)}>
+                  {CAUCHO_TIPOS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
+              </Field>
+              <Field label={idx === 0 ? 'Cantidad (cm)' : ''} w={110}><NumField value={row.cm} onChange={v => setCaucho(idx, 'cm', v)} /></Field>
+              <button
+                className="btn sm" onClick={() => removeCaucho(idx)}
+                disabled={form.cauchos.length === 1}
+                style={{ marginBottom: 4 }}
+              >
+                Quitar
+              </button>
+            </div>
+          ))}
+          <button className="btn sm" onClick={addCaucho} style={{ alignSelf: 'flex-start', marginTop: 2 }}>+ Agregar caucho</button>
+        </div>
       </div>
 
       <div>
@@ -419,6 +530,7 @@ const ESTADO_BADGE = {
   pendiente: { label: 'Pendiente', bg: 'var(--warn-soft, #fef6e7)', color: 'var(--warn, #e0a800)' },
   aprobado: { label: 'Aprobado', bg: 'var(--ok-soft, #e8f6ec)', color: 'var(--ok, #2e8b57)' },
   devuelto: { label: 'Devuelto', bg: 'var(--danger-soft, #fdecea)', color: 'var(--danger, #c0392b)' },
+  borrador: { label: 'Borrador', bg: 'var(--surface-2, #f2f2f2)', color: 'var(--ink-3, #777)' },
 }
 
 export function EstadoFormatoBadge({ estado }) {
@@ -433,8 +545,14 @@ export function EstadoFormatoBadge({ estado }) {
 export function FormatosCuchillasHistory({ formatos, loading, onEdit }) {
   if (loading) return <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Cargando…</div>
   if (!formatos.length) return <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Sin formatos registrados.</div>
-  const headers = ['Fecha / Hora', 'Estado', 'Operador', 'Cuchilla', 'Grafa', 'Caucho', 'Puntos', 'ch / sac / gan', 'Tiempos (enc/cuch/cauch)']
+  const headers = ['Fecha / Hora', 'Estado', 'Operador', 'Cuchilla', 'Grafa', 'Caucho', 'Puntos', 'ch / sac / perfo / gan', 'Desperdicio', 'Tiempos (enc/cuch/cauch)']
   if (onEdit) headers.push('')
+
+  // Nuevo formato: "12,50cm 4x4" — legacy: texto libre
+  const medidaCell = (cm, medida, legacy) => {
+    if (Number(cm) > 0 || medida) return `${fmtNum(cm, 2)}cm${medida ? ` ${medida}` : ''}`
+    return legacy || ''
+  }
   return (
     <div style={{ overflowX: 'auto' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -448,6 +566,18 @@ export function FormatosCuchillasHistory({ formatos, loading, onEdit }) {
         <tbody>
           {formatos.map((f, idx) => {
             const puntos = [f.dos_puntos && '2pt', f.tres_puntos && '3pt', f.perfo && 'perfo'].filter(Boolean).join(', ') || '—'
+            const caucho = (f.cauchos || []).length
+              ? f.cauchos.map(r => `${CAUCHO_TIPO_LABELS[r.tipo] || r.tipo}: ${fmtNum(r.cm, 2)}`).join(' · ')
+              : '—'
+            const chSacGan = [
+              medidaCell(f.ch_cm, f.ch_medida, f.ch),
+              medidaCell(f.sac_cm, f.sac_medida, f.sac),
+              medidaCell(f.perfo_cm, f.perfo_medida, ''),
+              f.gan,
+            ].filter(Boolean).join(' / ') || '—'
+            const desperdicio = Number(f.desperdicio_mm) > 0
+              ? `${fmtNum(f.desperdicio_mm, 1)} mm`
+              : (f.desperdicio || '—')
             return (
               <tr key={f.id} style={{ borderBottom: '1px solid var(--line)', background: idx % 2 ? 'var(--surface-2)' : 'var(--surface)' }}>
                 <td style={{ padding: '8px 12px', fontFamily: 'JetBrains Mono, monospace', fontSize: 11, whiteSpace: 'nowrap' }}>{fmtFecha(f.fecha_hora)}</td>
@@ -455,9 +585,10 @@ export function FormatosCuchillasHistory({ formatos, loading, onEdit }) {
                 <td style={{ padding: '8px 12px', fontWeight: 600 }}>{f.operador_username || '—'}</td>
                 <td style={{ padding: '8px 12px' }}>{fmtNum(f.cuchilla_cm, 2)}</td>
                 <td style={{ padding: '8px 12px' }}>{fmtNum(f.grafa_cm, 2)}</td>
-                <td style={{ padding: '8px 12px' }}>{fmtNum(f.caucho_cm, 2)}</td>
+                <td style={{ padding: '8px 12px', fontSize: 12, whiteSpace: 'nowrap' }}>{caucho}</td>
                 <td style={{ padding: '8px 12px', fontSize: 12 }}>{puntos}</td>
-                <td style={{ padding: '8px 12px', fontSize: 12 }}>{[f.ch, f.sac, f.gan].filter(Boolean).join(' / ') || '—'}</td>
+                <td style={{ padding: '8px 12px', fontSize: 12 }}>{chSacGan}</td>
+                <td style={{ padding: '8px 12px', fontSize: 12 }}>{desperdicio}</td>
                 <td style={{ padding: '8px 12px', fontSize: 12 }}>{[f.tiempo_encalado_min, f.tiempo_encuchillado_min, f.tiempo_encauchado_min].map(fmtMin).join(' / ')}</td>
                 {onEdit && (
                   <td style={{ padding: '8px 12px' }}>
@@ -519,83 +650,6 @@ export function TroquelCostos({ ordenId, refreshKey }) {
   )
 }
 
-// ────────── Precios unitarios (Admin) ──────────
-
-export function PreciosTroquelPanel({ onChanged }) {
-  const [precios, setPrecios] = useState([])   // valores originales (server)
-  const [edit, setEdit] = useState({})         // { [id]: precio_unitario } editado en vivo
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [okMsg, setOkMsg] = useState(false)
-
-  const load = () => {
-    setLoading(true)
-    getPreciosTroquel()
-      .then(d => {
-        const list = asList(d)
-        setPrecios(list)
-        setEdit(Object.fromEntries(list.map(p => [p.id, Number(p.precio_unitario)])))
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false))
-  }
-  useEffect(() => { load() }, [])
-
-  const setLocal = (id, v) => { setOkMsg(false); setEdit(e => ({ ...e, [id]: v })) }
-
-  // Filas modificadas respecto al valor original
-  const dirty = precios.filter(p => Number(edit[p.id]) !== Number(p.precio_unitario))
-
-  const saveAll = () => {
-    if (!dirty.length) return
-    setSaving(true); setOkMsg(false)
-    Promise.all(dirty.map(p => updatePrecioTroquel(p.id, edit[p.id])))
-      .then(() => {
-        setPrecios(ps => ps.map(p => ({ ...p, precio_unitario: edit[p.id] })))
-        setOkMsg(true)
-        onChanged && onChanged()
-      })
-      .catch(() => {})
-      .finally(() => setSaving(false))
-  }
-
-  if (loading) return <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Cargando precios…</div>
-
-  return (
-    <div style={{ padding: 16 }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse', maxWidth: 420 }}>
-        <thead>
-          <tr style={{ borderBottom: '2px solid var(--line)' }}>
-            {['Tipo', 'Precio (COP/cm)'].map((h, i) => (
-              <th key={i} style={{ padding: '8px 12px', textAlign: i ? 'right' : 'left', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--ink-3)', background: 'var(--surface-2)' }}>{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {precios.map((p, idx) => (
-            <tr key={p.id} style={{ borderBottom: '1px solid var(--line)', background: idx % 2 ? 'var(--surface-2)' : 'var(--surface)' }}>
-              <td style={{ padding: '8px 12px', fontWeight: 600 }}>{PRECIO_LABELS[p.tipo] || p.tipo}</td>
-              <td style={{ padding: '8px 12px', textAlign: 'right' }}>
-                <div style={{ display: 'inline-flex', justifyContent: 'flex-end', width: 160 }}>
-                  <MoneyInput value={Number(edit[p.id] ?? 0)} onChange={v => setLocal(p.id, v)} suffix="" />
-                </div>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12 }}>
-        <button className="btn primary" onClick={saveAll} disabled={saving || !dirty.length}>
-          {saving ? 'Guardando…' : 'Guardar cambios'}
-        </button>
-        {!!dirty.length && !saving && <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>{dirty.length} cambio(s) sin guardar</span>}
-        {okMsg && <span style={{ fontSize: 12, color: 'var(--accent)' }}>Precios guardados ✓</span>}
-      </div>
-    </div>
-  )
-}
-
 // ────────── Nueva tarea de troquel (Admin) ──────────
 // Crea una OP directa (sin cotización) con el proceso "troquel" activo y le
 // adjunta el modelo (PDF/imagen + campos técnicos) en un solo flujo.
@@ -604,6 +658,7 @@ const EMPTY_TAREA_MODELO = {
   troquel_numero: '', pinza: '', madera: '', cuchilla_puntos: '', material: '',
   espejo: false, instrucciones: '',
   corte_cm: 0, score_cm: 0, hendido_cm: 0,
+  precio_corte: 0, precio_score: 0, precio_hendido: 0, precio_caucho: 0,
 }
 
 export function NuevaTareaTroquelModal({ onClose, onCreated }) {
@@ -681,7 +736,9 @@ export function NuevaTareaTroquelModal({ onClose, onCreated }) {
 
   const hasModeloData = () =>
     ['troquel_numero', 'pinza', 'madera', 'cuchilla_puntos', 'material', 'instrucciones'].some(k => String(modelo[k] || '').trim())
-    || modelo.espejo || Number(modelo.corte_cm) > 0 || Number(modelo.score_cm) > 0 || Number(modelo.hendido_cm) > 0
+    || modelo.espejo
+    || ['corte_cm', 'score_cm', 'hendido_cm',
+        'precio_corte', 'precio_score', 'precio_hendido', 'precio_caucho'].some(k => Number(modelo[k]) > 0)
 
   // El visor del operador solo muestra instrucciones + archivo: si no se
   // escribieron instrucciones, se componen desde los campos técnicos.
@@ -731,7 +788,8 @@ export function NuevaTareaTroquelModal({ onClose, onCreated }) {
         ;['troquel_numero', 'pinza', 'madera', 'cuchilla_puntos', 'material'].forEach(k => fd.append(k, modelo[k] ?? ''))
         fd.append('instrucciones', composedInstrucciones())
         fd.append('espejo', modelo.espejo ? 'true' : 'false')
-        ;['corte_cm', 'score_cm', 'hendido_cm'].forEach(k => fd.append(k, modelo[k] ?? 0))
+        ;['corte_cm', 'score_cm', 'hendido_cm',
+          'precio_corte', 'precio_score', 'precio_hendido', 'precio_caucho'].forEach(k => fd.append(k, modelo[k] ?? 0))
         if (archivo) fd.append('archivo', archivo)
         await saveTroquelModelo(null, fd)
       }
@@ -795,9 +853,18 @@ export function NuevaTareaTroquelModal({ onClose, onCreated }) {
             <span style={{ fontSize: 12, color: 'var(--ink-2)' }}>Hacer espejo <span style={{ color: 'var(--ink-3)' }}>(sin marcar = NO hacer espejo)</span></span>
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 10 }}>
-            <Field label="Corte (cm)"><NumField value={modelo.corte_cm} onChange={v => setM('corte_cm', v)} /></Field>
-            <Field label="Score (cm)"><NumField value={modelo.score_cm} onChange={v => setM('score_cm', v)} /></Field>
-            <Field label="C. Hendido (cm)"><NumField value={modelo.hendido_cm} onChange={v => setM('hendido_cm', v)} /></Field>
+            <Field label="Corte (cm)" w={110}><NumField value={modelo.corte_cm} onChange={v => setM('corte_cm', v)} /></Field>
+            <Field label="Score (cm)" w={110}><NumField value={modelo.score_cm} onChange={v => setM('score_cm', v)} /></Field>
+            <Field label="C. Hendido (cm)" w={110}><NumField value={modelo.hendido_cm} onChange={v => setM('hendido_cm', v)} /></Field>
+          </div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.04em', marginTop: 14, marginBottom: 6 }}>
+            Precios unitarios de esta OP (COP/cm)
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+            <Field label="Corte" w={130}><MoneyInput value={Number(modelo.precio_corte) || 0} onChange={v => setM('precio_corte', v)} suffix="" /></Field>
+            <Field label="Score" w={130}><MoneyInput value={Number(modelo.precio_score) || 0} onChange={v => setM('precio_score', v)} suffix="" /></Field>
+            <Field label="C. Hendido" w={130}><MoneyInput value={Number(modelo.precio_hendido) || 0} onChange={v => setM('precio_hendido', v)} suffix="" /></Field>
+            <Field label="Caucho" w={130}><MoneyInput value={Number(modelo.precio_caucho) || 0} onChange={v => setM('precio_caucho', v)} suffix="" /></Field>
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 10 }}>
             <Field label="Instrucciones adicionales (visibles al operador)" full>
@@ -853,10 +920,10 @@ export function NuevaTareaTroquelModal({ onClose, onCreated }) {
             <Field label="Referencia *">
               <input className="input" value={op.referencia} disabled={opLocked} onChange={e => setOp(o => ({ ...o, referencia: e.target.value }))} />
             </Field>
-            <Field label="Cantidad *">
+            <Field label="Cantidad *" w={100}>
               <input className="input" type="number" min="1" value={op.cantidad || ''} disabled={opLocked} onChange={e => setOp(o => ({ ...o, cantidad: e.target.value }))} />
             </Field>
-            <Field label="Fecha de entrega">
+            <Field label="Fecha de entrega" w={150}>
               <input className="input" type="date" value={op.fechaEntrega} disabled={opLocked} onChange={e => setOp(o => ({ ...o, fechaEntrega: e.target.value }))} />
             </Field>
           </div>

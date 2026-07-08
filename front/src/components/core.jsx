@@ -278,7 +278,7 @@ export function MoneyInput({ value, onChange, className = '', style = {}, suffix
         type="text"
         inputMode="numeric"
         className={'input mono ' + className}
-        style={{ textAlign: 'right', paddingRight: 38, ...style }}
+        style={{ textAlign: 'right', paddingRight: suffix ? 38 : 10, ...style }}
         value={display}
         onChange={(e) => {
           const v = parseInt(e.target.value.replace(/[^\d]/g, '')) || 0
