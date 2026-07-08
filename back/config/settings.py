@@ -99,12 +99,12 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+MEDIA_URL = "/media/"
 if AZURE_STORAGE_CONNECTION_STRING:
     DEFAULT_FILE_STORAGE = "storages.backends.azure_storage.AzureStorage"
     AZURE_CONTAINER = os.getenv("AZURE_CONTAINER_NAME", "media")
     AZURE_URL_EXPIRATION_SECS = None
 else:
-    MEDIA_URL = "/media/"
     MEDIA_ROOT = BASE_DIR / "media"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
