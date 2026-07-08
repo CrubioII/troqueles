@@ -15,16 +15,24 @@ const IMG_RE = /\.(png|jpe?g|gif|webp|bmp|svg)$/i
 // Tamaños disponibles en el formato de cuchillas (deben coincidir con el backend)
 const CH_SIZES = ['3x3', '4x4', '6x6', '8x8', '10x10']
 const SAC_SIZES = [
-  ...Array.from({ length: 10 }, (_, i) => ({ value: String(i + 1), label: `${i + 1} (extensor)` })),
+  ...Array.from({ length: 10 }, (_, i) => ({ value: String(i + 1), label: `${i + 1} (expulsor)` })),
   ...Array.from({ length: 5 }, (_, i) => ({ value: String(i + 11), label: `${i + 11} (tubo)` })),
 ]
 const PERFO_SIZES = ['1x1', '2x1', '2x2', '3x1', '3x2', '3x3', '4x1', '4x2', '4x3', '4x4', '6x6', '10x10']
 const CAUCHO_TIPOS = [
   { value: 'verde', label: 'Caucho Verde' },
   { value: 'profigumi', label: 'Profigumi' },
-  { value: 'grupolam', label: 'Grupolam' },
+  { value: 'blucolan', label: 'Blucolan' },
 ]
 const CAUCHO_TIPO_LABELS = Object.fromEntries(CAUCHO_TIPOS.map(t => [t.value, t.label]))
+const SAC_SIZE_LABELS = Object.fromEntries(SAC_SIZES.map(s => [s.value, s.label]))
+// Medidas fijas por tipo de puntos (mm); solo la altura de grafa 2pt es elegible
+const PUNTOS_SPECS = {
+  '2': { altura: '23,8', espesor: '0,71' },
+  '3': { altura: '23,8', espesor: '1,05' },
+}
+const GRAFA_ALTURAS = ['23.4', '23.3']
+const GRAFA_3PT_ALTURA = '23,0' // la grafa 3pt es más baja que la cuchilla 3pt
 
 // ────────── helpers de presentación ──────────
 
@@ -46,6 +54,15 @@ function FieldGroup({ title, children }) {
       <legend style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink-3)', padding: '0 4px' }}>{title}</legend>
       {children}
     </fieldset>
+  )
+}
+
+// Medidas fijas informativas dentro de un FieldGroup (no editables)
+function SpecHint({ children }) {
+  return (
+    <span style={{ fontSize: 11, color: 'var(--ink-3)', alignSelf: 'flex-end', paddingBottom: 8, whiteSpace: 'nowrap' }}>
+      {children}
+    </span>
   )
 }
 
@@ -299,10 +316,10 @@ export function ModeloTroquelGestion({ ordenId, onSaved }) {
 // ────────── Formato de cuchillas (Operador) ──────────
 
 const EMPTY_FORMATO = {
-  cuchilla_cm: 0, grafa_cm: 0,
-  dos_puntos: false, tres_puntos: false,
+  cuchilla_cm: 0, cuchilla_puntos: '',
+  grafa_cm: 0, grafa_puntos: '', grafa_altura: '',
   ch_cm: 0, ch_medida: '',
-  sac_cm: 0, sac_medida: '',
+  sac_medida: '',
   perfo_cm: 0, perfo_medida: '',
   gan: '',
   cauchos: [{ tipo: 'verde', cm: 0 }],
@@ -391,15 +408,55 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
 
   return (
     <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-end' }}>
-        <Field label="Cuchilla (cm)" w={110}><NumField value={form.cuchilla_cm} onChange={v => set('cuchilla_cm', v)} /></Field>
-        <Field label="Grafa (cm)" w={110}><NumField value={form.grafa_cm} onChange={v => set('grafa_cm', v)} /></Field>
-        {[['dos_puntos', '2 puntos'], ['tres_puntos', '3 puntos']].map(([k, label]) => (
-          <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, paddingBottom: 8 }}>
-            <Checkbox checked={form[k]} onChange={() => set(k, !form[k])} />
-            <span style={{ fontSize: 12, color: 'var(--ink-2)' }}>{label}</span>
-          </div>
-        ))}
+      {/* Cuchilla y grafa: cm usados + tipo de puntos; las medidas fijas se muestran solas */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 28, rowGap: 14 }}>
+        <FieldGroup title="Cuchilla">
+          <Field label="cm" w={90}><NumField value={form.cuchilla_cm} onChange={v => set('cuchilla_cm', v)} /></Field>
+          <Field label="Tipo" w={110}>
+            <select className="input" value={form.cuchilla_puntos} onChange={e => set('cuchilla_puntos', e.target.value)}>
+              <option value="">—</option>
+              <option value="2">2 puntos</option>
+              <option value="3">3 puntos</option>
+            </select>
+          </Field>
+          {form.cuchilla_puntos && (
+            <SpecHint>
+              Altura {PUNTOS_SPECS[form.cuchilla_puntos].altura} mm · Espesor {PUNTOS_SPECS[form.cuchilla_puntos].espesor} mm
+            </SpecHint>
+          )}
+        </FieldGroup>
+        <FieldGroup title="Grafa">
+          <Field label="cm" w={90}><NumField value={form.grafa_cm} onChange={v => set('grafa_cm', v)} /></Field>
+          <Field label="Tipo" w={110}>
+            <select
+              className="input" value={form.grafa_puntos}
+              onChange={e => setForm(f => ({
+                ...f, grafa_puntos: e.target.value,
+                grafa_altura: e.target.value === '2' ? f.grafa_altura : '',
+              }))}
+            >
+              <option value="">—</option>
+              <option value="2">2 puntos</option>
+              <option value="3">3 puntos</option>
+            </select>
+          </Field>
+          {form.grafa_puntos === '2' && (
+            <>
+              <Field label="Altura" w={110}>
+                <select className="input" value={form.grafa_altura} onChange={e => set('grafa_altura', e.target.value)}>
+                  <option value="">—</option>
+                  {GRAFA_ALTURAS.map(a => <option key={a} value={a}>{a.replace('.', ',')} mm</option>)}
+                </select>
+              </Field>
+              <SpecHint>Espesor {PUNTOS_SPECS['2'].espesor} mm</SpecHint>
+            </>
+          )}
+          {form.grafa_puntos === '3' && (
+            <SpecHint>
+              Altura {GRAFA_3PT_ALTURA} mm · Espesor {PUNTOS_SPECS['3'].espesor} mm
+            </SpecHint>
+          )}
+        </FieldGroup>
       </div>
 
       {/* Pares cm + tamaño agrupados por concepto */}
@@ -414,8 +471,7 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
           </Field>
         </FieldGroup>
         <FieldGroup title="Sacabocados">
-          <Field label="cm" w={90}><NumField value={form.sac_cm} onChange={v => set('sac_cm', v)} /></Field>
-          <Field label="Tamaño" w={130}>
+          <Field label="Unidades" w={130}>
             <select className="input" value={form.sac_medida} onChange={e => set('sac_medida', e.target.value)}>
               <option value="">—</option>
               {SAC_SIZES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
@@ -542,16 +598,24 @@ export function EstadoFormatoBadge({ estado }) {
   )
 }
 
-export function FormatosCuchillasHistory({ formatos, loading, onEdit }) {
+export function FormatosCuchillasHistory({ formatos, loading, onEdit, showOrden = false, canEdit = () => true }) {
   if (loading) return <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Cargando…</div>
   if (!formatos.length) return <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Sin formatos registrados.</div>
   const headers = ['Fecha / Hora', 'Estado', 'Operador', 'Cuchilla', 'Grafa', 'Caucho', 'Puntos', 'ch / sac / perfo / gan', 'Desperdicio', 'Tiempos (enc/cuch/cauch)']
+  if (showOrden) headers.unshift('OP #', 'Cliente')
   if (onEdit) headers.push('')
 
   // Nuevo formato: "12,50cm 4x4" — legacy: texto libre
   const medidaCell = (cm, medida, legacy) => {
     if (Number(cm) > 0 || medida) return `${fmtNum(cm, 2)}cm${medida ? ` ${medida}` : ''}`
     return legacy || ''
+  }
+
+  // Sacabocados: hoy se mide en unidades; los registros viejos conservan sus cm
+  const sacCell = (f) => {
+    if (Number(f.sac_cm) > 0) return medidaCell(f.sac_cm, f.sac_medida, f.sac)
+    if (f.sac_medida) return SAC_SIZE_LABELS[f.sac_medida] || f.sac_medida
+    return f.sac || ''
   }
   return (
     <div style={{ overflowX: 'auto' }}>
@@ -565,13 +629,20 @@ export function FormatosCuchillasHistory({ formatos, loading, onEdit }) {
         </thead>
         <tbody>
           {formatos.map((f, idx) => {
-            const puntos = [f.dos_puntos && '2pt', f.tres_puntos && '3pt', f.perfo && 'perfo'].filter(Boolean).join(', ') || '—'
+            // Nuevo formato: puntos por material — legacy: booleanos compartidos
+            const puntosNuevo = [
+              f.cuchilla_puntos && `C ${f.cuchilla_puntos}pt`,
+              f.grafa_puntos && `G ${f.grafa_puntos}pt${f.grafa_altura ? ` (${f.grafa_altura.replace('.', ',')})` : ''}`,
+            ].filter(Boolean).join(' · ')
+            const puntos = puntosNuevo
+              || [f.dos_puntos && '2pt', f.tres_puntos && '3pt', f.perfo && 'perfo'].filter(Boolean).join(', ')
+              || '—'
             const caucho = (f.cauchos || []).length
               ? f.cauchos.map(r => `${CAUCHO_TIPO_LABELS[r.tipo] || r.tipo}: ${fmtNum(r.cm, 2)}`).join(' · ')
               : '—'
             const chSacGan = [
               medidaCell(f.ch_cm, f.ch_medida, f.ch),
-              medidaCell(f.sac_cm, f.sac_medida, f.sac),
+              sacCell(f),
               medidaCell(f.perfo_cm, f.perfo_medida, ''),
               f.gan,
             ].filter(Boolean).join(' / ') || '—'
@@ -580,6 +651,12 @@ export function FormatosCuchillasHistory({ formatos, loading, onEdit }) {
               : (f.desperdicio || '—')
             return (
               <tr key={f.id} style={{ borderBottom: '1px solid var(--line)', background: idx % 2 ? 'var(--surface-2)' : 'var(--surface)' }}>
+                {showOrden && (
+                  <>
+                    <td style={{ padding: '8px 12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>{f.orden_numero || '—'}</td>
+                    <td style={{ padding: '8px 12px', fontWeight: 600, fontSize: 12 }}>{f.cliente_nombre || '—'}</td>
+                  </>
+                )}
                 <td style={{ padding: '8px 12px', fontFamily: 'JetBrains Mono, monospace', fontSize: 11, whiteSpace: 'nowrap' }}>{fmtFecha(f.fecha_hora)}</td>
                 <td style={{ padding: '8px 12px' }}><EstadoFormatoBadge estado={f.estado} /></td>
                 <td style={{ padding: '8px 12px', fontWeight: 600 }}>{f.operador_username || '—'}</td>
@@ -592,7 +669,7 @@ export function FormatosCuchillasHistory({ formatos, loading, onEdit }) {
                 <td style={{ padding: '8px 12px', fontSize: 12 }}>{[f.tiempo_encalado_min, f.tiempo_encuchillado_min, f.tiempo_encauchado_min].map(fmtMin).join(' / ')}</td>
                 {onEdit && (
                   <td style={{ padding: '8px 12px' }}>
-                    <button className="btn sm" onClick={() => onEdit(f)}>Editar</button>
+                    {canEdit(f) && <button className="btn sm" onClick={() => onEdit(f)}>Editar</button>}
                   </td>
                 )}
               </tr>

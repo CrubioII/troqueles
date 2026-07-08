@@ -357,7 +357,7 @@ class FormatoCuchillas(models.Model):
 
     CH_MEDIDA_CHOICES = [(v, v) for v in ["3x3", "4x4", "6x6", "8x8", "10x10"]]
     SAC_MEDIDA_CHOICES = (
-        [(str(n), f"{n} (extensor)") for n in range(1, 11)]
+        [(str(n), f"{n} (expulsor)") for n in range(1, 11)]
         + [(str(n), f"{n} (tubo)") for n in range(11, 16)]
     )
     PERFO_MEDIDA_CHOICES = [
@@ -367,16 +367,23 @@ class FormatoCuchillas(models.Model):
     CAUCHO_TIPO_CHOICES = [
         ("verde", "Caucho Verde"),
         ("profigumi", "Profigumi"),
-        ("grupolam", "Grupolam"),
+        ("blucolan", "Blucolan"),
     ]
+    PUNTOS_CHOICES = [("2", "2 puntos"), ("3", "3 puntos")]
+    GRAFA_ALTURA_CHOICES = [("23.4", "23,4 mm"), ("23.3", "23,3 mm")]
 
     orden = models.ForeignKey(
         OrdenProduccion, on_delete=models.CASCADE, related_name="formatos_cuchillas"
     )
+    # Cuchilla/grafa: cm usados + tipo de puntos. Las medidas fijas por tipo
+    # (espesor 0,71 mm en 2pt / 1,05 mm en 3pt; altura 23,8 mm salvo grafa 3pt
+    # que es 23,0 mm) se muestran en el front; solo la altura de grafa 2pt es
+    # elegible (23,4 o 23,3 mm).
     cuchilla_cm = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    cuchilla_puntos = models.CharField(max_length=1, choices=PUNTOS_CHOICES, blank=True, default="")
     grafa_cm = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    dos_puntos = models.BooleanField(default=False)
-    tres_puntos = models.BooleanField(default=False)
+    grafa_puntos = models.CharField(max_length=1, choices=PUNTOS_CHOICES, blank=True, default="")
+    grafa_altura = models.CharField(max_length=5, choices=GRAFA_ALTURA_CHOICES, blank=True, default="")
     ch_cm = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     ch_medida = models.CharField(max_length=10, choices=CH_MEDIDA_CHOICES, blank=True, default="")
     sac_cm = models.DecimalField(max_digits=10, decimal_places=2, default=0)
@@ -384,10 +391,12 @@ class FormatoCuchillas(models.Model):
     perfo_cm = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     perfo_medida = models.CharField(max_length=10, choices=PERFO_MEDIDA_CHOICES, blank=True, default="")
     desperdicio_mm = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    # Filas de caucho: [{"tipo": "verde"|"profigumi"|"grupolam", "cm": <number>}, ...]
+    # Filas de caucho: [{"tipo": "verde"|"profigumi"|"blucolan", "cm": <number>}, ...]
     cauchos = models.JSONField(default=list, blank=True)
     gan = models.CharField(max_length=100, blank=True, default="")
     # Legacy (solo lectura, formatos anteriores al formulario estructurado)
+    dos_puntos = models.BooleanField(default=False)
+    tres_puntos = models.BooleanField(default=False)
     perfo = models.BooleanField(default=False)
     ch = models.CharField(max_length=100, blank=True, default="")
     sac = models.CharField(max_length=100, blank=True, default="")

@@ -358,6 +358,9 @@ export const extraerPdfTroquel = (file) => {
 export const getFormatosCuchillas = (ordenId) =>
   apiFetch(`${BASE}/formatos-cuchillas/?orden=${ordenId}`).then(json)
 
+export const getFormatosCuchillasTodos = () =>
+  apiFetch(`${BASE}/formatos-cuchillas/`).then(json)
+
 export const createFormatoCuchillas = (data) =>
   apiFetch(`${BASE}/formatos-cuchillas/`, {
     method: 'POST',

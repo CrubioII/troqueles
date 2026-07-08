@@ -1054,12 +1054,15 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
         return super().partial_update(request, *args, **kwargs)
 
     def _check_update_permission(self, request):
-        # Operador solo puede editar (reenviar) un formato devuelto por el Admin
-        # o un borrador propio (envío cancelado con cancelar_envio).
+        # Operador solo puede editar sus propios formatos no aprobados:
+        # pendiente (queda pendiente), devuelto o borrador (se reenvían a pendiente).
         if request.user.is_staff:
             return
-        if self.get_object().estado not in ("devuelto", "borrador"):
+        formato = self.get_object()
+        if formato.estado not in ("pendiente", "devuelto", "borrador"):
             raise PermissionDenied("Solo administradores pueden realizar esta acción.")
+        if formato.operador_id != request.user.id:
+            raise PermissionDenied("Solo el operador que registró el formato puede editarlo.")
 
     def perform_update(self, serializer):
         if self.request.user.is_staff:

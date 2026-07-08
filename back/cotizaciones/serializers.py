@@ -421,22 +421,32 @@ class FormatoCuchillasSerializer(serializers.ModelSerializer):
             filas.append({"tipo": tipo, "cm": cm})
         return filas
 
+    def validate(self, data):
+        get = lambda k: data.get(k, getattr(self.instance, k, None) if self.instance else None)
+        grafa_puntos = get("grafa_puntos")
+        if grafa_puntos == "2" and float(get("grafa_cm") or 0) > 0 and not get("grafa_altura"):
+            raise serializers.ValidationError(
+                {"grafa_altura": "Seleccione la altura de la grafa de 2 puntos (23,4 o 23,3 mm)."}
+            )
+        if grafa_puntos == "3":
+            data["grafa_altura"] = ""  # altura fija (23,0 mm), no aplica elección
+        return data
+
     class Meta:
         model = FormatoCuchillas
         fields = [
             "id", "orden", "orden_numero", "cliente_nombre", "fecha_entrega",
-            "cuchilla_cm", "grafa_cm",
-            "dos_puntos", "tres_puntos",
+            "cuchilla_cm", "cuchilla_puntos", "grafa_cm", "grafa_puntos", "grafa_altura",
             "ch_cm", "ch_medida", "sac_cm", "sac_medida", "perfo_cm", "perfo_medida",
             "desperdicio_mm", "cauchos", "gan",
-            "perfo", "ch", "sac", "desperdicio",  # legacy, solo lectura
+            "dos_puntos", "tres_puntos", "perfo", "ch", "sac", "desperdicio",  # legacy, solo lectura
             "tiempo_encalado_min", "tiempo_encuchillado_min", "tiempo_encauchado_min",
             "operador", "operador_username", "fecha_hora",
             "estado", "devolucion_motivo", "revisado_por_username", "revisado_en",
         ]
         read_only_fields = [
             "id", "operador", "fecha_hora",
-            "perfo", "ch", "sac", "desperdicio",
+            "dos_puntos", "tres_puntos", "perfo", "ch", "sac", "desperdicio",
             "estado", "devolucion_motivo", "revisado_en",
         ]
 

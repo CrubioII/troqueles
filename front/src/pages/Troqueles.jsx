@@ -9,7 +9,8 @@ import {
   NuevaTareaTroquelModal,
 } from '../components/Troquel'
 import {
-  getOrdenes, getFormatosCuchillas, getOrdenesPendientes, getOrdenProduccion, getTroquelModelo,
+  getOrdenes, getFormatosCuchillas, getFormatosCuchillasTodos, getOrdenesPendientes,
+  getOrdenProduccion, getTroquelModelo,
   updateFormatoCuchillas, getFormatosPendientes, cancelarEnvioFormato,
 } from '../api'
 import { usePolling } from '../lib/usePolling'
@@ -208,6 +209,8 @@ function AdminTroqueles() {
 // ─────────────── Vista Operador ───────────────
 
 function OperadorTroqueles() {
+  const { user } = useAuth()
+  const [tab, setTab] = useState('pendientes')
   const [lista, setLista] = useState([])
   const [loadingLista, setLoadingLista] = useState(true)
   const [orden, setOrden] = useState(null)
@@ -216,6 +219,10 @@ function OperadorTroqueles() {
   const [loadingFormatos, setLoadingFormatos] = useState(false)
   const [cancelando, setCancelando] = useState(false)
   const [cancelError, setCancelError] = useState(null)
+  // Historial de formatos (todas las OPs / operadores) y formato en edición
+  const [historial, setHistorial] = useState([])
+  const [loadingHistorial, setLoadingHistorial] = useState(false)
+  const [editHist, setEditHist] = useState(null)
 
   const loadLista = (silent = false) => {
     if (!silent) setLoadingLista(true)
@@ -227,8 +234,18 @@ function OperadorTroqueles() {
 
   useEffect(() => { loadLista() }, [])
 
+  const loadHistorial = () => {
+    setLoadingHistorial(true)
+    getFormatosCuchillasTodos()
+      .then(d => setHistorial(asList(d)))
+      .catch(() => setHistorial([]))
+      .finally(() => setLoadingHistorial(false))
+  }
+
+  useEffect(() => { if (tab === 'historial') loadHistorial() }, [tab])
+
   // Tiempo real: refrescar la lista de pendientes solo cuando se está viendo
-  usePolling(() => loadLista(true), { enabled: !orden })
+  usePolling(() => loadLista(true), { enabled: !orden && tab === 'pendientes' })
 
   const loadFormatos = (ordenId) => {
     setLoadingFormatos(true)
@@ -264,43 +281,85 @@ function OperadorTroqueles() {
   const volver = () => { setOrden(null); setFormatos([]); loadLista() }
 
   if (!orden) {
+    const puedeEditar = (f) =>
+      f.estado !== 'aprobado' && !!user?.username && f.operador_username === user.username
     return (
-      <Section title="Troqueles del día — selecciona una OP">
-        {loadingLista ? (
-          <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Cargando…</div>
-        ) : lista.length === 0 ? (
-          <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>No hay troqueles pendientes 🎉</div>
-        ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ borderBottom: '2px solid var(--line)' }}>
-                {['OP #', 'Entrega', 'Cliente', 'Referencia', 'Cantidad', ''].map((h, i) => (
-                  <th key={i} style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--ink-3)', background: 'var(--surface-2)' }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {lista.map((op, idx) => {
-                const ent = fmtEntrega(op.fecha_entrega)
-                return (
-                  <tr key={op.id}
-                    style={{ borderBottom: '1px solid var(--line)', background: idx % 2 ? 'var(--surface-2)' : 'var(--surface)', cursor: 'pointer' }}
-                    onClick={() => !opening && abrir(op)}>
-                    <td style={{ padding: '12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 13 }}>{op.numero}</td>
-                    <td style={{ padding: '12px', fontSize: 12, fontWeight: 600, color: ent.color }}>{ent.txt}</td>
-                    <td style={{ padding: '12px', fontWeight: 600 }}>{op.cliente_nombre || '—'}</td>
-                    <td style={{ padding: '12px', color: 'var(--ink-2)' }}>{op.referencia}</td>
-                    <td style={{ padding: '12px', fontFamily: 'JetBrains Mono, monospace', color: 'var(--ink-2)' }}>{op.cantidad}</td>
-                    <td style={{ padding: '12px' }}>
-                      <button className="btn sm primary" disabled={opening} onClick={e => { e.stopPropagation(); abrir(op) }}>Abrir</button>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+      <>
+        <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+          <button className={`btn sm${tab === 'pendientes' ? ' primary' : ''}`} onClick={() => { setTab('pendientes'); setEditHist(null) }}>Pendientes</button>
+          <button className={`btn sm${tab === 'historial' ? ' primary' : ''}`} onClick={() => setTab('historial')}>Historial</button>
+        </div>
+
+        {tab === 'historial' && editHist && (
+          <>
+            <button className="btn" style={{ marginTop: 16 }} onClick={() => setEditHist(null)}><Icon.ArrowLeft /> Volver al historial</button>
+            {editHist.estado === 'pendiente' && (
+              <div style={{ marginTop: 16, padding: '12px 16px', borderRadius: 8, background: 'var(--warn-soft, #fef6e7)', border: '1px solid var(--warn, #e0a800)', fontSize: 13, color: 'var(--ink-2)' }}>
+                ⏳ Este formato sigue <strong>pendiente de aprobación</strong>; al guardar los cambios seguirá en la cola del administrador.
+              </div>
+            )}
+            <Section title={`Editar formato — OP ${editHist.orden_numero || ''}${editHist.cliente_nombre ? ` · ${editHist.cliente_nombre}` : ''}`}>
+              <FormatoCuchillasForm
+                resubmit
+                formato={editHist}
+                ordenId={editHist.orden}
+                onCreated={() => { setEditHist(null); loadHistorial() }}
+              />
+            </Section>
+          </>
         )}
-      </Section>
+
+        {tab === 'historial' && !editHist && (
+          <Section title="Historial de formatos de cuchillas">
+            <FormatosCuchillasHistory
+              formatos={historial}
+              loading={loadingHistorial}
+              showOrden
+              onEdit={setEditHist}
+              canEdit={puedeEditar}
+            />
+          </Section>
+        )}
+
+        {tab === 'pendientes' && (
+          <Section title="Troqueles del día — selecciona una OP">
+            {loadingLista ? (
+              <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Cargando…</div>
+            ) : lista.length === 0 ? (
+              <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>No hay troqueles pendientes 🎉</div>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ borderBottom: '2px solid var(--line)' }}>
+                    {['OP #', 'Entrega', 'Cliente', 'Referencia', 'Cantidad', ''].map((h, i) => (
+                      <th key={i} style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--ink-3)', background: 'var(--surface-2)' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {lista.map((op, idx) => {
+                    const ent = fmtEntrega(op.fecha_entrega)
+                    return (
+                      <tr key={op.id}
+                        style={{ borderBottom: '1px solid var(--line)', background: idx % 2 ? 'var(--surface-2)' : 'var(--surface)', cursor: 'pointer' }}
+                        onClick={() => !opening && abrir(op)}>
+                        <td style={{ padding: '12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 13 }}>{op.numero}</td>
+                        <td style={{ padding: '12px', fontSize: 12, fontWeight: 600, color: ent.color }}>{ent.txt}</td>
+                        <td style={{ padding: '12px', fontWeight: 600 }}>{op.cliente_nombre || '—'}</td>
+                        <td style={{ padding: '12px', color: 'var(--ink-2)' }}>{op.referencia}</td>
+                        <td style={{ padding: '12px', fontFamily: 'JetBrains Mono, monospace', color: 'var(--ink-2)' }}>{op.cantidad}</td>
+                        <td style={{ padding: '12px' }}>
+                          <button className="btn sm primary" disabled={opening} onClick={e => { e.stopPropagation(); abrir(op) }}>Abrir</button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            )}
+          </Section>
+        )}
+      </>
     )
   }
 
