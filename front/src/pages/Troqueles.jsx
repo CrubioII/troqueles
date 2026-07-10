@@ -9,7 +9,7 @@ import {
   NuevaTareaTroquelModal,
 } from '../components/Troquel'
 import {
-  getOrdenes, getFormatosCuchillas, getFormatosCuchillasTodos, getOrdenesPendientes,
+  getOrdenes, deleteOrden, getFormatosCuchillas, getFormatosCuchillasTodos, getOrdenesPendientes,
   getOrdenProduccion, getTroquelModelo,
   updateFormatoCuchillas, getFormatosPendientes, cancelarEnvioFormato,
 } from '../api'
@@ -63,6 +63,7 @@ function AdminTroqueles() {
   const [editFormato, setEditFormato] = useState(null)   // formato en edición (Admin)
   const [showNueva, setShowNueva] = useState(false)      // modal Nueva tarea de troquel
   const [pendientes, setPendientes] = useState([])       // formatos esperando aprobación (contador)
+  const [confirmDelete, setConfirmDelete] = useState(null)
 
   const loadPendientes = () =>
     getFormatosPendientes()
@@ -101,8 +102,22 @@ function AdminTroqueles() {
     setCostRefresh(k => k + 1)
   }
 
+  const handleDelete = (e, ord) => {
+    e.stopPropagation()
+    if (confirmDelete === ord.id) {
+      setOrdenes(prev => prev.filter(o => o.id !== ord.id))
+      setConfirmDelete(null)
+      if (sel?.id === ord.id) setSel(null)
+      deleteOrden(ord.id).catch(() => {
+        setOrdenes(prev => [ord, ...prev].sort(byEntrega))
+      })
+    } else {
+      setConfirmDelete(ord.id)
+    }
+  }
+
   return (
-    <>
+    <div onClick={() => setConfirmDelete(null)}>
       <Section
         title={`Troqueles por aprobar${pendientes.length ? ` (${pendientes.length})` : ''}`}
         actions={
@@ -152,8 +167,16 @@ function AdminTroqueles() {
                       </div>
                     ) : '—'}
                   </td>
-                  <td style={{ padding: '10px 12px' }}>
-                    <button className="btn sm" onClick={e => { e.stopPropagation(); navigate(`/ordenes/${ord.id}`) }}>Abrir OP</button>
+                  <td style={{ padding: '10px 12px' }} onClick={e => e.stopPropagation()}>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      <button className="btn sm" onClick={() => navigate(`/ordenes/${ord.id}`)}>Abrir OP</button>
+                      <button
+                        className={'btn sm' + (confirmDelete === ord.id ? ' danger' : '')}
+                        onClick={e => handleDelete(e, ord)}
+                      >
+                        {confirmDelete === ord.id ? '¿Eliminar?' : 'Eliminar'}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -202,7 +225,7 @@ function AdminTroqueles() {
           }}
         />
       )}
-    </>
+    </div>
   )
 }
 

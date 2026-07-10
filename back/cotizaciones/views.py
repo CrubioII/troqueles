@@ -9,7 +9,7 @@ from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from django.core.mail import EmailMessage
 from django.db import connection, transaction
-from django.db.models import F, Max
+from django.db.models import F, Max, ProtectedError
 from django.http import HttpResponse
 from django.template.loader import render_to_string
 from django.conf import settings
@@ -563,6 +563,15 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         if self.action == "list":
             return OrdenListSerializer
         return OrdenSerializer
+
+    def destroy(self, request, *args, **kwargs):
+        try:
+            return super().destroy(request, *args, **kwargs)
+        except ProtectedError:
+            return Response(
+                {"detail": "La OP ya tiene remisión y no puede eliminarse."},
+                status=400,
+            )
 
     @action(detail=False, methods=["get"], url_path="next_numero")
     def next_numero(self, request):
