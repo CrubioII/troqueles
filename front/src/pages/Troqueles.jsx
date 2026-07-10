@@ -403,7 +403,11 @@ function OperadorTroqueles() {
 
           {!loadingFormatos && formatos.length === 0 && (
             <Section title="Formato de cuchillas + tiempos">
-              <FormatoCuchillasForm ordenId={orden.id} onCreated={() => loadFormatos(orden.id)} />
+              <FormatoCuchillasForm
+                ordenId={orden.id}
+                onCreated={() => loadFormatos(orden.id)}
+                onDraftSaved={() => loadFormatos(orden.id)}
+              />
             </Section>
           )}
 
@@ -425,14 +429,15 @@ function OperadorTroqueles() {
           {formatos.length > 0 && formatos[0].estado === 'borrador' && (
             <>
               <div style={{ marginTop: 16, padding: '12px 16px', borderRadius: 8, background: 'var(--surface-2, #f2f2f2)', border: '1px solid var(--line)', fontSize: 13, color: 'var(--ink-2)' }}>
-                ✏️ Cancelaste el envío del formato de cuchillas. Edítalo y reenvíalo cuando esté listo.
+                ✏️ Formato guardado como <strong>borrador</strong> — el administrador no lo verá hasta que lo envíes.
               </div>
-              <Section title="Editar y reenviar formato de cuchillas">
+              <Section title="Editar y enviar formato de cuchillas">
                 <FormatoCuchillasForm
                   resubmit
                   formato={formatos[0]}
                   ordenId={orden.id}
                   onCreated={() => loadFormatos(orden.id)}
+                  onDraftSaved={() => loadFormatos(orden.id)}
                 />
               </Section>
             </>
@@ -451,6 +456,7 @@ function OperadorTroqueles() {
                   formato={formatos[0]}
                   ordenId={orden.id}
                   onCreated={() => loadFormatos(orden.id)}
+                  onDraftSaved={() => loadFormatos(orden.id)}
                 />
               </Section>
             </>

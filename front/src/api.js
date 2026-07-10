@@ -368,7 +368,8 @@ export const createFormatoCuchillas = (data) =>
     body: JSON.stringify(data),
   }).then(json)
 
-// Editar formato existente — Admin, o el Operador reenviando uno devuelto
+// Editar formato existente — Admin, o el Operador guardando avance / reenviando.
+// El body acepta enviar:true para pasar el formato a pendiente de aprobación.
 export const updateFormatoCuchillas = (id, data) =>
   apiFetch(`${BASE}/formatos-cuchillas/${id}/`, {
     method: 'PATCH',

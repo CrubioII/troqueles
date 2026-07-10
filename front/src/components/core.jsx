@@ -371,18 +371,21 @@ export function ChipToggle({ active, onClick, children }) {
 }
 
 // ============ Numeric input — clears to empty, commits on blur ============
-export function NumField({ value, onChange, step = 'any', className = '', style = {} }) {
+export function NumField({ value, onChange, step = 'any', className = '', style = {}, placeholder = '' }) {
   const [focused, setFocused] = useState(false)
   const [raw, setRaw] = useState('')
   const isInt = step === 1 || step === '1'
+  // Cero se muestra vacío también cuando llega como string decimal del API ("0.00").
+  const hasValue = !!Number(value)
   return (
     <input
       type="text"
       inputMode={isInt ? 'numeric' : 'decimal'}
       className={'input mono ' + className}
       style={style}
-      value={focused ? raw : (value || '')}
-      onFocus={() => { setFocused(true); setRaw(value ? String(value) : '') }}
+      placeholder={placeholder}
+      value={focused ? raw : (hasValue ? value : '')}
+      onFocus={() => { setFocused(true); setRaw(hasValue ? String(value) : '') }}
       onChange={e => {
         const filtered = isInt
           ? e.target.value.replace(/[^\d]/g, '')

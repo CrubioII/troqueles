@@ -364,9 +364,15 @@ const fmtMin = (m) => {
   return h ? `${h}h ${min}m` : `${min}m`
 }
 
-export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, onCancel, resubmit = false }) {
+export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, onCancel, onDraftSaved, resubmit = false }) {
   const isEdit = !!formato && !resubmit
+  // "Reenviar" solo si el formato ya pasó por la cola (devuelto/pendiente);
+  // un borrador que nunca se envió se "envía" por primera vez.
+  const reenvio = resubmit && (formato?.estado === 'devuelto' || formato?.estado === 'pendiente')
   const [form, setForm] = useState(() => initFormato(formato))
+  // Id del formato ya persistido (borrador o existente): los guardados
+  // siguientes hacen PATCH en vez de POST (una sola fila por OP).
+  const [draftId, setDraftId] = useState(formato?.id || null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
   const [okMsg, setOkMsg] = useState(false)
@@ -379,29 +385,46 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
 
   // Edición (Admin): PATCH directo, sin popup de irreversibilidad.
   const submitEdit = () => {
-    setSaving(true); setError(null); setOkMsg(false)
+    setSaving(true); setError(null); setOkMsg(null)
     updateFormatoCuchillas(formato.id, formatoPayload(form))
-      .then(() => { setOkMsg(true); onUpdated && onUpdated() })
+      .then(() => { setOkMsg('Formato actualizado ✓'); onUpdated && onUpdated() })
       .catch(() => setError('No se pudo actualizar el formato'))
       .finally(() => setSaving(false))
   }
 
-  // Registro (Operador): se confirma en el modal y queda pendiente de aprobación.
-  const submitCreate = () => {
-    setSaving(true); setError(null); setOkMsg(false)
-    const req = resubmit
-      ? updateFormatoCuchillas(formato.id, formatoPayload(form))
+  // Guardar avance (Operador): persiste como borrador sin enviarlo a revisión.
+  // El formulario conserva los valores para seguir trabajando.
+  const saveDraft = () => {
+    setSaving(true); setError(null); setOkMsg(null)
+    const req = draftId
+      ? updateFormatoCuchillas(draftId, formatoPayload(form))
       : createFormatoCuchillas({ orden: ordenId, ...formatoPayload(form) })
+    req
+      .then((f) => {
+        if (f?.id) setDraftId(f.id)
+        setOkMsg('Avance guardado ✓')
+        onDraftSaved && onDraftSaved(f)
+      })
+      .catch((e) => setError(e?.message || 'No se pudo guardar el avance'))
+      .finally(() => setSaving(false))
+  }
+
+  // Enviar (Operador): se confirma en el modal y queda pendiente de aprobación.
+  const submitSend = () => {
+    setSaving(true); setError(null); setOkMsg(null)
+    const req = draftId
+      ? updateFormatoCuchillas(draftId, { ...formatoPayload(form), enviar: true })
+      : createFormatoCuchillas({ orden: ordenId, ...formatoPayload(form), enviar: true })
     req
       .then(() => {
         setForm(EMPTY_FORMATO)
         setConfirming(false)
-        setOkMsg(true)
+        setOkMsg('Formato enviado ✓')
         onCreated && onCreated()
       })
       .catch((e) => {
         setConfirming(false)
-        setError(e?.message || 'No se pudo guardar el formato')
+        setError(e?.message || 'No se pudo enviar el formato')
       })
       .finally(() => setSaving(false))
   }
@@ -411,7 +434,7 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
       {/* Cuchilla y grafa: cm usados + tipo de puntos; las medidas fijas se muestran solas */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 28, rowGap: 14 }}>
         <FieldGroup title="Cuchilla">
-          <Field label="cm" w={90}><NumField value={form.cuchilla_cm} onChange={v => set('cuchilla_cm', v)} /></Field>
+          <Field label="cm" w={90}><NumField placeholder="0" value={form.cuchilla_cm} onChange={v => set('cuchilla_cm', v)} /></Field>
           <Field label="Tipo" w={110}>
             <select className="input" value={form.cuchilla_puntos} onChange={e => set('cuchilla_puntos', e.target.value)}>
               <option value="">—</option>
@@ -426,7 +449,7 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
           )}
         </FieldGroup>
         <FieldGroup title="Grafa">
-          <Field label="cm" w={90}><NumField value={form.grafa_cm} onChange={v => set('grafa_cm', v)} /></Field>
+          <Field label="cm" w={90}><NumField placeholder="0" value={form.grafa_cm} onChange={v => set('grafa_cm', v)} /></Field>
           <Field label="Tipo" w={110}>
             <select
               className="input" value={form.grafa_puntos}
@@ -462,7 +485,7 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
       {/* Pares cm + tamaño agrupados por concepto */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 28, rowGap: 14 }}>
         <FieldGroup title="CH">
-          <Field label="cm" w={90}><NumField value={form.ch_cm} onChange={v => set('ch_cm', v)} /></Field>
+          <Field label="cm" w={90}><NumField placeholder="0" value={form.ch_cm} onChange={v => set('ch_cm', v)} /></Field>
           <Field label="Tamaño" w={100}>
             <select className="input" value={form.ch_medida} onChange={e => set('ch_medida', e.target.value)}>
               <option value="">—</option>
@@ -479,7 +502,7 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
           </Field>
         </FieldGroup>
         <FieldGroup title="Perforaciones">
-          <Field label="cm" w={90}><NumField value={form.perfo_cm} onChange={v => set('perfo_cm', v)} /></Field>
+          <Field label="cm" w={90}><NumField placeholder="0" value={form.perfo_cm} onChange={v => set('perfo_cm', v)} /></Field>
           <Field label="Tamaño" w={100}>
             <select className="input" value={form.perfo_medida} onChange={e => set('perfo_medida', e.target.value)}>
               <option value="">—</option>
@@ -491,7 +514,7 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
         <Field label="gan" w={140}><input className="input" value={form.gan} onChange={e => set('gan', e.target.value)} /></Field>
-        <Field label="Desperdicio (mm)" w={110}><NumField value={form.desperdicio_mm} onChange={v => set('desperdicio_mm', v)} /></Field>
+        <Field label="Desperdicio (mm)" w={110}><NumField placeholder="0" value={form.desperdicio_mm} onChange={v => set('desperdicio_mm', v)} /></Field>
       </div>
 
       <div>
@@ -506,7 +529,7 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
                   {CAUCHO_TIPOS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                 </select>
               </Field>
-              <Field label={idx === 0 ? 'Cantidad (cm)' : ''} w={110}><NumField value={row.cm} onChange={v => setCaucho(idx, 'cm', v)} /></Field>
+              <Field label={idx === 0 ? 'Cantidad (cm)' : ''} w={110}><NumField placeholder="0" value={row.cm} onChange={v => setCaucho(idx, 'cm', v)} /></Field>
               <button
                 className="btn sm" onClick={() => removeCaucho(idx)}
                 disabled={form.cauchos.length === 1}
@@ -532,7 +555,7 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
       </div>
 
       {error && <div style={{ color: 'var(--danger, #c0392b)', fontSize: 12 }}>{error}</div>}
-      {okMsg && <div style={{ color: 'var(--accent)', fontSize: 12 }}>{isEdit ? 'Formato actualizado ✓' : 'Formato registrado ✓'}</div>}
+      {okMsg && <div style={{ color: 'var(--accent)', fontSize: 12 }}>{okMsg}</div>}
 
       <div style={{ display: 'flex', gap: 8 }}>
         {isEdit ? (
@@ -543,9 +566,14 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
             {onCancel && <button className="btn" onClick={onCancel} disabled={saving}>Cancelar</button>}
           </>
         ) : (
-          <button className="btn primary" onClick={() => { setError(null); setConfirming(true) }} disabled={saving}>
-            {resubmit ? 'Reenviar formato' : 'Registrar formato'}
-          </button>
+          <>
+            <button className="btn" onClick={saveDraft} disabled={saving}>
+              {saving ? 'Guardando…' : 'Guardar avance'}
+            </button>
+            <button className="btn primary" onClick={() => { setError(null); setConfirming(true) }} disabled={saving}>
+              {reenvio ? 'Reenviar formato' : 'Enviar formato'}
+            </button>
+          </>
         )}
       </div>
 
@@ -556,7 +584,7 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
         }}>
           <div style={{ background: 'var(--surface)', borderRadius: 12, maxWidth: 420, width: '100%', padding: 24, boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
             <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>
-              {resubmit ? '⚠ Confirmar reenvío del formato' : '⚠ Confirmar registro del formato'}
+              {reenvio ? '⚠ Confirmar reenvío del formato' : '⚠ Confirmar envío del formato'}
             </div>
             <div style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5, marginBottom: 18 }}>
               ¿La información registrada es correcta? El formato quedará <strong>pendiente de
@@ -564,8 +592,8 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <button className="btn" onClick={() => setConfirming(false)} disabled={saving}>Cancelar</button>
-              <button className="btn primary" onClick={submitCreate} disabled={saving}>
-                {saving ? 'Guardando…' : (resubmit ? 'Sí, reenviar' : 'Sí, registrar')}
+              <button className="btn primary" onClick={submitSend} disabled={saving}>
+                {saving ? 'Enviando…' : (reenvio ? 'Sí, reenviar' : 'Sí, enviar')}
               </button>
             </div>
           </div>

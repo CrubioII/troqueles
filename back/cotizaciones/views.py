@@ -739,7 +739,7 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         hendido_cm = float(modelo.hendido_cm) if modelo else 0
         caucho_cm = sum(
             float(fila.get("cm") or 0)
-            for f in op.formatos_cuchillas.all()
+            for f in op.formatos_cuchillas.exclude(estado="borrador")
             for fila in (f.cauchos or [])
         )
         cm = {"corte": corte_cm, "score": score_cm, "hendido": hendido_cm, "caucho": caucho_cm}
@@ -1050,9 +1050,14 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
                 "Esta OP ya tiene un formato de cuchillas registrado. "
                 "Solo el administrador puede modificarlo."
             )
-        # El formato queda pendiente de aprobación: el troquel solo se completa
+        # El Operador guarda avances como borrador y decide cuándo enviar
+        # (enviar=true → pendiente de aprobación). El troquel solo se completa
         # (y puede generar remisión) cuando el Admin lo aprueba.
-        serializer.save(operador=self.request.user)
+        if self.request.user.is_staff:
+            serializer.save(operador=self.request.user)
+            return
+        estado = "pendiente" if self.request.data.get("enviar") else "borrador"
+        serializer.save(operador=self.request.user, estado=estado)
 
     def update(self, request, *args, **kwargs):
         self._check_update_permission(request)
@@ -1063,8 +1068,9 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
         return super().partial_update(request, *args, **kwargs)
 
     def _check_update_permission(self, request):
-        # Operador solo puede editar sus propios formatos no aprobados:
-        # pendiente (queda pendiente), devuelto o borrador (se reenvían a pendiente).
+        # Operador solo puede editar sus propios formatos no aprobados
+        # (pendiente, devuelto o borrador). El estado solo cambia a pendiente
+        # cuando el body trae enviar=true; si no, se conserva.
         if request.user.is_staff:
             return
         formato = self.get_object()
@@ -1077,12 +1083,16 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
         if self.request.user.is_staff:
             serializer.save()
             return
-        # Reenvío del Operador: vuelve a la cola de aprobación.
-        serializer.save(
-            operador=self.request.user,
-            estado="pendiente",
-            devolucion_motivo="",
-        )
+        if self.request.data.get("enviar"):
+            # Envío/reenvío del Operador: vuelve a la cola de aprobación.
+            serializer.save(
+                operador=self.request.user,
+                estado="pendiente",
+                devolucion_motivo="",
+            )
+            return
+        # Guardar avance: conserva el estado actual (borrador/devuelto/pendiente).
+        serializer.save(operador=self.request.user)
 
     def destroy(self, request, *args, **kwargs):
         _require_admin(request)
