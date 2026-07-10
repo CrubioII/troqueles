@@ -677,8 +677,17 @@ export function FormatosCuchillasHistory({ formatos, loading, onEdit, showOrden 
             const desperdicio = Number(f.desperdicio_mm) > 0
               ? `${fmtNum(f.desperdicio_mm, 1)} mm`
               : (f.desperdicio || '—')
+            const editable = !!onEdit && canEdit(f)
+            const zebra = idx % 2 ? 'var(--surface-2)' : 'var(--surface)'
             return (
-              <tr key={f.id} style={{ borderBottom: '1px solid var(--line)', background: idx % 2 ? 'var(--surface-2)' : 'var(--surface)' }}>
+              <tr
+                key={f.id}
+                title={editable ? 'Clic para editar' : undefined}
+                onClick={editable ? () => onEdit(f) : undefined}
+                onMouseEnter={editable ? (e) => { e.currentTarget.style.background = 'var(--accent-soft, #eef4fd)' } : undefined}
+                onMouseLeave={editable ? (e) => { e.currentTarget.style.background = zebra } : undefined}
+                style={{ borderBottom: '1px solid var(--line)', background: zebra, cursor: editable ? 'pointer' : 'default' }}
+              >
                 {showOrden && (
                   <>
                     <td style={{ padding: '8px 12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>{f.orden_numero || '—'}</td>
@@ -697,7 +706,7 @@ export function FormatosCuchillasHistory({ formatos, loading, onEdit, showOrden 
                 <td style={{ padding: '8px 12px', fontSize: 12 }}>{[f.tiempo_encalado_min, f.tiempo_encuchillado_min, f.tiempo_encauchado_min].map(fmtMin).join(' / ')}</td>
                 {onEdit && (
                   <td style={{ padding: '8px 12px' }}>
-                    {canEdit(f) && <button className="btn sm" onClick={() => onEdit(f)}>Editar</button>}
+                    {canEdit(f) && <button className="btn sm" onClick={(e) => { e.stopPropagation(); onEdit(f) }}>Editar</button>}
                   </td>
                 )}
               </tr>
