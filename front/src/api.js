@@ -290,9 +290,12 @@ export const liquidarRemision = (id, email, extraEmails = []) =>
     body: JSON.stringify({ email, extra_emails: extraEmails }),
   }).then(json)
 
-export const pdfRemision = (id) =>
+// tipo: 'cliente' (sin valores por ítem) | 'admin' (desglose interno de costos)
+export const pdfRemision = (id, tipo = 'cliente') =>
   apiFetch(`${BASE}/remisiones/${id}/pdf/`, {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tipo }),
   })
 
 // Remisiones pendientes del mismo cliente que pueden fusionarse en esta
@@ -332,9 +335,16 @@ export const buscarOrdenPorNumero = (numero) =>
 export const getOrdenesPendientes = (proceso = 'troquel') =>
   apiFetch(`${BASE}/ordenes/produccion_pendientes/?proceso=${encodeURIComponent(proceso)}`).then(json)
 
-// Costos de troquel (solo Admin)
+// Costos de troquel (solo Admin): líneas sembradas del formato de cuchillas
 export const getTroquelCostos = (id) =>
   apiFetch(`${BASE}/ordenes/${id}/troquel_costos/`).then(json)
+
+export const saveTroquelCostos = (id, items) =>
+  apiFetch(`${BASE}/ordenes/${id}/troquel_costos/`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items }),
+  }).then(json)
 
 // Modelo del troquel (Admin)
 export const getTroquelModelo = (ordenId) =>

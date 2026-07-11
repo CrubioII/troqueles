@@ -270,8 +270,10 @@ export function Checkbox({ checked, onChange }) {
 }
 
 // ============ Money input ============
-export function MoneyInput({ value, onChange, className = '', style = {}, suffix = 'COP' }) {
-  const display = Number(Math.round(value || 0)).toLocaleString('es-CO')
+// Con `placeholder`, el cero se muestra vacío (placeholder gris) en vez de "0".
+export function MoneyInput({ value, onChange, className = '', style = {}, suffix = 'COP', placeholder = '' }) {
+  const n = Number(Math.round(value || 0))
+  const display = placeholder && !n ? '' : n.toLocaleString('es-CO')
   return (
     <div className="input-affix" style={{ flex: style.flex }}>
       <input
@@ -279,6 +281,7 @@ export function MoneyInput({ value, onChange, className = '', style = {}, suffix
         inputMode="numeric"
         className={'input mono ' + className}
         style={{ textAlign: 'right', paddingRight: suffix ? 38 : 10, ...style }}
+        placeholder={placeholder}
         value={display}
         onChange={(e) => {
           const v = parseInt(e.target.value.replace(/[^\d]/g, '')) || 0

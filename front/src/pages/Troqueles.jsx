@@ -195,7 +195,7 @@ function AdminTroqueles() {
             <ModeloTroquelGestion ordenId={sel.id} onSaved={() => setCostRefresh(k => k + 1)} />
           </Section>
 
-          <Section title="Costos (subtotales + total)">
+          <Section title="Costos (del formato de cuchillas)">
             <TroquelCostos ordenId={sel.id} refreshKey={costRefresh} />
           </Section>
 

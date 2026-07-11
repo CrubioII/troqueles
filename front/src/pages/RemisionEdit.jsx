@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import { createPortal } from 'react-dom'
 import { Icon } from '../components/Icons'
 import { fmtCOP, fmtNum, REMISION_STATUS_DEFS } from '../components/core'
-import { getRemision, updateRemision, liquidarRemision, getRemisionesImportables, importarRemisiones } from '../api'
+import { getRemision, updateRemision, liquidarRemision, pdfRemision, getRemisionesImportables, importarRemisiones } from '../api'
 import logo from '../assets/logo.png'
 
 // ─────────── Modal de envío (espeja CotizacionModal) ───────────
@@ -277,6 +277,28 @@ export default function RemisionEdit() {
   const updateItem = (i, field, value) => setItems(prev => prev.map((it, idx) => idx === i ? { ...it, [field]: value } : it))
   const removeItem = (i) => setItems(prev => prev.filter((_, idx) => idx !== i))
 
+  const [dlPdf, setDlPdf] = useState(null) // 'cliente' | 'admin' mientras descarga
+  const handlePdf = async (tipo) => {
+    setDlPdf(tipo)
+    try {
+      // Persistir ediciones para que el PDF refleje lo que se ve en pantalla
+      if (editable) await updateRemision(id, payload()).then(hydrate)
+      const r = await pdfRemision(id, tipo)
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      const blob = await r.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = tipo === 'admin' ? `Remision_${rem.numero}_admin.pdf` : `Remision_${rem.numero}.pdf`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      setSavedMsg('Error: no se pudo generar el PDF')
+    } finally {
+      setDlPdf(null)
+    }
+  }
+
   if (loading) return <div style={{ padding: 40, color: 'var(--ink-3)' }}>Cargando…</div>
   if (error) return <div style={{ padding: 40, color: 'var(--danger)' }}>Error: {error}</div>
   if (!rem) return null
@@ -403,17 +425,25 @@ export default function RemisionEdit() {
         </div>
 
         {/* Acciones */}
-        {editable && (
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'flex-end' }}>
-            {savedMsg && <span style={{ fontSize: 12, color: savedMsg.startsWith('Error') ? 'var(--danger)' : 'var(--ok)' }}>{savedMsg}</span>}
-            <button className="btn" onClick={handleSave} disabled={saving}>
-              <Icon.Save /> {saving ? 'Guardando…' : 'Guardar cambios'}
-            </button>
-            <button className="btn accent" onClick={() => setShowModal(true)}>
-              <Icon.Send /> Liquidar y enviar
-            </button>
-          </div>
-        )}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', justifyContent: 'flex-end' }}>
+          {savedMsg && <span style={{ fontSize: 12, color: savedMsg.startsWith('Error') ? 'var(--danger)' : 'var(--ok)' }}>{savedMsg}</span>}
+          <button className="btn" onClick={() => handlePdf('cliente')} disabled={!!dlPdf} title="PDF que recibe el cliente (sin valores por ítem)">
+            <Icon.Print /> {dlPdf === 'cliente' ? 'Generando…' : 'PDF cliente'}
+          </button>
+          <button className="btn" onClick={() => handlePdf('admin')} disabled={!!dlPdf} title="Documento interno con desglose de costos del troquel">
+            <Icon.Print /> {dlPdf === 'admin' ? 'Generando…' : 'PDF admin (desglose)'}
+          </button>
+          {editable && (
+            <>
+              <button className="btn" onClick={handleSave} disabled={saving}>
+                <Icon.Save /> {saving ? 'Guardando…' : 'Guardar cambios'}
+              </button>
+              <button className="btn accent" onClick={() => setShowModal(true)}>
+                <Icon.Send /> Liquidar y enviar
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       {showModal && (

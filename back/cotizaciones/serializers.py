@@ -377,7 +377,6 @@ class TroquelModeloSerializer(serializers.ModelSerializer):
             "troquel_numero", "pinza", "madera", "cuchilla_puntos", "material",
             "espejo", "instrucciones",
             "corte_cm", "score_cm", "hendido_cm",
-            "precio_corte", "precio_score", "precio_hendido", "precio_caucho",
             "creado", "modificado",
         ]
         read_only_fields = ["id", "creado", "modificado"]

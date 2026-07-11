@@ -2,14 +2,12 @@ import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { fmtCOP, fmtNum, NumField, Checkbox, MoneyInput } from './core'
 import {
-  getTroquelModelo, saveTroquelModelo, getTroquelCostos, extraerPdfTroquel,
+  getTroquelModelo, saveTroquelModelo, getTroquelCostos, saveTroquelCostos, extraerPdfTroquel,
   getFormatosCuchillas, createFormatoCuchillas, updateFormatoCuchillas,
   getClientes, createCliente, createOrden,
 } from '../api'
 
 const asList = (data) => (Array.isArray(data) ? data : (data?.results || []))
-
-const PRECIO_LABELS = { corte: 'Corte', score: 'Score', hendido: 'C. Hendido', caucho: 'Caucho' }
 const IMG_RE = /\.(png|jpe?g|gif|webp|bmp|svg)$/i
 
 // Tamaños disponibles en el formato de cuchillas (deben coincidir con el backend)
@@ -89,7 +87,6 @@ function SectionHeader({ children }) {
 const EMPTY_MODELO = {
   instrucciones: '',
   corte_cm: 0, score_cm: 0, hendido_cm: 0,
-  precio_corte: 0, precio_score: 0, precio_hendido: 0, precio_caucho: 0,
 }
 
 export function TroquelModeloForm({ ordenId, onSaved, onLoaded }) {
@@ -171,8 +168,7 @@ export function TroquelModeloForm({ ordenId, onSaved, onLoaded }) {
     const fd = new FormData()
     fd.append('orden', ordenId)
     fd.append('instrucciones', form.instrucciones ?? '')
-    ;['corte_cm', 'score_cm', 'hendido_cm',
-      'precio_corte', 'precio_score', 'precio_hendido', 'precio_caucho'].forEach(k => fd.append(k, form[k] ?? 0))
+    ;['corte_cm', 'score_cm', 'hendido_cm'].forEach(k => fd.append(k, form[k] ?? 0))
     if (archivo) fd.append('archivo', archivo)
     saveTroquelModelo(modelo?.id, fd)
       .then(saved => {
@@ -200,24 +196,12 @@ export function TroquelModeloForm({ ordenId, onSaved, onLoaded }) {
 
       <div>
         <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
-          CM Lineales (alimentan el cálculo de costos)
+          CM lineales del modelo (informativo)
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
           <Field label="Corte (cm)" w={110}><NumField value={form.corte_cm} onChange={v => set('corte_cm', v)} /></Field>
           <Field label="Score (cm)" w={110}><NumField value={form.score_cm} onChange={v => set('score_cm', v)} /></Field>
           <Field label="C. Hendido (cm)" w={110}><NumField value={form.hendido_cm} onChange={v => set('hendido_cm', v)} /></Field>
-        </div>
-      </div>
-
-      <div>
-        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
-          Precios unitarios de esta OP (COP/cm)
-        </div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
-          <Field label="Corte" w={130}><MoneyInput value={Number(form.precio_corte) || 0} onChange={v => set('precio_corte', v)} suffix="" /></Field>
-          <Field label="Score" w={130}><MoneyInput value={Number(form.precio_score) || 0} onChange={v => set('precio_score', v)} suffix="" /></Field>
-          <Field label="C. Hendido" w={130}><MoneyInput value={Number(form.precio_hendido) || 0} onChange={v => set('precio_hendido', v)} suffix="" /></Field>
-          <Field label="Caucho" w={130}><MoneyInput value={Number(form.precio_caucho) || 0} onChange={v => set('precio_caucho', v)} suffix="" /></Field>
         </div>
       </div>
 
@@ -720,46 +704,99 @@ export function FormatosCuchillasHistory({ formatos, loading, onEdit, showOrden 
 
 // ────────── Costos de troquel (Admin) ──────────
 
-export function TroquelCostos({ ordenId, refreshKey }) {
-  const [data, setData] = useState(null)
+export function TroquelCostos({ ordenId, refreshKey, onDirtyChange }) {
+  const [items, setItems] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
+  const [okMsg, setOkMsg] = useState(false)
+  const [dirty, setDirty] = useState(false)
+
+  // El padre (p.ej. la revisión) necesita saber si hay costos sin guardar
+  useEffect(() => { onDirtyChange && onDirtyChange(dirty) }, [dirty])
+
   useEffect(() => {
     setLoading(true)
+    setError(null)
     getTroquelCostos(ordenId)
-      .then(setData)
-      .catch(() => setData(null))
+      .then(data => { setItems(data.items || []); setDirty(false) })
+      .catch(() => setItems(null))
       .finally(() => setLoading(false))
   }, [ordenId, refreshKey])
 
-  if (loading) return <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Calculando…</div>
-  if (!data) return <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Sin datos de costos.</div>
+  const setItem = (idx, k, v) => {
+    setItems(list => list.map((it, i) => (i === idx ? { ...it, [k]: v } : it)))
+    setDirty(true)
+    setOkMsg(false)
+  }
 
-  const tipos = ['corte', 'score', 'hendido', 'caucho']
+  const save = () => {
+    setSaving(true); setError(null); setOkMsg(false)
+    saveTroquelCostos(ordenId, items.map(({ total, ...it }) => it))
+      .then(data => { setItems(data.items || []); setDirty(false); setOkMsg(true) })
+      .catch(() => setError('No se pudieron guardar los costos'))
+      .finally(() => setSaving(false))
+  }
+
+  if (loading) return <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Calculando…</div>
+  if (!items) return <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Sin datos de costos.</div>
+  if (!items.length) {
+    return (
+      <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>
+        Sin formato de cuchillas registrado — los costos se generan del formato del operador.
+      </div>
+    )
+  }
+
+  const total = items.reduce((acc, it) => acc + (Number(it.cantidad) || 0) * (Number(it.precio) || 0), 0)
   return (
-    <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead>
-          <tr style={{ borderBottom: '2px solid var(--line)' }}>
-            {['Tipo', 'CM lineales', 'Precio unit.', 'Subtotal'].map((h, i) => (
-              <th key={i} style={{ padding: '10px 12px', textAlign: i ? 'right' : 'left', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'var(--ink-3)', background: 'var(--surface-2)' }}>{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {tipos.map((t, idx) => (
-            <tr key={t} style={{ borderBottom: '1px solid var(--line)', background: idx % 2 ? 'var(--surface-2)' : 'var(--surface)' }}>
-              <td style={{ padding: '8px 12px', fontWeight: 600 }}>{PRECIO_LABELS[t]}</td>
-              <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'JetBrains Mono, monospace' }}>{fmtNum(data.cm[t], 3)}</td>
-              <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'JetBrains Mono, monospace' }}>{fmtCOP(data.precios[t] || 0)}</td>
-              <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 700, fontFamily: 'JetBrains Mono, monospace' }}>{fmtCOP(data.subtotales[t])}</td>
+    <div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ borderBottom: '2px solid var(--line)' }}>
+              {['Concepto', 'Detalle', 'Cantidad', 'Precio unit.', 'Total'].map((h, i) => (
+                <th key={i} style={{ padding: '10px 12px', textAlign: i > 1 ? 'right' : 'left', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'var(--ink-3)', background: 'var(--surface-2)' }}>{h}</th>
+              ))}
             </tr>
-          ))}
-          <tr style={{ borderTop: '2px solid var(--line)' }}>
-            <td colSpan={3} style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700 }}>Total</td>
-            <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 800, fontFamily: 'JetBrains Mono, monospace', color: 'var(--accent)' }}>{fmtCOP(data.total)}</td>
-          </tr>
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {items.map((it, idx) => (
+              <tr key={it.key || idx} style={{ borderBottom: '1px solid var(--line)', background: idx % 2 ? 'var(--surface-2)' : 'var(--surface)' }}>
+                <td style={{ padding: '8px 12px', fontWeight: 600 }}>{it.concepto}</td>
+                <td style={{ padding: '8px 12px', color: 'var(--ink-3)', fontSize: 12 }}>{it.detalle}</td>
+                <td style={{ padding: '8px 12px', textAlign: 'right' }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ width: 90, display: 'inline-block' }}>
+                      <NumField value={it.cantidad} onChange={v => setItem(idx, 'cantidad', v)} placeholder="0" />
+                    </span>
+                    <span style={{ fontSize: 11, color: 'var(--ink-3)', width: 24 }}>{it.unidad}</span>
+                  </span>
+                </td>
+                <td style={{ padding: '8px 12px', textAlign: 'right' }}>
+                  <span style={{ width: 120, display: 'inline-block' }}>
+                    <MoneyInput value={Number(it.precio) || 0} onChange={v => setItem(idx, 'precio', v)} suffix="" placeholder="0" />
+                  </span>
+                </td>
+                <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 700, fontFamily: 'JetBrains Mono, monospace' }}>
+                  {fmtCOP((Number(it.cantidad) || 0) * (Number(it.precio) || 0))}
+                </td>
+              </tr>
+            ))}
+            <tr style={{ borderTop: '2px solid var(--line)' }}>
+              <td colSpan={4} style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700 }}>Total</td>
+              <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 800, fontFamily: 'JetBrains Mono, monospace', color: 'var(--accent)' }}>{fmtCOP(total)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderTop: '1px solid var(--line)' }}>
+        <button className="btn btn-primary" onClick={save} disabled={saving || !dirty}>
+          {saving ? 'Guardando…' : 'Guardar costos'}
+        </button>
+        {okMsg && <span style={{ fontSize: 12, color: 'var(--ok, #2e9e5b)' }}>Costos guardados ✓</span>}
+        {error && <span style={{ fontSize: 12, color: 'var(--danger, #c0392b)' }}>{error}</span>}
+      </div>
     </div>
   )
 }
@@ -772,7 +809,6 @@ const EMPTY_TAREA_MODELO = {
   troquel_numero: '', pinza: '', madera: '', cuchilla_puntos: '', material: '',
   espejo: false, instrucciones: '',
   corte_cm: 0, score_cm: 0, hendido_cm: 0,
-  precio_corte: 0, precio_score: 0, precio_hendido: 0, precio_caucho: 0,
 }
 
 export function NuevaTareaTroquelModal({ onClose, onCreated }) {
@@ -851,8 +887,7 @@ export function NuevaTareaTroquelModal({ onClose, onCreated }) {
   const hasModeloData = () =>
     ['troquel_numero', 'pinza', 'madera', 'cuchilla_puntos', 'material', 'instrucciones'].some(k => String(modelo[k] || '').trim())
     || modelo.espejo
-    || ['corte_cm', 'score_cm', 'hendido_cm',
-        'precio_corte', 'precio_score', 'precio_hendido', 'precio_caucho'].some(k => Number(modelo[k]) > 0)
+    || ['corte_cm', 'score_cm', 'hendido_cm'].some(k => Number(modelo[k]) > 0)
 
   // El visor del operador solo muestra instrucciones + archivo: si no se
   // escribieron instrucciones, se componen desde los campos técnicos.
@@ -902,8 +937,7 @@ export function NuevaTareaTroquelModal({ onClose, onCreated }) {
         ;['troquel_numero', 'pinza', 'madera', 'cuchilla_puntos', 'material'].forEach(k => fd.append(k, modelo[k] ?? ''))
         fd.append('instrucciones', composedInstrucciones())
         fd.append('espejo', modelo.espejo ? 'true' : 'false')
-        ;['corte_cm', 'score_cm', 'hendido_cm',
-          'precio_corte', 'precio_score', 'precio_hendido', 'precio_caucho'].forEach(k => fd.append(k, modelo[k] ?? 0))
+        ;['corte_cm', 'score_cm', 'hendido_cm'].forEach(k => fd.append(k, modelo[k] ?? 0))
         if (archivo) fd.append('archivo', archivo)
         await saveTroquelModelo(null, fd)
       }
@@ -970,15 +1004,6 @@ export function NuevaTareaTroquelModal({ onClose, onCreated }) {
             <Field label="Corte (cm)" w={110}><NumField value={modelo.corte_cm} onChange={v => setM('corte_cm', v)} /></Field>
             <Field label="Score (cm)" w={110}><NumField value={modelo.score_cm} onChange={v => setM('score_cm', v)} /></Field>
             <Field label="C. Hendido (cm)" w={110}><NumField value={modelo.hendido_cm} onChange={v => setM('hendido_cm', v)} /></Field>
-          </div>
-          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.04em', marginTop: 14, marginBottom: 6 }}>
-            Precios unitarios de esta OP (COP/cm)
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
-            <Field label="Corte" w={130}><MoneyInput value={Number(modelo.precio_corte) || 0} onChange={v => setM('precio_corte', v)} suffix="" /></Field>
-            <Field label="Score" w={130}><MoneyInput value={Number(modelo.precio_score) || 0} onChange={v => setM('precio_score', v)} suffix="" /></Field>
-            <Field label="C. Hendido" w={130}><MoneyInput value={Number(modelo.precio_hendido) || 0} onChange={v => setM('precio_hendido', v)} suffix="" /></Field>
-            <Field label="Caucho" w={130}><MoneyInput value={Number(modelo.precio_caucho) || 0} onChange={v => setM('precio_caucho', v)} suffix="" /></Field>
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 10 }}>
             <Field label="Instrucciones adicionales (visibles al operador)" full>

@@ -150,6 +150,32 @@
     border-top: 1px solid #e8e8e8;
   }
   .signature .sig-brand { color: #E8945A; }
+
+  /* ── Marcador de documento interno ── */
+  .uso-interno {
+    display: inline-block; margin-top: 4px; padding: 2px 8px;
+    font-size: 8px; font-weight: 700; letter-spacing: 0.15em;
+    color: #b03a2e; border: 1px solid #b03a2e; border-radius: 3px;
+  }
+
+  /* ── Detalle de costos (troquel) ── */
+  .costos-section { border-top: 1px solid #e8e8e8; padding: 10px 18px 14px; }
+  .costos-title {
+    font-size: 8px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.1em; color: #E8945A; margin-bottom: 6px;
+  }
+  table.costos { width: 100%; border-collapse: collapse; font-size: 10px; }
+  table.costos th {
+    text-align: left; font-size: 8px; text-transform: uppercase;
+    letter-spacing: 0.08em; color: #999; padding: 4px 6px;
+    border-bottom: 1px solid #e8e8e8;
+  }
+  table.costos td { padding: 4px 6px; border-bottom: 1px solid #f2f2f2; color: #333; }
+  table.costos th.num, table.costos td.num {
+    text-align: right; font-family: monospace;
+  }
+  table.costos tr.costos-total td { font-weight: 700; border-bottom: none; color: #1B1816; }
+  table.costos tr.costos-total td.num { color: #E8945A; font-size: 12px; }
 </style>
 </head>
 <body>
@@ -170,6 +196,7 @@
       {% if logo_uri %}<img src="{{ logo_uri }}" alt="Troqueles INK" height="30" width="auto" style="height:30px;width:auto;max-height:30px;"><br>{% endif %}
       <div class="doc-title">Remisión</div>
       <div class="doc-meta">{{ rem.numero }} &nbsp;·&nbsp; {{ rem.fecha }}</div>
+      <div class="uso-interno">USO INTERNO</div>
     </div>
   </div>
 
@@ -204,6 +231,7 @@
         <th class="col-num">Item</th>
         <th>Descripción</th>
         <th class="col-cant">Cantidad</th>
+        <th class="col-total">Vr. Total</th>
       </tr>
     </thead>
     <tbody>
@@ -212,6 +240,7 @@
         <td class="col-num">{{ forloop.counter }}</td>
         <td class="item-desc">{{ item.descripcion }}</td>
         <td class="col-cant">{{ item.cantidad }}</td>
+        <td class="col-total">{{ item.valor_total }}</td>
       </tr>
       {% endfor %}
     </tbody>
@@ -220,14 +249,49 @@
         <td></td>
         <td class="item-desc">Total entregado</td>
         <td class="col-cant">{{ total_cantidad }}</td>
+        <td class="col-total"></td>
       </tr>
       <tr class="total-row">
         <td></td>
         <td class="item-desc">Total</td>
+        <td class="col-cant"></td>
         <td class="col-total">{{ total_valor }}</td>
       </tr>
     </tfoot>
   </table>
+
+  {% if costos %}
+  <!-- Detalle de costos del troquel (solo documento interno) -->
+  <div class="costos-section">
+    <div class="costos-title">Detalle de costos — Troquel OP {{ rem.orden.numero }}</div>
+    <table class="costos">
+      <thead>
+        <tr>
+          <th>Concepto</th>
+          <th>Detalle</th>
+          <th class="num">Cantidad</th>
+          <th class="num">Precio unit.</th>
+          <th class="num">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in costos %}
+        <tr>
+          <td>{{ c.concepto }}</td>
+          <td>{{ c.detalle }}</td>
+          <td class="num">{{ c.cantidad }} {{ c.unidad }}</td>
+          <td class="num">{{ c.precio }}</td>
+          <td class="num">{{ c.total }}</td>
+        </tr>
+        {% endfor %}
+        <tr class="costos-total">
+          <td colspan="4">Total costos troquel</td>
+          <td class="num">{{ costos_total }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
 
   {% if rem.observaciones %}
   <div class="nota-section">

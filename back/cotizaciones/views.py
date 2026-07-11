@@ -88,10 +88,100 @@ def _require_admin(request):
         raise PermissionDenied("Solo administradores pueden realizar esta acción.")
 
 
+CAUCHO_LABELS = dict(FormatoCuchillas.CAUCHO_TIPO_CHOICES)
+
+
+def _build_costos_seed(formato):
+    """Líneas de costo derivadas de un formato de cuchillas (una por concepto con datos)."""
+    lines = []
+
+    def add(key, concepto, detalle, unidad, cantidad):
+        lines.append({
+            "key": key, "concepto": concepto, "detalle": detalle or "",
+            "unidad": unidad, "cantidad": float(cantidad or 0), "precio": 0,
+        })
+
+    for idx, fila in enumerate(formato.cauchos or []):
+        tipo = fila.get("tipo") or ""
+        cm = float(fila.get("cm") or 0)
+        if cm > 0:
+            add(f"caucho-{idx}", CAUCHO_LABELS.get(tipo, tipo or "Caucho"), "", "cm", cm)
+    if float(formato.cuchilla_cm or 0) > 0:
+        detalle = f"{formato.cuchilla_puntos} puntos" if formato.cuchilla_puntos else ""
+        add("cuchilla", "Cuchilla", detalle, "cm", formato.cuchilla_cm)
+    if float(formato.grafa_cm or 0) > 0:
+        partes = []
+        if formato.grafa_puntos:
+            partes.append(f"{formato.grafa_puntos} puntos")
+        if formato.grafa_altura:
+            partes.append(f"altura {formato.grafa_altura} mm")
+        add("grafa", "Grafa", " · ".join(partes), "cm", formato.grafa_cm)
+    if float(formato.ch_cm or 0) > 0:
+        add("ch", "CH", formato.ch_medida, "cm", formato.ch_cm)
+    if float(formato.sac_cm or 0) > 0:  # legacy: sacabocados en cm
+        add("sacabocados", "Sacabocados", formato.sac_medida, "cm", formato.sac_cm)
+    elif formato.sac_medida:
+        add("sacabocados", "Sacabocados", formato.get_sac_medida_display(), "und", 1)
+    if float(formato.perfo_cm or 0) > 0:
+        add("perforaciones", "Perforaciones", formato.perfo_medida, "cm", formato.perfo_cm)
+    if float(formato.desperdicio_mm or 0) > 0:
+        add("desperdicio", "Desperdicio", "", "mm", formato.desperdicio_mm)
+    if (formato.gan or "").strip():
+        add("gan", "Gan", formato.gan.strip(), "und", 0)
+    return lines
+
+
+def _sync_troquel_costos(op):
+    """Re-siembra costos_items desde el último formato no-borrador, conservando
+    los precios ya ingresados por el Admin (y cantidad/precio del gan)."""
+    formato = op.formatos_cuchillas.exclude(estado="borrador").order_by("-fecha_hora").first()
+    if not formato:
+        return None
+    modelo, _ = TroquelModelo.objects.get_or_create(orden=op)
+    prev = {item.get("key"): item for item in (modelo.costos_items or [])}
+    prev_caucho_precio = {}
+    for item in (modelo.costos_items or []):
+        if str(item.get("key", "")).startswith("caucho-") and float(item.get("precio") or 0) > 0:
+            prev_caucho_precio.setdefault(item.get("concepto"), item.get("precio"))
+    seed = _build_costos_seed(formato)
+    for line in seed:
+        old = prev.get(line["key"])
+        if old:
+            line["precio"] = old.get("precio") or 0
+            if line["key"] == "gan":
+                line["cantidad"] = old.get("cantidad") or line["cantidad"]
+        # Solo se conservan precios ya escritos por el Admin (misma línea o
+        # mismo tipo de caucho); nunca se auto-rellenan.
+        if line["key"].startswith("caucho-") and not float(line["precio"] or 0):
+            line["precio"] = prev_caucho_precio.get(line["concepto"]) or 0
+    modelo.costos_items = seed
+    modelo.save(update_fields=["costos_items", "modificado"])
+    _write_troquel_costo_proceso(op, _costos_items_total(seed))
+    return modelo
+
+
+def _costos_items_total(items):
+    return round(sum(
+        float(i.get("cantidad") or 0) * float(i.get("precio") or 0) for i in (items or [])
+    ), 2)
+
+
+def _troquel_costos_total(op):
+    # Consulta directa (no la relación cacheada): el modelo puede haberse
+    # creado/actualizado por _sync_troquel_costos en este mismo request.
+    modelo = TroquelModelo.objects.filter(orden=op).first()
+    return _costos_items_total(modelo.costos_items) if modelo else 0
+
+
+def _write_troquel_costo_proceso(op, total):
+    op.procesos.filter(proceso_id="troquel").update(costo=total)
+
+
 def _maybe_crear_remision(op):
     """Si la OP está al 100% y aún no tiene remisión, créala (estado=pendiente).
 
-    Genera un ítem inicial derivado de la OP (referencia + valor total de venta);
+    Genera un ítem inicial derivado de la OP (referencia + valor total de venta,
+    o el total de costos de troquel si la OP tiene ese proceso activo);
     el dueño lo edita/divide al liquidar. Idempotente y silencioso ante errores
     para no romper el flujo de finalización de procesos.
     """
@@ -110,11 +200,16 @@ def _maybe_crear_remision(op):
                 ciudad=op.cliente.ciudad,
                 observaciones=op.observaciones,
             )
+            valor = 0
+            if op.procesos.filter(proceso_id="troquel", active=True).exists():
+                valor = _troquel_costos_total(op)
+            if not valor:
+                valor = _orden_valor_total_efectivo(op) or 0
             RemisionItem.objects.create(
                 remision=rem,
                 descripcion=op.referencia,
                 cantidad=op.cantidad or 0,
-                valor_total=_orden_valor_total_efectivo(op) or 0,
+                valor_total=valor,
                 orden=0,
             )
         return rem
@@ -718,34 +813,51 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         data = OrdenOperadorSerializer(qs, many=True, context={"request": request}).data
         return Response(data)
 
-    @action(detail=True, methods=["get"], url_path="troquel_costos")
+    @action(detail=True, methods=["get", "patch"], url_path="troquel_costos")
     def troquel_costos(self, request, pk=None):
-        """GET /api/ordenes/{id}/troquel_costos/ — subtotales y total (solo Admin).
+        """GET/PATCH /api/ordenes/{id}/troquel_costos/ — líneas de costo (solo Admin).
 
-        subtotal = cm × precio unitario de la OP (definido en su TroquelModelo).
-        CORTE/SCORE/HENDIDO vienen del modelo; el caucho suma las filas
-        registradas por el Operador en los formatos de cuchillas.
+        Las líneas se siembran desde el formato de cuchillas del Operador y el
+        Admin las edita (cantidad × precio). PATCH body: {"items": [...]}.
+        El total se refleja en el costo del proceso troquel de la OP.
         """
         op = self.get_object()
-        modelo = getattr(op, "troquel_modelo", None)
-        precios = {
-            "corte": float(modelo.precio_corte) if modelo else 0,
-            "score": float(modelo.precio_score) if modelo else 0,
-            "hendido": float(modelo.precio_hendido) if modelo else 0,
-            "caucho": float(modelo.precio_caucho) if modelo else 0,
-        }
-        corte_cm = float(modelo.corte_cm) if modelo else 0
-        score_cm = float(modelo.score_cm) if modelo else 0
-        hendido_cm = float(modelo.hendido_cm) if modelo else 0
-        caucho_cm = sum(
-            float(fila.get("cm") or 0)
-            for f in op.formatos_cuchillas.exclude(estado="borrador")
-            for fila in (f.cauchos or [])
-        )
-        cm = {"corte": corte_cm, "score": score_cm, "hendido": hendido_cm, "caucho": caucho_cm}
-        subtotales = {tipo: round(cm[tipo] * precios.get(tipo, 0), 2) for tipo in cm}
-        total = round(sum(subtotales.values()), 2)
-        return Response({"cm": cm, "precios": precios, "subtotales": subtotales, "total": total})
+        if request.method == "PATCH":
+            raw = request.data.get("items")
+            if not isinstance(raw, list):
+                return Response({"error": "items debe ser una lista."}, status=400)
+            items = []
+            for i in raw:
+                if not isinstance(i, dict):
+                    return Response({"error": "Cada línea debe ser un objeto."}, status=400)
+                try:
+                    cantidad = float(i.get("cantidad") or 0)
+                    precio = float(i.get("precio") or 0)
+                except (TypeError, ValueError):
+                    return Response({"error": "cantidad y precio deben ser numéricos."}, status=400)
+                if cantidad < 0 or precio < 0:
+                    return Response({"error": "cantidad y precio no pueden ser negativos."}, status=400)
+                items.append({
+                    "key": str(i.get("key") or ""),
+                    "concepto": str(i.get("concepto") or "")[:100],
+                    "detalle": str(i.get("detalle") or "")[:200],
+                    "unidad": str(i.get("unidad") or "")[:10],
+                    "cantidad": cantidad,
+                    "precio": precio,
+                })
+            modelo, _ = TroquelModelo.objects.get_or_create(orden=op)
+            modelo.costos_items = items
+            modelo.save(update_fields=["costos_items", "modificado"])
+            _write_troquel_costo_proceso(op, _costos_items_total(items))
+        else:
+            modelo = getattr(op, "troquel_modelo", None)
+            if not modelo or not modelo.costos_items:
+                # bootstrap para formatos previos a esta función
+                modelo = _sync_troquel_costos(op) or modelo
+        items = list(modelo.costos_items) if modelo else []
+        for i in items:
+            i["total"] = round(float(i.get("cantidad") or 0) * float(i.get("precio") or 0), 2)
+        return Response({"items": items, "total": _costos_items_total(items)})
 
 
 class RegistroMaquinaViewSet(viewsets.ModelViewSet):
@@ -826,11 +938,11 @@ class RemisionViewSet(viewsets.ModelViewSet):
             qs = qs.filter(fecha__lte=fecha_before)
         return qs
 
-    def _build_pdf_ctx(self, rem):
+    def _build_pdf_ctx(self, rem, admin=False):
         items = list(rem.items.all())
         total_cantidad = sum((it.cantidad or 0) for it in items)
         total_valor = sum((it.valor_total or 0) for it in items)
-        return {
+        ctx = {
             "rem": rem,
             "items": [
                 {
@@ -844,20 +956,43 @@ class RemisionViewSet(viewsets.ModelViewSet):
             "total_valor": _fmt_cop(total_valor),
             "logo_uri": _logo_data_uri(),
         }
+        if admin:
+            modelo = TroquelModelo.objects.filter(orden=rem.orden).first() if rem.orden_id else None
+            costos = list(modelo.costos_items) if modelo else []
+            ctx["costos"] = [
+                {
+                    "concepto": c.get("concepto") or "",
+                    "detalle": c.get("detalle") or "",
+                    "unidad": c.get("unidad") or "",
+                    "cantidad": _fmt_num(c.get("cantidad")),
+                    "precio": _fmt_cop(c.get("precio")),
+                    "total": _fmt_cop(float(c.get("cantidad") or 0) * float(c.get("precio") or 0)),
+                }
+                for c in costos
+            ]
+            ctx["costos_total"] = _fmt_cop(_costos_items_total(costos))
+        return ctx
 
     @action(detail=True, methods=["post"], url_path="pdf")
     def generar_pdf(self, request, pk=None):
-        """POST /api/remisiones/{id}/pdf/ — devuelve el PDF de la remisión como descarga."""
+        """POST /api/remisiones/{id}/pdf/ — devuelve el PDF de la remisión como descarga.
+
+        Body {"tipo": "admin"} → documento interno con desglose de costos del
+        troquel; por defecto genera el PDF para el cliente (sin valores por ítem).
+        """
         rem = self.get_object()
-        ctx = self._build_pdf_ctx(rem)
+        es_admin = (request.data.get("tipo") or request.query_params.get("tipo")) == "admin"
+        ctx = self._build_pdf_ctx(rem, admin=es_admin)
+        template = "cotizaciones/pdf_remision_admin.html" if es_admin else "cotizaciones/pdf_remision.html"
         try:
-            html_pdf = render_to_string("cotizaciones/pdf_remision.html", ctx)
+            html_pdf = render_to_string(template, ctx)
             pdf_bytes = WeasyprintHTML(string=html_pdf).write_pdf()
         except Exception as e:
             traceback.print_exc()
             return Response({"error": str(e)}, status=502)
+        filename = f"Remision_{rem.numero}_admin.pdf" if es_admin else f"Remision_{rem.numero}.pdf"
         response = HttpResponse(pdf_bytes, content_type="application/pdf")
-        response["Content-Disposition"] = f'attachment; filename="Remision_{rem.numero}.pdf"'
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
         return response
 
     @action(detail=True, methods=["post"], url_path="liquidar")
@@ -1054,10 +1189,12 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
         # (enviar=true → pendiente de aprobación). El troquel solo se completa
         # (y puede generar remisión) cuando el Admin lo aprueba.
         if self.request.user.is_staff:
-            serializer.save(operador=self.request.user)
-            return
-        estado = "pendiente" if self.request.data.get("enviar") else "borrador"
-        serializer.save(operador=self.request.user, estado=estado)
+            formato = serializer.save(operador=self.request.user)
+        else:
+            estado = "pendiente" if self.request.data.get("enviar") else "borrador"
+            formato = serializer.save(operador=self.request.user, estado=estado)
+        if formato.estado != "borrador" and formato.orden_id:
+            _sync_troquel_costos(formato.orden)
 
     def update(self, request, *args, **kwargs):
         self._check_update_permission(request)
@@ -1081,18 +1218,19 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         if self.request.user.is_staff:
-            serializer.save()
-            return
-        if self.request.data.get("enviar"):
+            formato = serializer.save()
+        elif self.request.data.get("enviar"):
             # Envío/reenvío del Operador: vuelve a la cola de aprobación.
-            serializer.save(
+            formato = serializer.save(
                 operador=self.request.user,
                 estado="pendiente",
                 devolucion_motivo="",
             )
-            return
-        # Guardar avance: conserva el estado actual (borrador/devuelto/pendiente).
-        serializer.save(operador=self.request.user)
+        else:
+            # Guardar avance: conserva el estado actual (borrador/devuelto/pendiente).
+            formato = serializer.save(operador=self.request.user)
+        if formato.estado != "borrador" and formato.orden_id:
+            _sync_troquel_costos(formato.orden)
 
     def destroy(self, request, *args, **kwargs):
         _require_admin(request)
@@ -1135,6 +1273,11 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
             formato.orden.procesos.filter(proceso_id="troquel").update(
                 completado=True, completado_en=timezone.now()
             )
+            # Bootstrap defensivo: si aún no hay líneas de costo, siémbralas.
+            # No re-sincroniza si existen, para no pisar ediciones del Admin.
+            modelo = TroquelModelo.objects.filter(orden=formato.orden).first()
+            if not modelo or not modelo.costos_items:
+                _sync_troquel_costos(formato.orden)
             _maybe_crear_remision(formato.orden)
         return Response(self.get_serializer(formato).data)
 

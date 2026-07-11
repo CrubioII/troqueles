@@ -335,11 +335,16 @@ class TroquelModelo(models.Model):
     corte_cm = models.DecimalField(max_digits=12, decimal_places=3, default=0)
     score_cm = models.DecimalField(max_digits=12, decimal_places=3, default=0)
     hendido_cm = models.DecimalField(max_digits=12, decimal_places=3, default=0)
-    # Precios unitarios por OP (COP por cm, definidos por el Admin)
+    # Precios unitarios por OP (legacy: el costeo ahora usa costos_items)
     precio_corte = models.DecimalField(max_digits=12, decimal_places=4, default=0)
     precio_score = models.DecimalField(max_digits=12, decimal_places=4, default=0)
     precio_hendido = models.DecimalField(max_digits=12, decimal_places=4, default=0)
     precio_caucho = models.DecimalField(max_digits=12, decimal_places=4, default=0)
+    # Líneas de costo editables por el Admin, sembradas desde el formato de
+    # cuchillas del Operador. Cada línea:
+    # {"key", "concepto", "detalle", "unidad", "cantidad", "precio"}
+    # (los totales se calculan siempre al vuelo, nunca se almacenan)
+    costos_items = models.JSONField(default=list, blank=True)
     creado = models.DateTimeField(auto_now_add=True)
     modificado = models.DateTimeField(auto_now=True)
 

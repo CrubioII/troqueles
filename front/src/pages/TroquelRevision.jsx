@@ -96,6 +96,8 @@ function RevisionDetalle({ formato, onVolver, onResuelto }) {
   const [motivo, setMotivo] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
+  const [costosDirty, setCostosDirty] = useState(false)   // costos escritos sin guardar
+  const [avisoCostos, setAvisoCostos] = useState(false)   // popup "guarda antes de aprobar"
 
   useEffect(() => {
     setLoadingInfo(true)
@@ -164,8 +166,8 @@ function RevisionDetalle({ formato, onVolver, onResuelto }) {
         <FormatosCuchillasHistory formatos={[formato]} loading={false} />
       </Section>
 
-      <Section title="Costos (subtotales + total)">
-        <TroquelCostos ordenId={formato.orden} refreshKey={0} />
+      <Section title="Costos (del formato de cuchillas)">
+        <TroquelCostos ordenId={formato.orden} refreshKey={0} onDirtyChange={setCostosDirty} />
       </Section>
 
       {error && <div style={{ marginTop: 12, color: 'var(--danger, #c0392b)', fontSize: 13 }}>{error}</div>}
@@ -176,10 +178,29 @@ function RevisionDetalle({ formato, onVolver, onResuelto }) {
         <button className="btn" style={{ color: 'var(--danger, #c0392b)' }} onClick={() => { setMotivo(''); setDevolviendo(true) }} disabled={busy}>
           Devolver al operador
         </button>
-        <button className="btn primary" onClick={() => setConfirmando(true)} disabled={busy}>
+        <button className="btn primary" onClick={() => (costosDirty ? setAvisoCostos(true) : setConfirmando(true))} disabled={busy}>
           Aprobar → remisión
         </button>
       </div>
+
+      {avisoCostos && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 9999,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+        }}>
+          <div style={{ background: 'var(--surface)', borderRadius: 12, maxWidth: 440, width: '100%', padding: 24, boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
+            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>Costos sin guardar</div>
+            <div style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5, marginBottom: 18 }}>
+              Escribiste precios o cantidades en la tabla de costos que aún no se han guardado.
+              Presiona <strong>Guardar costos</strong> antes de aprobar, para que la remisión
+              se genere con el total correcto.
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button className="btn primary" onClick={() => setAvisoCostos(false)}>Entendido</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {confirmando && (
         <div style={{
