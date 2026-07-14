@@ -45,10 +45,11 @@ function Field({ label, children, full, w }) {
   )
 }
 
-// Grupo visual de campos relacionados (p.ej. cm + tamaño de un mismo concepto)
+// Grupo visual de campos relacionados (p.ej. cm + tamaño de un mismo concepto).
+// minInlineSize/flexWrap: los fieldset no se encogen por defecto y desbordaban en móvil.
 function FieldGroup({ title, children }) {
   return (
-    <fieldset style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '6px 12px 10px', margin: 0, display: 'flex', gap: 10 }}>
+    <fieldset style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '6px 12px 10px', margin: 0, display: 'flex', flexWrap: 'wrap', gap: 10, rowGap: 8, minInlineSize: 0, maxWidth: '100%' }}>
       <legend style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink-3)', padding: '0 4px' }}>{title}</legend>
       {children}
     </fieldset>
