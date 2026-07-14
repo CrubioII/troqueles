@@ -7,6 +7,7 @@ from .views import (
     RemisionViewSet,
 )
 from .dashboard_views import DashboardStatsView
+from .sync_views import SyncView
 
 router = DefaultRouter()
 router.register("clientes", ClienteViewSet, basename="cliente")
@@ -21,5 +22,6 @@ router.register("formatos-cuchillas", FormatoCuchillasViewSet, basename="formato
 
 urlpatterns = [
     path("dashboard/stats/", DashboardStatsView.as_view(), name="dashboard-stats"),
+    path("sync/", SyncView.as_view(), name="sync"),
     path("", include(router.urls)),
 ]

@@ -4,7 +4,7 @@ import { fmtNum, fmtCOP } from '../components/core'
 import { Icon } from '../components/Icons'
 import { RegistroMaquinaForm, RegistroMaquinaHistory } from '../components/RegistroMaquina'
 import { getRegistrosMaquina } from '../api'
-import { usePolling } from '../lib/usePolling'
+import { useSyncPolling } from '../lib/useSyncPolling'
 
 const BLOQUE_HORAS = 4
 
@@ -52,7 +52,7 @@ export default function Guillotina() {
 
   useEffect(() => { loadRegistros() }, [])
 
-  usePolling(() => loadRegistros(true))
+  useSyncPolling({ registros: () => loadRegistros(true) })
 
   const grupos = agruparPorBloque(registros)
 

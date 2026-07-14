@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Icon } from '../components/Icons'
 import { fmtNum, ProgressBar, Checkbox } from '../components/core'
 import { getOrdenes, getOrden, toggleProcesoCompletado } from '../api'
-import { usePolling } from '../lib/usePolling'
+import { useSyncPolling } from '../lib/useSyncPolling'
 
 const PROCESO_LABELS = {
   impresion: 'Impresión',
@@ -136,7 +136,7 @@ export default function ProduccionGeneral() {
 
   useEffect(() => { load('', true) }, [])
 
-  usePolling(() => load(paramsRef.current))
+  useSyncPolling({ ordenes: () => load(paramsRef.current) })
 
   const handleSearch = (v) => {
     setSearch(v)

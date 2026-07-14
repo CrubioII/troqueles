@@ -14,7 +14,7 @@ import {
   updateFormatoCuchillas, getFormatosPendientes, cancelarEnvioFormato,
   enviarRemisionOperador, pdfRemisionOperador, getRemisionesSolicitadas,
 } from '../api'
-import { usePolling } from '../lib/usePolling'
+import { useSyncPolling } from '../lib/useSyncPolling'
 
 const asList = (data) => (Array.isArray(data) ? data : (data?.results || []))
 
@@ -78,7 +78,10 @@ function AdminTroqueles() {
       .catch(() => setSolicitudes([]))
 
   useEffect(() => { loadPendientes(); loadSolicitudes() }, [])
-  usePolling(() => { loadPendientes(); loadSolicitudes() }, { enabled: true })
+  useSyncPolling({
+    formatos_pendientes: loadPendientes,
+    remisiones_solicitadas: loadSolicitudes,
+  })
 
   const loadOrdenes = () => {
     setLoading(true)
@@ -307,7 +310,7 @@ function OperadorTroqueles() {
   useEffect(() => { if (tab === 'historial') loadHistorial() }, [tab])
 
   // Tiempo real: refrescar la lista de pendientes solo cuando se está viendo
-  usePolling(() => loadLista(true), { enabled: !orden && tab === 'pendientes' })
+  useSyncPolling({ ordenes: () => loadLista(true) }, { enabled: !orden && tab === 'pendientes' })
 
   const loadFormatos = (ordenId) => {
     setLoadingFormatos(true)

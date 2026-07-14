@@ -86,6 +86,10 @@ const jsonConCodigo = async (r) => {
   return r.json()
 }
 
+// Versiones por recurso para el polling barato (ver lib/useSyncPolling.js)
+export const getSync = () =>
+  apiFetch(`${BASE}/sync/`).then(json)
+
 export const getPapeles = () =>
   apiFetch(`${BASE}/papel/`).then(json)
 

@@ -1044,6 +1044,7 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
             .select_related("cliente", "remision_solicitada_por")
             .order_by("remision_solicitada_en")
         )
+        modelos = {m.orden_id: m for m in TroquelModelo.objects.filter(orden__in=qs)}
         data = [
             {
                 "id": op.id,
@@ -1054,7 +1055,7 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
                 "solicitada_por": getattr(op.remision_solicitada_por, "username", ""),
             }
             for op in qs
-            if _troquel_costos_total(op) <= 0
+            if _costos_items_total(getattr(modelos.get(op.id), "costos_items", None)) <= 0
         ]
         return Response(data)
 
@@ -1284,7 +1285,9 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
     Editar/eliminar requiere admin. operador y fecha_hora se estampan server-side.
     """
 
-    queryset = FormatoCuchillas.objects.select_related("orden", "operador")
+    queryset = FormatoCuchillas.objects.select_related(
+        "orden", "orden__cliente", "operador", "revisado_por"
+    )
     serializer_class = FormatoCuchillasSerializer
     filter_backends = [filters.OrderingFilter]
     ordering_fields = ["fecha_hora"]

@@ -32,6 +32,14 @@ export function AuthProvider({ children }) {
         token = localStorage.getItem('access')
       }
       if (token && !isExpired(token)) {
+        // El token trae username/role como claims: restaurar la sesión sin red.
+        const claims = decodePayload(token)
+        if (claims?.username && claims?.role) {
+          setUser({ username: claims.username, role: claims.role })
+          setReady(true)
+          return
+        }
+        // Tokens emitidos antes del deploy de claims: caer a /auth/me/.
         try {
           const res = await fetch(`${BASE}/auth/me/`, {
             headers: { Authorization: `Bearer ${token}` },

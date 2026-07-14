@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Icon } from '../components/Icons'
 import { fmtCOP, fmtNum } from '../components/core'
 import { getClientesResumen } from '../api'
-import { usePolling } from '../lib/usePolling'
+import { useSyncPolling } from '../lib/useSyncPolling'
 
 const ACTIVIDAD_LABEL = {
   cotizacion: 'cotización',
@@ -64,7 +64,7 @@ export default function ClienteList() {
   }
 
   useEffect(() => { load(true) }, [])
-  usePolling(() => load(), {})
+  useSyncPolling({ clientes: () => load() })
 
   const rows = useMemo(() => {
     let list = clientes

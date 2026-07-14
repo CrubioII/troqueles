@@ -4,7 +4,7 @@ import { Icon } from '../components/Icons'
 import { fmtCOP, fmtNum } from '../components/core'
 import { getOrdenes, deleteOrden } from '../api'
 import { useAuth } from '../context/AuthContext'
-import { usePolling } from '../lib/usePolling'
+import { useSyncPolling } from '../lib/useSyncPolling'
 
 function Skeleton() {
   return (
@@ -64,7 +64,7 @@ export default function OrdenList() {
 
   useEffect(() => { load('', true) }, [])
 
-  usePolling(() => load(paramsRef.current), { enabled: confirmDelete == null })
+  useSyncPolling({ ordenes: () => load(paramsRef.current) }, { enabled: confirmDelete == null })
 
   const handleSearch = (v) => {
     setSearch(v)

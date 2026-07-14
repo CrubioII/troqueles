@@ -8,7 +8,7 @@ import {
   getFormatosPendientes, aprobarFormatoCuchillas, devolverFormatoCuchillas,
   getOrden, getTroquelModelo,
 } from '../api'
-import { usePolling } from '../lib/usePolling'
+import { useSyncPolling } from '../lib/useSyncPolling'
 
 const asList = (data) => (Array.isArray(data) ? data : (data?.results || []))
 
@@ -274,7 +274,7 @@ export default function TroquelRevision() {
   useEffect(() => { loadPendientes() }, [])
 
   // Tiempo real: refrescar la cola solo cuando se está viendo la lista
-  usePolling(() => loadPendientes(true), { enabled: !sel })
+  useSyncPolling({ formatos_pendientes: () => loadPendientes(true) }, { enabled: !sel })
 
   const volver = () => { setSel(null); loadPendientes() }
 

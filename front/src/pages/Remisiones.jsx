@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Icon } from '../components/Icons'
 import { REMISION_STATUS_DEFS } from '../components/core'
 import { getRemisiones } from '../api'
-import { usePolling } from '../lib/usePolling'
+import { useSyncPolling } from '../lib/useSyncPolling'
 
 const TAB_DEFS = [
   { id: 'pendiente', label: 'Activas' },
@@ -80,7 +80,7 @@ export default function Remisiones() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab])
 
-  usePolling(() => load(paramsRef.current))
+  useSyncPolling({ remisiones: () => load(paramsRef.current) })
 
   const reapply = (s = search, desde = fechaDesde, hasta = fechaHasta) => {
     load(buildParams(tab, s, desde, hasta))

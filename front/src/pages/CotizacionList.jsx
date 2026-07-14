@@ -4,7 +4,7 @@ import { Icon } from '../components/Icons'
 import { fmtNum, STATUS_DEFS } from '../components/core'
 import { getCotizaciones, deleteCotizacion, getDashboardStats } from '../api'
 import { useAuth } from '../context/AuthContext'
-import { usePolling } from '../lib/usePolling'
+import { useSyncPolling } from '../lib/useSyncPolling'
 import { EmbudoChart } from '../components/charts/DashboardCharts'
 
 const TAB_DEFS = [
@@ -90,7 +90,7 @@ export default function CotizacionList() {
     load('', true)
   }, [])
 
-  usePolling(() => load(paramsRef.current), { enabled: confirmDelete == null })
+  useSyncPolling({ cotizaciones: () => load(paramsRef.current) }, { enabled: confirmDelete == null })
 
   const buildParams = (s, st) => {
     const parts = []

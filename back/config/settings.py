@@ -71,7 +71,11 @@ if all([DB_NAME, DB_USER, DB_PASSWORD, DB_HOST]):
             "PORT": DB_PORT,
             "OPTIONS": {
                 "sslmode": "require",
-            }
+            },
+            # Reutilizar conexiones entre requests: evita un handshake TCP+TLS
+            # a Postgres por cada request (~0.5-1s en Azure).
+            "CONN_MAX_AGE": 600,
+            "CONN_HEALTH_CHECKS": True,
         }
     }
 else:
@@ -137,6 +141,7 @@ CORS_ALLOWED_ORIGINS = os.getenv(
     "http://localhost:3000,http://localhost:5173,http://127.0.0.1:5500"
 ).split(",")
 CORS_ALLOW_ALL_ORIGINS = DEBUG
+CORS_PREFLIGHT_MAX_AGE = 86400
 
 CSRF_TRUSTED_ORIGINS = os.getenv(
     "CSRF_TRUSTED_ORIGINS",
