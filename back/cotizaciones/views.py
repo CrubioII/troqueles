@@ -105,9 +105,16 @@ def _build_costos_seed(formato):
         cm = float(fila.get("cm") or 0)
         if cm > 0:
             add(f"caucho-{idx}", CAUCHO_LABELS.get(tipo, tipo or "Caucho"), "", "cm", cm)
-    if float(formato.cuchilla_cm or 0) > 0:
-        detalle = f"{formato.cuchilla_puntos} puntos" if formato.cuchilla_puntos else ""
-        add("cuchilla", "Cuchilla", detalle, "cm", formato.cuchilla_cm)
+    # Cuchilla y desperdicio se cobran juntos: una sola línea con el total,
+    # desglosando en el detalle cuánto corresponde a cada uno.
+    cuchilla_cm = float(formato.cuchilla_cm or 0)
+    desperdicio_cm = float(formato.desperdicio_cm or 0)
+    if cuchilla_cm > 0 or desperdicio_cm > 0:
+        partes = []
+        if formato.cuchilla_puntos:
+            partes.append(f"{formato.cuchilla_puntos} puntos")
+        partes.append(f"{cuchilla_cm:g} cm + {desperdicio_cm:g} cm desperdicio")
+        add("cuchilla", "Cuchilla", " · ".join(partes), "cm", cuchilla_cm + desperdicio_cm)
     if float(formato.grafa_cm or 0) > 0:
         partes = []
         if formato.grafa_puntos:
@@ -123,8 +130,6 @@ def _build_costos_seed(formato):
         add("sacabocados", "Sacabocados", formato.get_sac_medida_display(), "und", formato.sac_cantidad or 1)
     if float(formato.perfo_cm or 0) > 0:
         add("perforaciones", "Perforado", formato.perfo_medida, "cm", formato.perfo_cm)
-    if float(formato.desperdicio_cm or 0) > 0:
-        add("desperdicio", "Desperdicio", "", "cm", formato.desperdicio_cm)
     if (formato.gan or "").strip():
         add("gan", "Gan", formato.gan.strip(), "und", 0)
     return lines
