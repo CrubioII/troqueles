@@ -388,13 +388,6 @@ export const saveTroquelModelo = (id, formData) =>
     body: formData,
   }).then(json)
 
-// Lee un PDF de modelo de troquel y devuelve los campos detectados (no guarda nada)
-export const extraerPdfTroquel = (file) => {
-  const fd = new FormData()
-  fd.append('archivo', file)
-  return apiFetch(`${BASE}/troquel-modelos/extraer_pdf/`, { method: 'POST', body: fd }).then(json)
-}
-
 // Formato de cuchillas
 export const getFormatosCuchillas = (ordenId) =>
   apiFetch(`${BASE}/formatos-cuchillas/?orden=${ordenId}`).then(json)

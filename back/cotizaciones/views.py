@@ -16,7 +16,6 @@ from django.conf import settings
 from django.utils import timezone
 from weasyprint import HTML as WeasyprintHTML
 
-from .pdf_troquel import parse_troquel_pdf
 
 _LOGO_PATH = os.path.join(settings.BASE_DIR, "cotizaciones", "static", "cotizaciones", "logo.png")
 
@@ -1277,18 +1276,6 @@ class TroquelModeloViewSet(viewsets.ModelViewSet):
         if orden_id:
             qs = qs.filter(orden_id=orden_id)
         return qs
-
-    @action(detail=False, methods=["post"])
-    def extraer_pdf(self, request):
-        """Lee un PDF de modelo de troquel y devuelve los campos detectados (sin guardar)."""
-        archivo = request.FILES.get("archivo")
-        if not archivo:
-            return Response({"error": "Falta el archivo"}, status=400)
-        try:
-            data = parse_troquel_pdf(archivo)
-        except Exception:
-            return Response({"error": "No se pudo leer el PDF"}, status=400)
-        return Response(data)
 
 
 class FormatoCuchillasViewSet(viewsets.ModelViewSet):

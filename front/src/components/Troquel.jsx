@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { fmtCOP, fmtNum, NumField, Checkbox, MoneyInput } from './core'
 import {
-  getTroquelModelo, saveTroquelModelo, getTroquelCostos, saveTroquelCostos, extraerPdfTroquel,
+  getTroquelModelo, saveTroquelModelo, getTroquelCostos, saveTroquelCostos,
   getFormatosCuchillas, createFormatoCuchillas, updateFormatoCuchillas,
   getClientes, createCliente, createOrden,
 } from '../api'
@@ -64,15 +64,6 @@ function SpecHint({ children }) {
   )
 }
 
-function Spinner({ size = 13 }) {
-  return (
-    <span style={{
-      display: 'inline-block', width: size, height: size, flexShrink: 0,
-      border: '2px solid var(--line)', borderTopColor: 'var(--accent)',
-      borderRadius: '50%', animation: 'troquel-spin 0.7s linear infinite',
-    }} />
-  )
-}
 
 function SectionHeader({ children }) {
   return (
@@ -98,8 +89,6 @@ export function TroquelModeloForm({ ordenId, onSaved, onLoaded }) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
   const [okMsg, setOkMsg] = useState(false)
-  const [pdfMsg, setPdfMsg] = useState(null)
-  const [pdfLoading, setPdfLoading] = useState(false)
 
   const load = () => {
     setLoading(true)
@@ -128,41 +117,6 @@ export function TroquelModeloForm({ ordenId, onSaved, onLoaded }) {
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
-  // Al elegir un PDF, se intenta leer Referencia/Troquel/Pinza/Madera/Cuchilla/Material
-  // y los cm lineales (Corte/Score/Hendido) para autorrellenar el formulario.
-  const handleArchivoChange = (file) => {
-    setArchivo(file)
-    if (!file || file.type !== 'application/pdf') { setPdfMsg(null); setPdfLoading(false); return }
-    setPdfMsg('Leyendo PDF…')
-    setPdfLoading(true)
-    extraerPdfTroquel(file)
-      .then(data => {
-        const campos = [
-          ['Referencia', data.referencia],
-          ['Troquel', data.troquel],
-          ['Pinza', data.pinza],
-          ['Madera', data.madera],
-          ['Cuchilla', data.cuchilla],
-          ['Material', data.material],
-        ].filter(([, v]) => v)
-        const hayCm = data.corte_cm != null || data.score_cm != null || data.hendido_cm != null
-        setForm(f => {
-          const next = { ...f }
-          if (campos.length) {
-            next.instrucciones = campos.map(([k, v]) => `${k}: ${v}`).join('\n')
-              + (data.espejo === false ? '\n(NO Hacer espejo)' : '')
-          }
-          if (data.corte_cm != null) next.corte_cm = data.corte_cm
-          if (data.score_cm != null) next.score_cm = data.score_cm
-          if (data.hendido_cm != null) next.hendido_cm = data.hendido_cm
-          return next
-        })
-        setPdfMsg(campos.length || hayCm ? 'Datos leídos del PDF ✓ — revisa antes de guardar' : 'No se detectaron datos en el PDF, completa manualmente')
-      })
-      .catch(() => setPdfMsg('No se pudo leer el PDF, completa manualmente'))
-      .finally(() => setPdfLoading(false))
-  }
-
   const submit = () => {
     setSaving(true); setError(null); setOkMsg(false)
     const fd = new FormData()
@@ -175,8 +129,6 @@ export function TroquelModeloForm({ ordenId, onSaved, onLoaded }) {
         setModelo(saved)
         setForm({ ...EMPTY_MODELO, ...saved })
         setArchivo(null)
-        setPdfMsg(null)
-        setPdfLoading(false)
         setOkMsg(true)
         onSaved && onSaved(saved)
       })
@@ -207,14 +159,8 @@ export function TroquelModeloForm({ ordenId, onSaved, onLoaded }) {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <Field label="Archivo del modelo (imagen / PDF)" full>
-          <input type="file" accept="image/*,application/pdf" onChange={e => handleArchivoChange(e.target.files[0] || null)} />
+          <input type="file" accept="image/*,application/pdf" onChange={e => setArchivo(e.target.files[0] || null)} />
         </Field>
-        {pdfMsg && (
-          <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ink-3)' }}>
-            {pdfLoading && <Spinner />}
-            {pdfMsg}
-          </span>
-        )}
         {/* Previsualización: archivo recién elegido tiene prioridad sobre el guardado */}
         {preview ? (
           <img src={preview} alt="Vista previa" style={{ maxWidth: 360, maxHeight: 260, borderRadius: 8, border: '1px solid var(--line)' }} />
@@ -816,8 +762,6 @@ export function NuevaTareaTroquelModal({ onClose, onCreated }) {
   const [modelo, setModelo] = useState(EMPTY_TAREA_MODELO)
   const [archivo, setArchivo] = useState(null)
   const [preview, setPreview] = useState(null)
-  const [pdfMsg, setPdfMsg] = useState(null)
-  const [pdfLoading, setPdfLoading] = useState(false)
   const [suggestions, setSuggestions] = useState([])
   const [showSugg, setShowSugg] = useState(false)
   const searchRef = useRef(null)
@@ -853,35 +797,6 @@ export function NuevaTareaTroquelModal({ onClose, onCreated }) {
     setOp(o => ({ ...o, cliente: c.nombre, clienteId: c.id }))
     setSuggestions([])
     setShowSugg(false)
-  }
-
-  const handleArchivoChange = (file) => {
-    setArchivo(file)
-    if (!file || file.type !== 'application/pdf') { setPdfMsg(null); setPdfLoading(false); return }
-    setPdfMsg('Leyendo PDF…')
-    setPdfLoading(true)
-    extraerPdfTroquel(file)
-      .then(data => {
-        const hayDatos = ['referencia', 'troquel', 'pinza', 'madera', 'cuchilla', 'material'].some(k => data[k])
-          || data.espejo != null || data.corte_cm != null || data.score_cm != null || data.hendido_cm != null
-        if (data.referencia) setOp(o => (o.referencia ? o : { ...o, referencia: data.referencia }))
-        setModelo(m => {
-          const next = { ...m }
-          if (data.troquel) next.troquel_numero = data.troquel
-          if (data.pinza) next.pinza = data.pinza
-          if (data.madera) next.madera = data.madera
-          if (data.cuchilla) next.cuchilla_puntos = data.cuchilla
-          if (data.material) next.material = data.material
-          if (data.espejo != null) next.espejo = !!data.espejo
-          if (data.corte_cm != null) next.corte_cm = data.corte_cm
-          if (data.score_cm != null) next.score_cm = data.score_cm
-          if (data.hendido_cm != null) next.hendido_cm = data.hendido_cm
-          return next
-        })
-        setPdfMsg(hayDatos ? 'Datos leídos del PDF ✓ — revisa antes de crear' : 'No se detectaron datos en el PDF, completa manualmente')
-      })
-      .catch(() => setPdfMsg('No se pudo leer el PDF, completa manualmente'))
-      .finally(() => setPdfLoading(false))
   }
 
   const hasModeloData = () =>
@@ -969,15 +884,9 @@ export function NuevaTareaTroquelModal({ onClose, onCreated }) {
         <div style={{ fontSize: 15, fontWeight: 700 }}>Nueva tarea de troquel</div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <Field label="Archivo del modelo (imagen / PDF) — el PDF autorrellena los campos" full>
-            <input type="file" accept="image/*,application/pdf" onChange={e => handleArchivoChange(e.target.files[0] || null)} />
+          <Field label="Archivo del modelo (imagen / PDF)" full>
+            <input type="file" accept="image/*,application/pdf" onChange={e => setArchivo(e.target.files[0] || null)} />
           </Field>
-          {pdfMsg && (
-            <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ink-3)' }}>
-              {pdfLoading && <Spinner />}
-              {pdfMsg}
-            </span>
-          )}
           {preview ? (
             <img src={preview} alt="Vista previa" style={{ maxWidth: 360, maxHeight: 220, borderRadius: 8, border: '1px solid var(--line)' }} />
           ) : archivo ? (

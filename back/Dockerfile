@@ -7,7 +7,7 @@ ENV PYTHONUNBUFFERED=1
 # Configurar el directorio de trabajo
 WORKDIR /app
 
-# Instalar dependencias del sistema requeridas para weasyprint, pdf2image y pytesseract
+# Instalar dependencias del sistema requeridas para weasyprint
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libffi-dev \
@@ -20,10 +20,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     libcairo2 \
     libgirepository-1.0-1 \
-    # Dependencias de pdf2image y pytesseract
-    poppler-utils \
-    tesseract-ocr \
-    tesseract-ocr-spa \
     # Fuentes tipográficas básicas para generar PDFs con WeasyPrint
     fonts-dejavu-core \
     fontconfig \
