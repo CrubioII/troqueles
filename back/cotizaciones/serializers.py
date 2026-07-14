@@ -460,16 +460,21 @@ class OrdenOperadorSerializer(serializers.ModelSerializer):
     procesos = serializers.SerializerMethodField()
     troquel_modelo = serializers.SerializerMethodField()
     cliente_nombre = serializers.CharField(source="cliente.nombre", read_only=True, default="")
+    remision_enviada = serializers.SerializerMethodField()
 
     class Meta:
         model = OrdenProduccion
-        fields = ["id", "numero", "fecha_entrega", "cliente_nombre", "referencia", "cantidad", "procesos", "troquel_modelo"]
+        fields = ["id", "numero", "fecha_entrega", "cliente_nombre", "referencia", "cantidad", "procesos", "troquel_modelo", "remision_enviada"]
 
     def get_procesos(self, obj):
         return [
             {"proceso_id": p.proceso_id, "active": p.active, "completado": p.completado}
             for p in obj.procesos.all() if p.active
         ]
+
+    def get_remision_enviada(self, obj):
+        rem = Remision.objects.filter(orden=obj).only("estado").first()
+        return bool(rem and rem.estado != "pendiente")
 
     def get_troquel_modelo(self, obj):
         modelo = getattr(obj, "troquel_modelo", None)

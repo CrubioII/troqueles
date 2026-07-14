@@ -12,6 +12,7 @@ import {
   getOrdenes, deleteOrden, getFormatosCuchillas, getFormatosCuchillasTodos, getOrdenesPendientes,
   getOrdenProduccion, getTroquelModelo,
   updateFormatoCuchillas, getFormatosPendientes, cancelarEnvioFormato,
+  enviarRemisionOperador, pdfRemisionOperador, getRemisionesSolicitadas,
 } from '../api'
 import { usePolling } from '../lib/usePolling'
 
@@ -63,6 +64,7 @@ function AdminTroqueles() {
   const [editFormato, setEditFormato] = useState(null)   // formato en edición (Admin)
   const [showNueva, setShowNueva] = useState(false)      // modal Nueva tarea de troquel
   const [pendientes, setPendientes] = useState([])       // formatos esperando aprobación (contador)
+  const [solicitudes, setSolicitudes] = useState([])     // envíos de remisión bloqueados por falta de precios
   const [confirmDelete, setConfirmDelete] = useState(null)
 
   const loadPendientes = () =>
@@ -70,8 +72,13 @@ function AdminTroqueles() {
       .then(d => setPendientes(asList(d)))
       .catch(() => setPendientes([]))
 
-  useEffect(() => { loadPendientes() }, [])
-  usePolling(loadPendientes, { enabled: true })
+  const loadSolicitudes = () =>
+    getRemisionesSolicitadas()
+      .then(d => setSolicitudes(asList(d)))
+      .catch(() => setSolicitudes([]))
+
+  useEffect(() => { loadPendientes(); loadSolicitudes() }, [])
+  usePolling(() => { loadPendientes(); loadSolicitudes() }, { enabled: true })
 
   const loadOrdenes = () => {
     setLoading(true)
@@ -116,8 +123,33 @@ function AdminTroqueles() {
     }
   }
 
+  // Abre la sección de costos de la OP solicitada (o la cola de revisión si no está en la lista)
+  const irAPrecios = (s) => {
+    const row = ordenes.find(o => o.id === s.id)
+    if (row) selectOrden(row)
+    else navigate('/produccion/troqueles/revision')
+  }
+
   return (
     <div onClick={() => setConfirmDelete(null)}>
+      {solicitudes.length > 0 && (
+        <div style={{ marginTop: 16, padding: '12px 16px', borderRadius: 8, background: 'var(--danger-soft, #fdecea)', border: '1px solid var(--danger, #c0392b)', fontSize: 13, color: 'var(--ink-2)' }}>
+          <div style={{ fontWeight: 700, marginBottom: 8 }}>
+            🔔 Remisiones esperando precios de troquel ({solicitudes.length})
+          </div>
+          {solicitudes.map(s => (
+            <div key={s.id} style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10, padding: '6px 0', borderTop: '1px solid var(--danger, #c0392b22)' }}>
+              <span style={{ flex: 1, minWidth: 220 }}>
+                El operador {s.solicitada_por && <strong>{s.solicitada_por}</strong>} solicitó enviar la remisión de{' '}
+                <strong style={{ fontFamily: 'JetBrains Mono, monospace' }}>{s.numero}</strong>
+                {s.cliente_nombre && <> ({s.cliente_nombre})</>} — faltan los precios del troquel.
+              </span>
+              <button className="btn sm primary" onClick={() => irAPrecios(s)}>Poner precios</button>
+            </div>
+          ))}
+        </div>
+      )}
+
       <Section
         title={`Troqueles por aprobar${pendientes.length ? ` (${pendientes.length})` : ''}`}
         actions={
@@ -246,6 +278,13 @@ function OperadorTroqueles() {
   const [historial, setHistorial] = useState([])
   const [loadingHistorial, setLoadingHistorial] = useState(false)
   const [editHist, setEditHist] = useState(null)
+  // Envío de remisión: null | 'confirm' | 'blocked' | 'done' | 'ya_enviada'
+  const [remModal, setRemModal] = useState(null)
+  const [remBusy, setRemBusy] = useState(false)
+  const [remError, setRemError] = useState(null)
+  const [remNumero, setRemNumero] = useState('')
+  const [remEmail, setRemEmail] = useState('')
+  const [dlBusy, setDlBusy] = useState(false)
 
   const loadLista = (silent = false) => {
     if (!silent) setLoadingLista(true)
@@ -302,6 +341,52 @@ function OperadorTroqueles() {
   }
 
   const volver = () => { setOrden(null); setFormatos([]); loadLista() }
+
+  const enviarRemision = () => {
+    setRemBusy(true)
+    setRemError(null)
+    enviarRemisionOperador(orden.id, remEmail.trim())
+      .then(d => { setRemNumero(d.remision_numero || ''); setRemModal('done') })
+      .catch(e => {
+        if (e.code === 'precios_pendientes') setRemModal('blocked')
+        else if (e.code === 'ya_enviada') setRemModal('ya_enviada')
+        else { setRemModal(null); setRemError(e.message || 'No se pudo enviar la remisión') }
+      })
+      .finally(() => setRemBusy(false))
+  }
+
+  // Descarga el PDF cliente de la remisión para imprimirlo (mismo bloqueo por precios)
+  const descargarPdf = async () => {
+    setDlBusy(true)
+    setRemError(null)
+    try {
+      const r = await pdfRemisionOperador(orden.id)
+      if (!r.ok) {
+        const body = await r.json().catch(() => null)
+        if (body?.code === 'precios_pendientes') { setRemModal('blocked'); return }
+        throw new Error(body?.error || `HTTP ${r.status}`)
+      }
+      const nombre = (r.headers.get('Content-Disposition') || '').match(/filename="(.+?)"/)?.[1]
+      const blob = await r.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = nombre || `Remision_${orden.numero}.pdf`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      setRemError(e.message || 'No se pudo generar el PDF')
+    } finally {
+      setDlBusy(false)
+    }
+  }
+
+  // Al cerrar 'done'/'ya_enviada' se refresca la OP para que el botón cambie de estado
+  const cerrarRemModal = () => {
+    const refrescar = remModal === 'done' || remModal === 'ya_enviada'
+    setRemModal(null)
+    if (refrescar) getOrdenProduccion(orden.id).then(setOrden).catch(() => {})
+  }
 
   if (!orden) {
     const puedeEditar = (f) =>
@@ -391,10 +476,25 @@ function OperadorTroqueles() {
       <button className="btn" style={{ marginBottom: 4 }} onClick={volver}><Icon.ArrowLeft /> Volver a la lista</button>
       {orden && (
         <>
-          <div style={{ marginTop: 16, fontSize: 13, fontWeight: 700, color: 'var(--ink-2)' }}>
-            <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{orden.numero}</span> — {orden.referencia}
-            {orden.cliente_nombre && <span style={{ marginLeft: 12 }}>Cliente: {orden.cliente_nombre}</span>}
-            <span style={{ marginLeft: 12, fontWeight: 400, color: 'var(--ink-3)' }}>Cantidad: {orden.cantidad}</span>
+          <div style={{ marginTop: 16, fontSize: 13, fontWeight: 700, color: 'var(--ink-2)', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+            <span>
+              <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{orden.numero}</span> — {orden.referencia}
+              {orden.cliente_nombre && <span style={{ marginLeft: 12 }}>Cliente: {orden.cliente_nombre}</span>}
+              <span style={{ marginLeft: 12, fontWeight: 400, color: 'var(--ink-3)' }}>Cantidad: {orden.cantidad}</span>
+            </span>
+            {orden.remision_enviada ? (
+              <span style={{ padding: '4px 12px', borderRadius: 999, background: 'var(--surface-2, #f2f2f2)', border: '1px solid var(--line)', fontSize: 12, fontWeight: 600, color: 'var(--ink-3)' }}>
+                ✓ Remisión enviada
+              </span>
+            ) : (
+              <button className="btn sm primary" onClick={() => { setRemError(null); setRemModal('confirm') }}>
+                Enviar remisión
+              </button>
+            )}
+            <button className="btn sm" disabled={dlBusy} onClick={descargarPdf} title="Descarga el PDF de la remisión para imprimirlo">
+              {dlBusy ? 'Generando…' : '⬇ Descargar PDF'}
+            </button>
+            {remError && <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--danger, #c0392b)' }}>{remError}</span>}
           </div>
 
           <Section title="Modelo del troquel">
@@ -472,6 +572,76 @@ function OperadorTroqueles() {
           <Section title="Formato registrado en esta OP">
             <FormatosCuchillasHistory formatos={formatos} loading={loadingFormatos} />
           </Section>
+
+          {remModal === 'confirm' && (
+            <div style={{
+              position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 9999,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+            }}>
+              <div style={{ background: 'var(--surface)', borderRadius: 12, maxWidth: 440, width: '100%', padding: 24, boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
+                <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>Enviar remisión</div>
+                <div style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5, marginBottom: 14 }}>
+                  Se enviará la remisión de <strong>{orden.numero}</strong> por correo al cliente y a contaduría.
+                </div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--ink-2)', marginBottom: 4 }}>
+                  Correo del cliente
+                </label>
+                <input
+                  className="input" type="email" placeholder="correo@cliente.com"
+                  value={remEmail} onChange={e => setRemEmail(e.target.value)}
+                  disabled={remBusy} style={{ width: '100%' }}
+                />
+                <div style={{ fontSize: 11, color: 'var(--ink-3)', margin: '4px 0 16px' }}>
+                  Si lo dejas vacío se usa el correo registrado del cliente.
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                  <button className="btn" onClick={() => setRemModal(null)} disabled={remBusy}>Cancelar</button>
+                  <button className="btn primary" onClick={enviarRemision} disabled={remBusy}>
+                    {remBusy ? 'Enviando…' : 'Sí, enviar'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {remModal === 'blocked' && (
+            <div style={{
+              position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 9999,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+            }}>
+              <div style={{ background: 'var(--surface)', borderRadius: 12, maxWidth: 440, width: '100%', padding: 24, boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
+                <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>⚠️ Faltan precios del troquel</div>
+                <div style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5, marginBottom: 18 }}>
+                  El administrador aún no ha completado los precios de este troquel, así que la remisión
+                  no se puede enviar todavía. Ya le llegó el aviso en su pantalla; por favor notifícale.
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                  <button className="btn primary" onClick={() => setRemModal(null)}>Entendido</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {(remModal === 'done' || remModal === 'ya_enviada') && (
+            <div style={{
+              position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 9999,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+            }}>
+              <div style={{ background: 'var(--surface)', borderRadius: 12, maxWidth: 440, width: '100%', padding: 24, boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
+                <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>
+                  {remModal === 'done' ? '✓ Remisión enviada' : 'Remisión ya enviada'}
+                </div>
+                <div style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5, marginBottom: 18 }}>
+                  {remModal === 'done'
+                    ? <>Remisión {remNumero && <strong>{remNumero}</strong>} enviada al cliente por correo.</>
+                    : 'La remisión de esta OP ya fue enviada o consolidada anteriormente.'}
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                  <button className="btn primary" onClick={cerrarRemModal}>Entendido</button>
+                </div>
+              </div>
+            </div>
+          )}
         </>
       )}
     </>

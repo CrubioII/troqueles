@@ -240,6 +240,14 @@ class OrdenProduccion(models.Model):
     tipo_facturacion = models.CharField(max_length=20, choices=TIPO_FACTURACION_CHOICES, default="factura")
     observaciones = models.TextField(blank=True, default="")
 
+    # Solicitud del Operador de enviar la remisión cuando aún faltaban precios.
+    # La alerta del Admin se computa: solicitada_en != None y costos del troquel en 0.
+    remision_solicitada_en = models.DateTimeField(null=True, blank=True)
+    remision_solicitada_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="remisiones_solicitadas",
+    )
+
     creado = models.DateTimeField(auto_now_add=True)
     modificado = models.DateTimeField(auto_now=True)
 

@@ -74,6 +74,18 @@ const jsonConError = async (r) => {
   return r.json()
 }
 
+// Como `jsonConError`, pero conserva code/status del servidor en el Error
+const jsonConCodigo = async (r) => {
+  if (!r.ok) {
+    const body = await r.json().catch(() => null)
+    const err = new Error(body?.error || body?.detail || `HTTP ${r.status}`)
+    err.code = body?.code
+    err.status = r.status
+    throw err
+  }
+  return r.json()
+}
+
 export const getPapeles = () =>
   apiFetch(`${BASE}/papel/`).then(json)
 
@@ -324,9 +336,28 @@ export const createRegistroMaquina = (data) =>
 
 // ─────────────── Troqueles: modelo, formato de cuchillas, costos ───────────────
 
-// OP sanitizada para el Operador (sin dinero; incluye cliente)
+// OP sanitizada para el Operador (sin dinero; incluye cliente).
+// incluir_remisionadas: sin él la OP desaparece del queryset al crearse su remisión (404).
 export const getOrdenProduccion = (id) =>
-  apiFetch(`${BASE}/ordenes/${id}/produccion/`).then(json)
+  apiFetch(`${BASE}/ordenes/${id}/produccion/?incluir_remisionadas=1`).then(json)
+
+// El Operador (o Admin) envía la remisión de la OP al cliente + contaduría.
+// email opcional: reemplaza el correo registrado del cliente.
+export const enviarRemisionOperador = (opId, email = '') =>
+  apiFetch(`${BASE}/ordenes/${opId}/enviar_remision/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  }).then(jsonConCodigo)
+
+// Descarga el PDF cliente de la remisión de la OP (Operador); 409 si faltan precios.
+// Devuelve el Response crudo: el caller decide entre blob (ok) y json de error.
+export const pdfRemisionOperador = (opId) =>
+  apiFetch(`${BASE}/ordenes/${opId}/remision_pdf/`, { method: 'POST' })
+
+// Solicitudes de envío de remisión bloqueadas por falta de precios (Admin)
+export const getRemisionesSolicitadas = () =>
+  apiFetch(`${BASE}/ordenes/remisiones_solicitadas/`).then(json)
 
 export const buscarOrdenPorNumero = (numero) =>
   apiFetch(`${BASE}/ordenes/buscar/?numero=${encodeURIComponent(numero)}`).then(json)

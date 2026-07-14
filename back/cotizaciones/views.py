@@ -177,13 +177,45 @@ def _write_troquel_costo_proceso(op, total):
     op.procesos.filter(proceso_id="troquel").update(costo=total)
 
 
-def _maybe_crear_remision(op):
-    """Si la OP está al 100% y aún no tiene remisión, créala (estado=pendiente).
+def _crear_remision(op):
+    """Crea la remisión de la OP (estado=pendiente) si no existe; devuelve la existente si ya hay.
 
     Genera un ítem inicial derivado de la OP (referencia + valor total de venta,
     o el total de costos de troquel si la OP tiene ese proceso activo);
-    el dueño lo edita/divide al liquidar. Idempotente y silencioso ante errores
-    para no romper el flujo de finalización de procesos.
+    el dueño lo edita/divide al liquidar. No valida progreso ni aprobación.
+    """
+    existente = Remision.objects.filter(orden=op).first()
+    if existente:
+        return existente
+    with transaction.atomic():
+        rem = Remision.objects.create(
+            fecha=timezone.localdate(),
+            orden=op,
+            cliente=op.cliente,
+            direccion=op.cliente.direccion,
+            ciudad=op.cliente.ciudad,
+            observaciones=op.observaciones,
+        )
+        valor = 0
+        if op.procesos.filter(proceso_id="troquel", active=True).exists():
+            valor = _troquel_costos_total(op)
+        if not valor:
+            valor = _orden_valor_total_efectivo(op) or 0
+        RemisionItem.objects.create(
+            remision=rem,
+            descripcion=op.referencia,
+            cantidad=op.cantidad or 0,
+            valor_total=valor,
+            orden=0,
+        )
+    return rem
+
+
+def _maybe_crear_remision(op):
+    """Si la OP está al 100% y aún no tiene remisión, créala (estado=pendiente).
+
+    Idempotente y silencioso ante errores para no romper el flujo de
+    finalización de procesos.
     """
     try:
         progreso = _orden_progreso(op)
@@ -191,31 +223,97 @@ def _maybe_crear_remision(op):
             return None
         if Remision.objects.filter(orden=op).exists():
             return None
-        with transaction.atomic():
-            rem = Remision.objects.create(
-                fecha=timezone.localdate(),
-                orden=op,
-                cliente=op.cliente,
-                direccion=op.cliente.direccion,
-                ciudad=op.cliente.ciudad,
-                observaciones=op.observaciones,
-            )
-            valor = 0
-            if op.procesos.filter(proceso_id="troquel", active=True).exists():
-                valor = _troquel_costos_total(op)
-            if not valor:
-                valor = _orden_valor_total_efectivo(op) or 0
-            RemisionItem.objects.create(
-                remision=rem,
-                descripcion=op.referencia,
-                cantidad=op.cantidad or 0,
-                valor_total=valor,
-                orden=0,
-            )
-        return rem
+        return _crear_remision(op)
     except Exception:
         traceback.print_exc()
         return None
+
+
+def _remision_pdf_ctx(rem, admin=False):
+    items = list(rem.items.all())
+    total_cantidad = sum((it.cantidad or 0) for it in items)
+    total_valor = sum((it.valor_total or 0) for it in items)
+    ctx = {
+        "rem": rem,
+        "items": [
+            {
+                "descripcion": item.descripcion,
+                "cantidad": _fmt_num(item.cantidad),
+                "valor_total": _fmt_cop(item.valor_total),
+            }
+            for item in items
+        ],
+        "total_cantidad": _fmt_num(total_cantidad),
+        "total_valor": _fmt_cop(total_valor),
+        "logo_uri": _logo_data_uri(),
+    }
+    if admin:
+        modelo = TroquelModelo.objects.filter(orden=rem.orden).first() if rem.orden_id else None
+        costos = list(modelo.costos_items) if modelo else []
+        ctx["costos"] = [
+            {
+                "concepto": c.get("concepto") or "",
+                "detalle": c.get("detalle") or "",
+                "unidad": c.get("unidad") or "",
+                "cantidad": _fmt_num(c.get("cantidad")),
+                "precio": _fmt_cop(c.get("precio")),
+                "total": _fmt_cop(float(c.get("cantidad") or 0) * float(c.get("precio") or 0)),
+            }
+            for c in costos
+        ]
+        ctx["costos_total"] = _fmt_cop(_costos_items_total(costos))
+    return ctx
+
+
+def _liquidar_remision(rem, email=None, extra_emails=None):
+    """Envía el PDF CLIENTE por correo y marca la remisión liquidada.
+
+    Destinatarios: email (o el del cliente) + CONTADURIA_EMAIL + extra_emails.
+    Nunca usa la plantilla admin (sin desglose de costos).
+    Devuelve (payload_dict, http_status).
+    """
+    recipients = []
+    email_cliente = email or rem.cliente.email
+    if email_cliente and email_cliente.strip():
+        recipients.append(email_cliente.strip())
+    contaduria = getattr(settings, "CONTADURIA_EMAIL", "")
+    if contaduria and contaduria.strip():
+        recipients.append(contaduria.strip())
+    recipients += [e.strip() for e in (extra_emails or []) if e and e.strip()]
+    # Únicos preservando orden
+    recipients = list(dict.fromkeys(recipients))
+    if not recipients:
+        return {"error": "No hay destinatarios (cliente sin email y CONTADURIA_EMAIL vacío)."}, 400
+
+    ctx = _remision_pdf_ctx(rem)
+    try:
+        html_pdf = render_to_string("cotizaciones/pdf_remision.html", ctx)
+        pdf_bytes = WeasyprintHTML(string=html_pdf).write_pdf()
+
+        msg = EmailMessage(
+            subject=f"Remisión {rem.numero} — Troqueles INK",
+            body=html_pdf,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            to=recipients,
+        )
+        msg.content_subtype = "html"
+        msg.attach(f"Remision_{rem.numero}.pdf", pdf_bytes, "application/pdf")
+        sent = msg.send()
+        if not sent:
+            return {"error": "SMTP no confirmó el envío (send() = 0)."}, 502
+    except Exception as e:
+        traceback.print_exc()
+        return {"error": str(e)}, 502
+
+    now = timezone.now()
+    rem.estado = "liquidada"
+    rem.enviada_en = now
+    rem.liquidada_en = now
+    rem.save(update_fields=["estado", "enviada_en", "liquidada_en", "modificado"])
+    if rem.orden_id:
+        OrdenProduccion.objects.filter(pk=rem.orden_id).update(
+            remision_solicitada_en=None, remision_solicitada_por=None)
+    return {"ok": True, "enviado_a": recipients}, 200
 
 
 INACTIVE_DAYS = 90
@@ -631,7 +729,7 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
-        if self.action in ("toggle_proceso_completado", "list", "retrieve", "produccion", "buscar", "produccion_pendientes"):
+        if self.action in ("toggle_proceso_completado", "list", "retrieve", "produccion", "buscar", "produccion_pendientes", "enviar_remision", "remision_pdf"):
             return
         _require_admin(request)
 
@@ -859,6 +957,108 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
             i["total"] = round(float(i.get("cantidad") or 0) * float(i.get("precio") or 0), 2)
         return Response({"items": items, "total": _costos_items_total(items)})
 
+    def _op_para_remision(self, request, pk):
+        """(op, error_response) para las acciones de remisión del Operador.
+
+        No usa get_object(): el queryset excluye OPs ya remisionadas (404).
+        Si faltan los precios del troquel registra la solicitud (alerta
+        persistente del Admin) y devuelve 409 precios_pendientes.
+        La aprobación del formato NO condiciona nada, solo los precios.
+        """
+        op = OrdenProduccion.objects.filter(pk=pk).first()
+        if op is None:
+            return None, Response({"error": "OP no encontrada."}, status=404)
+        if _troquel_costos_total(op) <= 0:
+            OrdenProduccion.objects.filter(pk=op.pk).update(
+                remision_solicitada_en=timezone.now(),
+                remision_solicitada_por=request.user,
+            )
+            return None, Response({
+                "code": "precios_pendientes",
+                "error": "El administrador aún no ha completado los precios del troquel.",
+            }, status=409)
+        return op, None
+
+    @action(detail=True, methods=["post"], url_path="enviar_remision")
+    def enviar_remision(self, request, pk=None):
+        """POST /api/ordenes/{id}/enviar_remision/ — Operador o Admin.
+
+        Envía el PDF CLIENTE de la remisión (creándola si no existe) al correo
+        del cliente + contaduría. Body {"email"} opcional: reemplaza el correo
+        del cliente (el Operador no ve el registrado y puede digitarlo).
+        Bloqueado si los costos del troquel siguen en 0 (409 precios_pendientes).
+        """
+        op, error = self._op_para_remision(request, pk)
+        if error:
+            return error
+
+        rem = Remision.objects.filter(orden=op).first()
+        if rem and rem.estado != "pendiente":
+            return Response({
+                "code": "ya_enviada",
+                "error": f"La remisión {rem.numero} ya fue enviada o consolidada.",
+            }, status=409)
+        if rem is None:
+            rem = _crear_remision(op)
+
+        email = (request.data.get("email") or "").strip() or None
+        data, status_code = _liquidar_remision(rem, email=email)
+        if status_code == 200:
+            # Sin datos financieros ni de contacto para el Operador
+            data["remision_numero"] = rem.numero
+        return Response(data, status=status_code)
+
+    @action(detail=True, methods=["post"], url_path="remision_pdf")
+    def remision_pdf(self, request, pk=None):
+        """POST /api/ordenes/{id}/remision_pdf/ — Operador o Admin.
+
+        Descarga el PDF CLIENTE de la remisión (creándola en pendiente si no
+        existe) para imprimirla. Nunca genera la plantilla admin. Mismo
+        bloqueo por precios que enviar_remision.
+        """
+        op, error = self._op_para_remision(request, pk)
+        if error:
+            return error
+
+        rem = Remision.objects.filter(orden=op).first() or _crear_remision(op)
+        ctx = _remision_pdf_ctx(rem)
+        try:
+            html_pdf = render_to_string("cotizaciones/pdf_remision.html", ctx)
+            pdf_bytes = WeasyprintHTML(string=html_pdf).write_pdf()
+        except Exception as e:
+            traceback.print_exc()
+            return Response({"error": str(e)}, status=502)
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="Remision_{rem.numero}.pdf"'
+        return response
+
+    @action(detail=False, methods=["get"], url_path="remisiones_solicitadas")
+    def remisiones_solicitadas(self, request):
+        """GET /api/ordenes/remisiones_solicitadas/ — solo Admin (via initial).
+
+        OPs donde el Operador pidió enviar la remisión y los precios del
+        troquel siguen en 0. La alerta desaparece sola al poner precios.
+        """
+        qs = (
+            OrdenProduccion.objects
+            .filter(remision_solicitada_en__isnull=False)
+            .select_related("cliente", "remision_solicitada_por")
+            .order_by("remision_solicitada_en")
+        )
+        data = [
+            {
+                "id": op.id,
+                "numero": op.numero,
+                "cliente_nombre": op.cliente.nombre,
+                "referencia": op.referencia,
+                "solicitada_en": op.remision_solicitada_en,
+                "solicitada_por": getattr(op.remision_solicitada_por, "username", ""),
+            }
+            for op in qs
+            if _troquel_costos_total(op) <= 0
+        ]
+        return Response(data)
+
 
 class RegistroMaquinaViewSet(viewsets.ModelViewSet):
     """Registros de ejecución por máquina (troquel, guillotina).
@@ -905,6 +1105,8 @@ class RemisionViewSet(viewsets.ModelViewSet):
     Se autogeneran al completar una OP (estado=pendiente). El dueño edita los
     ítems y al liquidar se envía por correo (cliente + contaduría) y pasa al
     historial (estado=liquidada). No se crean ni borran desde la API (PROTECT).
+    El Operador envía remisiones por su propia vía:
+    OrdenProduccionViewSet.enviar_remision (solo PDF cliente).
     """
 
     queryset = Remision.objects.select_related("cliente", "orden").prefetch_related("items")
@@ -938,41 +1140,6 @@ class RemisionViewSet(viewsets.ModelViewSet):
             qs = qs.filter(fecha__lte=fecha_before)
         return qs
 
-    def _build_pdf_ctx(self, rem, admin=False):
-        items = list(rem.items.all())
-        total_cantidad = sum((it.cantidad or 0) for it in items)
-        total_valor = sum((it.valor_total or 0) for it in items)
-        ctx = {
-            "rem": rem,
-            "items": [
-                {
-                    "descripcion": item.descripcion,
-                    "cantidad": _fmt_num(item.cantidad),
-                    "valor_total": _fmt_cop(item.valor_total),
-                }
-                for item in items
-            ],
-            "total_cantidad": _fmt_num(total_cantidad),
-            "total_valor": _fmt_cop(total_valor),
-            "logo_uri": _logo_data_uri(),
-        }
-        if admin:
-            modelo = TroquelModelo.objects.filter(orden=rem.orden).first() if rem.orden_id else None
-            costos = list(modelo.costos_items) if modelo else []
-            ctx["costos"] = [
-                {
-                    "concepto": c.get("concepto") or "",
-                    "detalle": c.get("detalle") or "",
-                    "unidad": c.get("unidad") or "",
-                    "cantidad": _fmt_num(c.get("cantidad")),
-                    "precio": _fmt_cop(c.get("precio")),
-                    "total": _fmt_cop(float(c.get("cantidad") or 0) * float(c.get("precio") or 0)),
-                }
-                for c in costos
-            ]
-            ctx["costos_total"] = _fmt_cop(_costos_items_total(costos))
-        return ctx
-
     @action(detail=True, methods=["post"], url_path="pdf")
     def generar_pdf(self, request, pk=None):
         """POST /api/remisiones/{id}/pdf/ — devuelve el PDF de la remisión como descarga.
@@ -982,7 +1149,7 @@ class RemisionViewSet(viewsets.ModelViewSet):
         """
         rem = self.get_object()
         es_admin = (request.data.get("tipo") or request.query_params.get("tipo")) == "admin"
-        ctx = self._build_pdf_ctx(rem, admin=es_admin)
+        ctx = _remision_pdf_ctx(rem, admin=es_admin)
         template = "cotizaciones/pdf_remision_admin.html" if es_admin else "cotizaciones/pdf_remision.html"
         try:
             html_pdf = render_to_string(template, ctx)
@@ -1007,45 +1174,14 @@ class RemisionViewSet(viewsets.ModelViewSet):
             return Response(
                 {"error": "Esta remisión ya fue liquidada o consolidada."}, status=409)
 
-        recipients = []
-        email_cliente = request.data.get("email") or rem.cliente.email
-        if email_cliente and email_cliente.strip():
-            recipients.append(email_cliente.strip())
-        contaduria = getattr(settings, "CONTADURIA_EMAIL", "")
-        if contaduria and contaduria.strip():
-            recipients.append(contaduria.strip())
-        recipients += [e.strip() for e in request.data.get("extra_emails", []) if e and e.strip()]
-        # Únicos preservando orden
-        recipients = list(dict.fromkeys(recipients))
-        if not recipients:
-            return Response({"error": "No hay destinatarios (cliente sin email y CONTADURIA_EMAIL vacío)."}, status=400)
-
-        ctx = self._build_pdf_ctx(rem)
-        try:
-            html_pdf = render_to_string("cotizaciones/pdf_remision.html", ctx)
-            pdf_bytes = WeasyprintHTML(string=html_pdf).write_pdf()
-
-            msg = EmailMessage(
-                subject=f"Remisión {rem.numero} — Troqueles INK",
-                body=html_pdf,
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                to=recipients,
-            )
-            msg.content_subtype = "html"
-            msg.attach(f"Remision_{rem.numero}.pdf", pdf_bytes, "application/pdf")
-            sent = msg.send()
-            if not sent:
-                return Response({"error": "SMTP no confirmó el envío (send() = 0)."}, status=502)
-        except Exception as e:
-            traceback.print_exc()
-            return Response({"error": str(e)}, status=502)
-
-        now = timezone.now()
-        rem.estado = "liquidada"
-        rem.enviada_en = now
-        rem.liquidada_en = now
-        rem.save(update_fields=["estado", "enviada_en", "liquidada_en", "modificado"])
-        return Response({"ok": True, "enviado_a": recipients, "remision": RemisionSerializer(rem).data})
+        data, status_code = _liquidar_remision(
+            rem,
+            email=request.data.get("email"),
+            extra_emails=request.data.get("extra_emails", []),
+        )
+        if status_code == 200:
+            data["remision"] = RemisionSerializer(rem).data
+        return Response(data, status=status_code)
 
     def _resumen_importable(self, rem):
         items = list(rem.items.all())
