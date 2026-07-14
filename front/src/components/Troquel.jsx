@@ -249,11 +249,11 @@ const EMPTY_FORMATO = {
   cuchilla_cm: 0, cuchilla_puntos: '',
   grafa_cm: 0, grafa_puntos: '', grafa_altura: '',
   ch_cm: 0, ch_medida: '',
-  sac_medida: '',
+  sac_medida: '', sac_cantidad: 0,
   perfo_cm: 0, perfo_medida: '',
   gan: '',
   cauchos: [{ tipo: 'verde', cm: 0 }],
-  desperdicio_mm: 0,
+  desperdicio_cm: 0,
   tiempo_encalado_min: 0, tiempo_encuchillado_min: 0, tiempo_encauchado_min: 0,
 }
 
@@ -377,6 +377,10 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
               Altura {PUNTOS_SPECS[form.cuchilla_puntos].altura} mm · Espesor {PUNTOS_SPECS[form.cuchilla_puntos].espesor} mm
             </SpecHint>
           )}
+          <Field label="Desperdicio (cm)" w={110}><NumField placeholder="0" value={form.desperdicio_cm} onChange={v => set('desperdicio_cm', v)} /></Field>
+          <span style={{ fontSize: 12, fontWeight: 700, alignSelf: 'flex-end', paddingBottom: 8, whiteSpace: 'nowrap' }}>
+            Total {fmtNum((Number(form.cuchilla_cm) || 0) + (Number(form.desperdicio_cm) || 0), 2)} cm
+          </span>
         </FieldGroup>
         <FieldGroup title="Grafa">
           <Field label="cm" w={90}><NumField placeholder="0" value={form.grafa_cm} onChange={v => set('grafa_cm', v)} /></Field>
@@ -424,14 +428,15 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
           </Field>
         </FieldGroup>
         <FieldGroup title="Sacabocados">
-          <Field label="Unidades" w={130}>
+          <Field label="Cantidad" w={90}><NumField step={1} placeholder="0" value={form.sac_cantidad} onChange={v => set('sac_cantidad', v)} /></Field>
+          <Field label="Tipo" w={130}>
             <select className="input" value={form.sac_medida} onChange={e => set('sac_medida', e.target.value)}>
               <option value="">—</option>
               {SAC_SIZES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
             </select>
           </Field>
         </FieldGroup>
-        <FieldGroup title="Perforaciones">
+        <FieldGroup title="Perforado">
           <Field label="cm" w={90}><NumField placeholder="0" value={form.perfo_cm} onChange={v => set('perfo_cm', v)} /></Field>
           <Field label="Tamaño" w={100}>
             <select className="input" value={form.perfo_medida} onChange={e => set('perfo_medida', e.target.value)}>
@@ -444,7 +449,6 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
         <Field label="gan" w={140}><input className="input" value={form.gan} onChange={e => set('gan', e.target.value)} /></Field>
-        <Field label="Desperdicio (mm)" w={110}><NumField placeholder="0" value={form.desperdicio_mm} onChange={v => set('desperdicio_mm', v)} /></Field>
       </div>
 
       <div>
@@ -559,7 +563,7 @@ export function EstadoFormatoBadge({ estado }) {
 export function FormatosCuchillasHistory({ formatos, loading, onEdit, showOrden = false, canEdit = () => true }) {
   if (loading) return <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Cargando…</div>
   if (!formatos.length) return <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Sin formatos registrados.</div>
-  const headers = ['Fecha / Hora', 'Estado', 'Operador', 'Cuchilla', 'Grafa', 'Caucho', 'Puntos', 'ch / sac / perfo / gan', 'Desperdicio', 'Tiempos (enc/cuch/cauch)']
+  const headers = ['Fecha / Hora', 'Estado', 'Operador', 'Cuchilla', 'Desperdicio', 'Total', 'Grafa', 'Caucho', 'Puntos', 'ch / sac / perfo / gan', 'Tiempos (enc/cuch/cauch)']
   if (showOrden) headers.unshift('OP #', 'Cliente')
   if (onEdit) headers.push('')
 
@@ -569,10 +573,13 @@ export function FormatosCuchillasHistory({ formatos, loading, onEdit, showOrden 
     return legacy || ''
   }
 
-  // Sacabocados: hoy se mide en unidades; los registros viejos conservan sus cm
+  // Sacabocados: cantidad × tipo; los registros viejos conservan sus cm
   const sacCell = (f) => {
     if (Number(f.sac_cm) > 0) return medidaCell(f.sac_cm, f.sac_medida, f.sac)
-    if (f.sac_medida) return SAC_SIZE_LABELS[f.sac_medida] || f.sac_medida
+    if (f.sac_medida) {
+      const tipo = SAC_SIZE_LABELS[f.sac_medida] || f.sac_medida
+      return Number(f.sac_cantidad) > 0 ? `${f.sac_cantidad} × ${tipo}` : tipo
+    }
     return f.sac || ''
   }
   return (
@@ -604,9 +611,10 @@ export function FormatosCuchillasHistory({ formatos, loading, onEdit, showOrden 
               medidaCell(f.perfo_cm, f.perfo_medida, ''),
               f.gan,
             ].filter(Boolean).join(' / ') || '—'
-            const desperdicio = Number(f.desperdicio_mm) > 0
-              ? `${fmtNum(f.desperdicio_mm, 1)} mm`
+            const desperdicio = Number(f.desperdicio_cm) > 0
+              ? `${fmtNum(f.desperdicio_cm, 2)} cm`
               : (f.desperdicio || '—')
+            const totalCuchilla = (Number(f.cuchilla_cm) || 0) + (Number(f.desperdicio_cm) || 0)
             const editable = !!onEdit && canEdit(f)
             const zebra = idx % 2 ? 'var(--surface-2)' : 'var(--surface)'
             return (
@@ -628,11 +636,12 @@ export function FormatosCuchillasHistory({ formatos, loading, onEdit, showOrden 
                 <td style={{ padding: '8px 12px' }}><EstadoFormatoBadge estado={f.estado} /></td>
                 <td style={{ padding: '8px 12px', fontWeight: 600 }}>{f.operador_username || '—'}</td>
                 <td style={{ padding: '8px 12px' }}>{fmtNum(f.cuchilla_cm, 2)}</td>
+                <td style={{ padding: '8px 12px', fontSize: 12 }}>{desperdicio}</td>
+                <td style={{ padding: '8px 12px', fontWeight: 700, whiteSpace: 'nowrap' }}>{totalCuchilla > 0 ? `${fmtNum(totalCuchilla, 2)} cm` : '—'}</td>
                 <td style={{ padding: '8px 12px' }}>{fmtNum(f.grafa_cm, 2)}</td>
                 <td style={{ padding: '8px 12px', fontSize: 12, whiteSpace: 'nowrap' }}>{caucho}</td>
                 <td style={{ padding: '8px 12px', fontSize: 12 }}>{puntos}</td>
                 <td style={{ padding: '8px 12px', fontSize: 12 }}>{chSacGan}</td>
-                <td style={{ padding: '8px 12px', fontSize: 12 }}>{desperdicio}</td>
                 <td style={{ padding: '8px 12px', fontSize: 12 }}>{[f.tiempo_encalado_min, f.tiempo_encuchillado_min, f.tiempo_encauchado_min].map(fmtMin).join(' / ')}</td>
                 {onEdit && (
                   <td style={{ padding: '8px 12px' }}>

@@ -120,11 +120,11 @@ def _build_costos_seed(formato):
     if float(formato.sac_cm or 0) > 0:  # legacy: sacabocados en cm
         add("sacabocados", "Sacabocados", formato.sac_medida, "cm", formato.sac_cm)
     elif formato.sac_medida:
-        add("sacabocados", "Sacabocados", formato.get_sac_medida_display(), "und", 1)
+        add("sacabocados", "Sacabocados", formato.get_sac_medida_display(), "und", formato.sac_cantidad or 1)
     if float(formato.perfo_cm or 0) > 0:
-        add("perforaciones", "Perforaciones", formato.perfo_medida, "cm", formato.perfo_cm)
-    if float(formato.desperdicio_mm or 0) > 0:
-        add("desperdicio", "Desperdicio", "", "mm", formato.desperdicio_mm)
+        add("perforaciones", "Perforado", formato.perfo_medida, "cm", formato.perfo_cm)
+    if float(formato.desperdicio_cm or 0) > 0:
+        add("desperdicio", "Desperdicio", "", "cm", formato.desperdicio_cm)
     if (formato.gan or "").strip():
         add("gan", "Gan", formato.gan.strip(), "und", 0)
     return lines

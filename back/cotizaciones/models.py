@@ -401,9 +401,11 @@ class FormatoCuchillas(models.Model):
     ch_medida = models.CharField(max_length=10, choices=CH_MEDIDA_CHOICES, blank=True, default="")
     sac_cm = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     sac_medida = models.CharField(max_length=5, choices=SAC_MEDIDA_CHOICES, blank=True, default="")
+    sac_cantidad = models.PositiveIntegerField(default=0)
     perfo_cm = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     perfo_medida = models.CharField(max_length=10, choices=PERFO_MEDIDA_CHOICES, blank=True, default="")
-    desperdicio_mm = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    # Desperdicio de cuchilla en cm (misma unidad que cuchilla_cm: total = cuchilla + desperdicio)
+    desperdicio_cm = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     # Filas de caucho: [{"tipo": "verde"|"profigumi"|"blucolan", "cm": <number>}, ...]
     cauchos = models.JSONField(default=list, blank=True)
     gan = models.CharField(max_length=100, blank=True, default="")

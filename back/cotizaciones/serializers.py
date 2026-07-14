@@ -436,8 +436,8 @@ class FormatoCuchillasSerializer(serializers.ModelSerializer):
         fields = [
             "id", "orden", "orden_numero", "cliente_nombre", "fecha_entrega",
             "cuchilla_cm", "cuchilla_puntos", "grafa_cm", "grafa_puntos", "grafa_altura",
-            "ch_cm", "ch_medida", "sac_cm", "sac_medida", "perfo_cm", "perfo_medida",
-            "desperdicio_mm", "cauchos", "gan",
+            "ch_cm", "ch_medida", "sac_cm", "sac_medida", "sac_cantidad", "perfo_cm", "perfo_medida",
+            "desperdicio_cm", "cauchos", "gan",
             "dos_puntos", "tres_puntos", "perfo", "ch", "sac", "desperdicio",  # legacy, solo lectura
             "tiempo_encalado_min", "tiempo_encuchillado_min", "tiempo_encauchado_min",
             "operador", "operador_username", "fecha_hora",
