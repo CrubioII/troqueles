@@ -4,7 +4,7 @@ import { fmtCOP, fmtNum, NumField, Checkbox, MoneyInput } from './core'
 import {
   getTroquelModelo, saveTroquelModelo, getTroquelCostos, saveTroquelCostos,
   getFormatosCuchillas, createFormatoCuchillas, updateFormatoCuchillas,
-  getClientes, createCliente, createOrden,
+  getClientes, createCliente, createOrden, patchOrden,
 } from '../api'
 
 const asList = (data) => (Array.isArray(data) ? data : (data?.results || []))
@@ -81,9 +81,12 @@ const EMPTY_MODELO = {
   corte_cm: 0, score_cm: 0, hendido_cm: 0,
 }
 
-export function TroquelModeloForm({ ordenId, onSaved, onLoaded }) {
+// `orden` (opcional): fila de la OP para editar referencia/fecha_entrega desde
+// aquí mismo; se omite donde la OP ya tiene su propio editor (OrdenEdit).
+export function TroquelModeloForm({ ordenId, orden, onSaved, onOrdenSaved, onLoaded }) {
   const [modelo, setModelo] = useState(null)   // registro existente (con id)
   const [form, setForm] = useState(EMPTY_MODELO)
+  const [opForm, setOpForm] = useState({ referencia: '', fechaEntrega: '' })
   const [archivo, setArchivo] = useState(null)
   const [preview, setPreview] = useState(null)  // object URL del archivo recién elegido
   const [loading, setLoading] = useState(true)
@@ -106,6 +109,10 @@ export function TroquelModeloForm({ ordenId, onSaved, onLoaded }) {
   }
   useEffect(() => { if (ordenId) load() }, [ordenId])
 
+  useEffect(() => {
+    setOpForm({ referencia: orden?.referencia || '', fechaEntrega: orden?.fecha_entrega || '' })
+  }, [orden?.id])
+
   // Previsualización del archivo recién seleccionado (solo imágenes)
   useEffect(() => {
     if (archivo && archivo.type?.startsWith('image/')) {
@@ -125,13 +132,23 @@ export function TroquelModeloForm({ ordenId, onSaved, onLoaded }) {
     fd.append('instrucciones', form.instrucciones ?? '')
     ;['corte_cm', 'score_cm', 'hendido_cm'].forEach(k => fd.append(k, form[k] ?? 0))
     if (archivo) fd.append('archivo', archivo)
-    saveTroquelModelo(modelo?.id, fd)
-      .then(saved => {
+    const opCambio = orden && (
+      opForm.referencia !== (orden.referencia || '') ||
+      opForm.fechaEntrega !== (orden.fecha_entrega || '')
+    )
+    Promise.all([
+      saveTroquelModelo(modelo?.id, fd),
+      opCambio
+        ? patchOrden(ordenId, { referencia: opForm.referencia, fecha_entrega: opForm.fechaEntrega || null })
+        : Promise.resolve(null),
+    ])
+      .then(([saved, opSaved]) => {
         setModelo(saved)
         setForm({ ...EMPTY_MODELO, ...saved })
         setArchivo(null)
         setOkMsg(true)
         onSaved && onSaved(saved)
+        if (opSaved) onOrdenSaved && onOrdenSaved(opSaved)
       })
       .catch(() => setError('No se pudo guardar el modelo'))
       .finally(() => setSaving(false))
@@ -143,6 +160,17 @@ export function TroquelModeloForm({ ordenId, onSaved, onLoaded }) {
 
   return (
     <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {orden && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+          <Field label="Referencia">
+            <input className="input" value={opForm.referencia} onChange={e => setOpForm(f => ({ ...f, referencia: e.target.value }))} />
+          </Field>
+          <Field label="Fecha de entrega" w={160}>
+            <input className="input" type="date" value={opForm.fechaEntrega} onChange={e => setOpForm(f => ({ ...f, fechaEntrega: e.target.value }))} />
+          </Field>
+        </div>
+      )}
+
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
         <Field label="Anotaciones técnicas (visibles al operador)" full><textarea className="input" rows={5} value={form.instrucciones} onChange={e => set('instrucciones', e.target.value)} /></Field>
       </div>
@@ -217,7 +245,7 @@ export function ModeloViewer({ modelo }) {
 // Si la OP ya tiene modelo, muestra un resumen read-only + botón
 // "Editar gestión del troquel"; si no, muestra el formulario directamente.
 
-export function ModeloTroquelGestion({ ordenId, onSaved }) {
+export function ModeloTroquelGestion({ ordenId, orden, onSaved, onOrdenSaved }) {
   const [modelo, setModelo] = useState(undefined)  // undefined = cargando, null = sin modelo
   const [editing, setEditing] = useState(false)
   const initRef = useRef(false)
@@ -241,7 +269,7 @@ export function ModeloTroquelGestion({ ordenId, onSaved }) {
       </div>
     )
   }
-  return <TroquelModeloForm ordenId={ordenId} onLoaded={handleLoaded} onSaved={handleSaved} />
+  return <TroquelModeloForm ordenId={ordenId} orden={orden} onLoaded={handleLoaded} onSaved={handleSaved} onOrdenSaved={onOrdenSaved} />
 }
 
 // ────────── Formato de cuchillas (Operador) ──────────

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { ProgressBar } from '../components/core'
@@ -30,6 +30,9 @@ function fmtEntrega(s) {
   else if (diff <= 2) color = 'var(--warn, #e0a800)'
   return { txt: diff < 0 ? `${txt} · vencido` : txt, color }
 }
+
+// Búsqueda sin distinguir mayúsculas ni tildes
+const norm = (s) => (s || '').toString().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
 
 // Orden por fecha de entrega ascendente; las OPs sin fecha quedan al final
 const byEntrega = (a, b) => {
@@ -227,7 +230,15 @@ function AdminTroqueles() {
           </div>
 
           <Section title="Modelo del troquel">
-            <ModeloTroquelGestion ordenId={sel.id} onSaved={() => setCostRefresh(k => k + 1)} />
+            <ModeloTroquelGestion
+              ordenId={sel.id}
+              orden={sel}
+              onSaved={() => setCostRefresh(k => k + 1)}
+              onOrdenSaved={() => loadOrdenes().then(list => {
+                const row = list.find(o => o.id === sel.id)
+                if (row) setSel(row)
+              })}
+            />
           </Section>
 
           <Section title="Costos (del formato de cuchillas)">
@@ -270,6 +281,7 @@ function OperadorTroqueles() {
   const { user } = useAuth()
   const [tab, setTab] = useState('pendientes')
   const [lista, setLista] = useState([])
+  const [busqueda, setBusqueda] = useState('')
   const [loadingLista, setLoadingLista] = useState(true)
   const [orden, setOrden] = useState(null)
   const [opening, setOpening] = useState(false)
@@ -311,6 +323,12 @@ function OperadorTroqueles() {
 
   // Tiempo real: refrescar la lista de pendientes solo cuando se está viendo
   useSyncPolling({ ordenes: () => loadLista(true) }, { enabled: !orden && tab === 'pendientes' })
+
+  const listaFiltrada = useMemo(() => {
+    const t = norm(busqueda.trim())
+    if (!t) return lista
+    return lista.filter(op => [op.numero, op.cliente_nombre, op.referencia].some(v => norm(v).includes(t)))
+  }, [lista, busqueda])
 
   const loadFormatos = (ordenId) => {
     setLoadingFormatos(true)
@@ -439,6 +457,24 @@ function OperadorTroqueles() {
             ) : lista.length === 0 ? (
               <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>No hay troqueles pendientes 🎉</div>
             ) : (
+              <>
+              <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)' }}>
+                <div style={{ position: 'relative', maxWidth: 420 }}>
+                  <input
+                    className="input"
+                    placeholder="Buscar por número, cliente, referencia…"
+                    value={busqueda}
+                    onChange={e => setBusqueda(e.target.value)}
+                    style={{ paddingLeft: 32 }}
+                  />
+                  <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-3)' }}>
+                    <Icon.Search />
+                  </span>
+                </div>
+              </div>
+              {listaFiltrada.length === 0 ? (
+                <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Sin resultados para «{busqueda.trim()}»</div>
+              ) : (
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ borderBottom: '2px solid var(--line)' }}>
@@ -448,7 +484,7 @@ function OperadorTroqueles() {
                   </tr>
                 </thead>
                 <tbody>
-                  {lista.map((op, idx) => {
+                  {listaFiltrada.map((op, idx) => {
                     const ent = fmtEntrega(op.fecha_entrega)
                     return (
                       <tr key={op.id}
@@ -467,6 +503,8 @@ function OperadorTroqueles() {
                   })}
                 </tbody>
               </table>
+              )}
+              </>
             )}
           </Section>
         )}

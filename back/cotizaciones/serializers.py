@@ -183,7 +183,7 @@ class DocumentoClienteListSerializer(serializers.ModelSerializer):
 
 # Campos editables en una OP creada desde cotización (todo lo demás quedó
 # pactado en la COT y se ignora server-side).
-OP_LOCKED_WHITELIST = {"abono", "observaciones", "fecha", "fecha_entrega"}
+OP_LOCKED_WHITELIST = {"abono", "observaciones", "fecha", "fecha_entrega", "referencia"}
 
 
 class OpProcesoSerializer(serializers.ModelSerializer):

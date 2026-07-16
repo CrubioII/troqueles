@@ -237,6 +237,13 @@ export const updateOrden = (id, data) =>
     body: JSON.stringify(data),
   }).then(json)
 
+export const patchOrden = (id, data) =>
+  apiFetch(`${BASE}/ordenes/${id}/`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  }).then(json)
+
 export const deleteOrden = (id) =>
   apiFetch(`${BASE}/ordenes/${id}/`, {
     method: 'DELETE',
