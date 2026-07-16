@@ -1,5 +1,5 @@
 from django.conf import settings
-from django.db import models
+from django.db import models, transaction
 
 
 class Cliente(models.Model):
@@ -105,10 +105,13 @@ class Cotizacion(models.Model):
 
     def save(self, *args, **kwargs):
         is_new = not self.pk
-        super().save(*args, **kwargs)
-        if is_new and not self.numero:
-            self.numero = f"COT-{self.pk:04d}"
-            Cotizacion.objects.filter(pk=self.pk).update(numero=self.numero)
+        # Atómico: si el proceso muere entre el INSERT y el UPDATE del numero,
+        # quedaría una fila con numero="" que rompe el unique en cada create.
+        with transaction.atomic():
+            super().save(*args, **kwargs)
+            if is_new and not self.numero:
+                self.numero = f"COT-{self.pk:04d}"
+                Cotizacion.objects.filter(pk=self.pk).update(numero=self.numero)
 
     def __str__(self):
         return f"{self.numero} · {self.cliente}"
@@ -153,10 +156,11 @@ class DocumentoCliente(models.Model):
 
     def save(self, *args, **kwargs):
         is_new = not self.pk
-        super().save(*args, **kwargs)
-        if is_new and not self.numero:
-            self.numero = f"DC-{self.pk:04d}"
-            DocumentoCliente.objects.filter(pk=self.pk).update(numero=self.numero)
+        with transaction.atomic():
+            super().save(*args, **kwargs)
+            if is_new and not self.numero:
+                self.numero = f"DC-{self.pk:04d}"
+                DocumentoCliente.objects.filter(pk=self.pk).update(numero=self.numero)
 
     def __str__(self):
         return f"{self.numero} · {self.cliente}"
@@ -256,10 +260,11 @@ class OrdenProduccion(models.Model):
 
     def save(self, *args, **kwargs):
         is_new = not self.pk
-        super().save(*args, **kwargs)
-        if is_new and not self.numero:
-            self.numero = f"OP-{self.pk:04d}"
-            OrdenProduccion.objects.filter(pk=self.pk).update(numero=self.numero)
+        with transaction.atomic():
+            super().save(*args, **kwargs)
+            if is_new and not self.numero:
+                self.numero = f"OP-{self.pk:04d}"
+                OrdenProduccion.objects.filter(pk=self.pk).update(numero=self.numero)
 
     def __str__(self):
         return f"{self.numero} · {self.cliente}"
@@ -489,10 +494,11 @@ class Remision(models.Model):
 
     def save(self, *args, **kwargs):
         is_new = not self.pk
-        super().save(*args, **kwargs)
-        if is_new and not self.numero:
-            self.numero = f"REM-{self.pk:04d}"
-            Remision.objects.filter(pk=self.pk).update(numero=self.numero)
+        with transaction.atomic():
+            super().save(*args, **kwargs)
+            if is_new and not self.numero:
+                self.numero = f"REM-{self.pk:04d}"
+                Remision.objects.filter(pk=self.pk).update(numero=self.numero)
 
     def __str__(self):
         return f"{self.numero} · {self.cliente}"
