@@ -197,7 +197,7 @@ OP_LOCKED_WHITELIST = {"abono", "observaciones", "fecha", "fecha_entrega", "refe
 class OpProcesoSerializer(serializers.ModelSerializer):
     class Meta:
         model = OpProceso
-        fields = ["id", "proceso_id", "active", "costo", "costo_override", "extras", "completado", "completado_en"]
+        fields = ["id", "proceso_id", "active", "costo", "costo_override", "extras", "completado", "completado_en", "visible_operador"]
         read_only_fields = ["id", "completado", "completado_en"]
 
 
@@ -207,6 +207,7 @@ class OrdenListSerializer(serializers.ModelSerializer):
     valor_total_efectivo = serializers.SerializerMethodField()
     saldo = serializers.SerializerMethodField()
     progreso = serializers.SerializerMethodField()
+    visible_operador_troquel = serializers.SerializerMethodField()
 
     class Meta:
         model = OrdenProduccion
@@ -214,8 +215,12 @@ class OrdenListSerializer(serializers.ModelSerializer):
             "id", "numero", "fecha", "fecha_entrega", "cliente_nombre", "referencia",
             "cantidad", "valor_total_efectivo", "abono", "saldo",
             "cotizacion", "cotizacion_numero", "creado", "modificado",
-            "progreso",
+            "progreso", "visible_operador_troquel",
         ]
+
+    def get_visible_operador_troquel(self, obj):
+        p = next((p for p in obj.procesos.all() if p.proceso_id == "troquel"), None)
+        return bool(p.visible_operador) if p else False
 
     def get_valor_total_efectivo(self, obj):
         return _orden_valor_total_efectivo(obj)

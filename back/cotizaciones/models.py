@@ -281,6 +281,9 @@ class OpProceso(models.Model):
     extras = models.JSONField(default=dict, blank=True)
     completado = models.BooleanField(default=False)
     completado_en = models.DateTimeField(null=True, blank=True)
+    # El Admin marca qué OPs de este proceso aparecen en la pantalla del Operador.
+    # Oculto por defecto: nada llega al Operador hasta que el Admin lo marca.
+    visible_operador = models.BooleanField(default=False)
 
     class Meta:
         unique_together = ("orden", "proceso_id")

@@ -10,7 +10,7 @@ import {
 } from '../components/Troquel'
 import {
   getOrdenes, deleteOrden, getFormatosCuchillas, getFormatosCuchillasTodos, getOrdenesPendientes,
-  getOrdenProduccion, getTroquelModelo,
+  getOrdenProduccion, getTroquelModelo, toggleProcesoVisibleOperador,
   updateFormatoCuchillas, getFormatosPendientes, cancelarEnvioFormato,
   enviarRemisionOperador, pdfRemisionOperador, getRemisionesSolicitadas,
 } from '../api'
@@ -129,6 +129,16 @@ function AdminTroqueles() {
     }
   }
 
+  // Marca/desmarca si la OP aparece en la pantalla del Operador (optimista + rollback)
+  const toggleVisible = (e, ord) => {
+    e.stopPropagation()
+    const next = !ord.visible_operador_troquel
+    setOrdenes(prev => prev.map(o => o.id === ord.id ? { ...o, visible_operador_troquel: next } : o))
+    toggleProcesoVisibleOperador(ord.id, 'troquel', next).catch(() => {
+      setOrdenes(prev => prev.map(o => o.id === ord.id ? { ...o, visible_operador_troquel: !next } : o))
+    })
+  }
+
   // Abre la sección de costos de la OP solicitada (o la cola de revisión si no está en la lista)
   const irAPrecios = (s) => {
     const row = ordenes.find(o => o.id === s.id)
@@ -183,7 +193,7 @@ function AdminTroqueles() {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ borderBottom: '2px solid var(--line)' }}>
-                {['OP #', 'Entrega', 'Cliente', 'Referencia', 'Progreso', ''].map((h, i) => (
+                {['OP #', 'Entrega', 'Cliente', 'Referencia', 'Progreso', 'Operador', ''].map((h, i) => (
                   <th key={i} style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--ink-3)', background: 'var(--surface-2)' }}>{h}</th>
                 ))}
               </tr>
@@ -204,6 +214,12 @@ function AdminTroqueles() {
                         <span style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'JetBrains Mono, monospace' }}>{ord.progreso.completados}/{ord.progreso.total}</span>
                       </div>
                     ) : '—'}
+                  </td>
+                  <td style={{ padding: '10px 12px' }} onClick={e => e.stopPropagation()}>
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600, color: ord.visible_operador_troquel ? 'var(--ink-1)' : 'var(--ink-3)' }}>
+                      <input type="checkbox" checked={!!ord.visible_operador_troquel} onChange={e => toggleVisible(e, ord)} />
+                      {ord.visible_operador_troquel ? 'Visible' : 'Oculto'}
+                    </label>
                   </td>
                   <td style={{ padding: '10px 12px' }} onClick={e => e.stopPropagation()}>
                     <div style={{ display: 'flex', gap: 4 }}>

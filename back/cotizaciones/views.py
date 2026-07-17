@@ -866,6 +866,21 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
             _maybe_crear_remision(OrdenProduccion.objects.get(pk=op.pk))
         return Response(OpProcesoSerializer(proceso).data)
 
+    @action(detail=True, methods=["patch"], url_path=r"procesos/(?P<proceso_id>[^/.]+)/visible_operador")
+    def toggle_proceso_visible_operador(self, request, pk=None, proceso_id=None):
+        """PATCH /api/ordenes/{id}/procesos/{proceso_id}/visible_operador/ — Body: { visible_operador: bool }.
+
+        El Admin decide qué OPs de este proceso aparecen en la pantalla del Operador.
+        """
+        op = self.get_object()
+        try:
+            proceso = op.procesos.get(proceso_id=proceso_id)
+        except OpProceso.DoesNotExist:
+            return Response({"error": "Proceso no encontrado en esta OP."}, status=404)
+        proceso.visible_operador = bool(request.data.get("visible_operador"))
+        proceso.save(update_fields=["visible_operador"])
+        return Response(OpProcesoSerializer(proceso).data)
+
     @action(detail=True, methods=["get"], url_path="produccion")
     def produccion(self, request, pk=None):
         """GET /api/ordenes/{id}/produccion/ — OP sanitizada para el Operador.
@@ -902,11 +917,17 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         proceso_id = (request.query_params.get("proceso") or "").strip()
         qs = OrdenProduccion.objects.select_related("cliente")
         if proceso_id:
-            qs = qs.filter(
-                procesos__proceso_id=proceso_id,
-                procesos__active=True,
-                procesos__completado=False,
-            ).distinct()
+            # Todas estas condiciones van en un solo filter() para que apliquen a
+            # la MISMA fila de proceso (no a filas distintas de la misma OP).
+            proc_cond = {
+                "procesos__proceso_id": proceso_id,
+                "procesos__active": True,
+                "procesos__completado": False,
+            }
+            if proceso_id == "troquel":
+                # Solo las OPs que el Admin marcó como visibles llegan al Operador.
+                proc_cond["procesos__visible_operador"] = True
+            qs = qs.filter(**proc_cond).distinct()
             if proceso_id == "troquel":
                 # OPs con formato esperando aprobación del Admin no están
                 # pendientes para el Operador (los devueltos sí reaparecen).

@@ -291,6 +291,13 @@ export const toggleProcesoCompletado = (opId, procesoId, completado) =>
     body: JSON.stringify({ completado }),
   }).then(json)
 
+export const toggleProcesoVisibleOperador = (opId, procesoId, visible) =>
+  apiFetch(`${BASE}/ordenes/${opId}/procesos/${procesoId}/visible_operador/`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ visible_operador: visible }),
+  }).then(json)
+
 // ─────────────── Remisiones ───────────────
 
 export const getRemisiones = (params = '') =>
