@@ -1,3 +1,5 @@
+import unicodedata
+
 from rest_framework import serializers
 from .models import Cliente, Papel, Cotizacion, CotizacionProceso, DocumentoCliente, DocumentoClienteItem, OrdenProduccion, OpProceso, RegistroMaquina, TroquelModelo, FormatoCuchillas, Remision, RemisionItem
 
@@ -7,6 +9,12 @@ class ClienteSerializer(serializers.ModelSerializer):
         model = Cliente
         fields = ["id", "nombre", "email", "telefono", "nit", "direccion", "ciudad", "tipo", "creado"]
         read_only_fields = ["id", "creado"]
+
+    def validate_nombre(self, value):
+        # NFC: acentos como un solo codepoint. Sin esto, un nombre guardado en
+        # NFD (p.ej. pegado desde macOS) no aparece en ?search= aunque se vea
+        # idéntico en pantalla.
+        return unicodedata.normalize("NFC", value).strip()
 
 
 class PapelSerializer(serializers.ModelSerializer):
