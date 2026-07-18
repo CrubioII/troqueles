@@ -70,6 +70,7 @@ function AdminTroqueles() {
   const [pendientes, setPendientes] = useState([])       // formatos esperando aprobación (contador)
   const [solicitudes, setSolicitudes] = useState([])     // envíos de remisión bloqueados por falta de precios
   const [confirmDelete, setConfirmDelete] = useState(null)
+  const [busqueda, setBusqueda] = useState('')           // filtro de la tabla de OPs en troquel
 
   const loadPendientes = () =>
     getFormatosPendientes()
@@ -100,6 +101,12 @@ function AdminTroqueles() {
   }
 
   useEffect(() => { loadOrdenes() }, [])
+
+  const ordenesFiltradas = useMemo(() => {
+    const t = norm(busqueda.trim())
+    if (!t) return ordenes
+    return ordenes.filter(o => [o.numero, o.cliente_nombre, o.referencia].some(v => norm(v).includes(t)))
+  }, [ordenes, busqueda])
 
   const loadFormatos = (ordenId) => {
     setLoadingFormatos(true)
@@ -191,6 +198,24 @@ function AdminTroqueles() {
         ) : ordenes.length === 0 ? (
           <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>No hay OPs con troquel activo</div>
         ) : (
+          <>
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)' }}>
+            <div style={{ position: 'relative', maxWidth: 420 }}>
+              <input
+                className="input"
+                placeholder="Buscar por número, cliente, referencia…"
+                value={busqueda}
+                onChange={e => setBusqueda(e.target.value)}
+                style={{ paddingLeft: 32 }}
+              />
+              <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-3)' }}>
+                <Icon.Search />
+              </span>
+            </div>
+          </div>
+          {ordenesFiltradas.length === 0 ? (
+            <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Sin resultados para «{busqueda.trim()}»</div>
+          ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ borderBottom: '2px solid var(--line)' }}>
@@ -200,7 +225,7 @@ function AdminTroqueles() {
               </tr>
             </thead>
             <tbody>
-              {ordenes.map((ord, idx) => (
+              {ordenesFiltradas.map((ord, idx) => (
                 <tr key={ord.id}
                   style={{ borderBottom: '1px solid var(--line)', background: sel?.id === ord.id ? 'var(--accent-soft, #fdf0e6)' : (idx % 2 ? 'var(--surface-2)' : 'var(--surface)'), cursor: 'pointer' }}
                   onClick={() => selectOrden(ord)}>
@@ -237,6 +262,8 @@ function AdminTroqueles() {
               ))}
             </tbody>
           </table>
+          )}
+          </>
         )}
       </Section>
 
