@@ -1151,6 +1151,9 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         qs = (
             OrdenProduccion.objects
             .filter(procesos__proceso_id="troquel", procesos__active=True)
+            # Solo OP con un formato de cuchillas cargado (no borrador): sin él no
+            # hay consumo que remisionar.
+            .filter(formatos_cuchillas__estado__in=["pendiente", "aprobado", "devuelto"])
             .filter(Q(remision__isnull=True) | Q(remision__estado="pendiente"))
             .select_related("cliente", "remision")
             .distinct()
@@ -1177,6 +1180,16 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         cliente_ids = {op.cliente_id for op in ops}
         if len(cliente_ids) > 1:
             return Response({"error": "Todas las OP deben ser del mismo cliente."}, status=400)
+
+        # Cada OP debe tener un formato de cuchillas cargado (no borrador).
+        sin_formato = [
+            op.numero for op in ops
+            if not op.formatos_cuchillas.exclude(estado="borrador").exists()
+        ]
+        if sin_formato:
+            return Response({
+                "error": f"Falta el formato de cuchillas en: {', '.join(sin_formato)}.",
+            }, status=409)
 
         # Preserva el orden solicitado por el Operador (la primera es el destino).
         ops.sort(key=lambda op: ids.index(op.id))
