@@ -206,6 +206,7 @@ export default function RemisionEdit() {
   const [showModal, setShowModal] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [toast, setToast] = useState(null)
+  const [mostrarValores, setMostrarValores] = useState(false)
 
   const editable = rem?.estado === 'pendiente'
   const liquidada = rem?.estado === 'liquidada'
@@ -219,6 +220,7 @@ export default function RemisionEdit() {
     setDireccion(data.direccion || '')
     setCiudad(data.ciudad || '')
     setObservaciones(data.observaciones || '')
+    setMostrarValores(!!data.mostrar_valores)
   }
 
   useEffect(() => {
@@ -231,6 +233,7 @@ export default function RemisionEdit() {
 
   const payload = () => ({
     direccion, ciudad, observaciones,
+    mostrar_valores: mostrarValores,
     items: items.map((it, idx) => ({
       descripcion: it.descripcion,
       cantidad: Number(it.cantidad) || 0,
@@ -422,6 +425,20 @@ export default function RemisionEdit() {
           <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12 }}>Observaciones</div>
           <textarea className="input" rows={3} value={observaciones} disabled={!editable}
             onChange={e => setObservaciones(e.target.value)} placeholder="Notas para el comprobante…" style={{ resize: 'vertical' }} />
+        </div>
+
+        {/* Remisión del Operador: permitir mostrar valores */}
+        <div className="section open" style={{ marginBottom: 16, padding: 18 }}>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: editable ? 'pointer' : 'default' }}>
+            <input type="checkbox" checked={mostrarValores} disabled={!editable}
+              onChange={e => setMostrarValores(e.target.checked)} style={{ marginTop: 3 }} />
+            <span>
+              <span style={{ fontWeight: 700, fontSize: 14 }}>Mostrar valores en la remisión del operador</span>
+              <span style={{ display: 'block', fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>
+                Por defecto la remisión del operador se entrega sin precios. Actívalo para que su PDF incluya los valores.
+              </span>
+            </span>
+          </label>
         </div>
 
         {/* Acciones */}

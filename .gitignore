@@ -5,3 +5,6 @@ cotización info.pdf
 
 # Archivos subidos en runtime (modelos de troquel, etc.)
 back/media/
+
+# Notas locales de sesión (no versionar)
+.claude/deployExplanation.md

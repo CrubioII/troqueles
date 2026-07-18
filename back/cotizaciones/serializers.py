@@ -496,6 +496,32 @@ class OrdenOperadorSerializer(serializers.ModelSerializer):
         return TroquelModeloOperadorSerializer(modelo, context=self.context).data
 
 
+class RemisionableOperadorSerializer(serializers.ModelSerializer):
+    """OP de troquel candidata a remisión del Operador (sin valores monetarios)."""
+
+    cliente_id = serializers.IntegerField(source="cliente.id", read_only=True)
+    cliente_nombre = serializers.CharField(source="cliente.nombre", read_only=True, default="")
+    remision_numero = serializers.SerializerMethodField()
+    remision_estado = serializers.SerializerMethodField()
+
+    class Meta:
+        model = OrdenProduccion
+        fields = ["id", "numero", "referencia", "cantidad", "fecha_entrega",
+                  "cliente_id", "cliente_nombre", "remision_numero", "remision_estado"]
+
+    def _remision(self, obj):
+        # Prefetch-friendly: OneToOne related_name="remision"
+        return getattr(obj, "remision", None)
+
+    def get_remision_numero(self, obj):
+        rem = self._remision(obj)
+        return rem.numero if rem else ""
+
+    def get_remision_estado(self, obj):
+        rem = self._remision(obj)
+        return rem.estado if rem else ""
+
+
 # ─────────────── Remisiones ───────────────
 
 
@@ -522,7 +548,7 @@ class RemisionSerializer(serializers.ModelSerializer):
             "id", "numero", "fecha",
             "orden", "orden_numero",
             "cliente", "cliente_nombre", "cliente_email", "cliente_telefono", "cliente_nit",
-            "direccion", "ciudad", "observaciones",
+            "direccion", "ciudad", "observaciones", "mostrar_valores",
             "estado", "enviada_en", "liquidada_en",
             "consolidada_en", "consolidada_en_remision", "consolidada_en_numero",
             "creado", "modificado",
@@ -553,4 +579,4 @@ class RemisionListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Remision
         fields = ["id", "numero", "fecha", "cliente_nombre", "orden_numero",
-                  "estado", "creado", "modificado"]
+                  "estado", "mostrar_valores", "creado", "modificado"]

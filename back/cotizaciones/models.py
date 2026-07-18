@@ -481,6 +481,9 @@ class Remision(models.Model):
     ciudad = models.CharField(max_length=120, blank=True, default="")
     observaciones = models.TextField(blank=True, default="")
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default="pendiente")
+    # Interruptor del Admin: si es True, la remisión del Operador muestra los
+    # valores monetarios; por defecto la remisión del Operador va sin precios.
+    mostrar_valores = models.BooleanField(default=False)
     enviada_en = models.DateTimeField(null=True, blank=True)
     liquidada_en = models.DateTimeField(null=True, blank=True)
     # Si fue fusionada dentro de otra remisión: estado=consolidada y apunta al destino.

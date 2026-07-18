@@ -9,7 +9,7 @@ from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from django.core.mail import EmailMessage
 from django.db import connection, transaction
-from django.db.models import F, Max, ProtectedError
+from django.db.models import F, Max, ProtectedError, Q
 from django.http import HttpResponse
 from django.template.loader import render_to_string
 from django.conf import settings
@@ -74,6 +74,7 @@ from .serializers import (
     TroquelModeloSerializer,
     FormatoCuchillasSerializer,
     OrdenOperadorSerializer,
+    RemisionableOperadorSerializer,
     RemisionSerializer,
     RemisionListSerializer,
 )
@@ -266,6 +267,88 @@ def _remision_pdf_ctx(rem, admin=False):
             for c in costos
         ]
         ctx["costos_total"] = _fmt_cop(_costos_items_total(costos))
+    return ctx
+
+
+def _consolidar_remisiones(target, fuentes, now=None):
+    """Fusiona los ítems de `fuentes` (remisiones pendientes del mismo cliente)
+    dentro de `target`. Cada fuente pasa a estado=consolidada apuntando al target.
+
+    Devuelve `target` refrescada. No valida (el llamador comprueba cliente/estado).
+    """
+    now = now or timezone.now()
+    next_orden = (target.items.aggregate(m=Max("orden")).get("m") or 0) + 1
+    with transaction.atomic():
+        for f in fuentes:
+            for it in f.items.all():
+                RemisionItem.objects.create(
+                    remision=target,
+                    descripcion=it.descripcion,
+                    cantidad=it.cantidad,
+                    valor_total=it.valor_total,
+                    orden=next_orden,
+                )
+                next_orden += 1
+            f.estado = "consolidada"
+            f.consolidada_en = now
+            f.consolidada_en_remision = target
+            f.save(update_fields=["estado", "consolidada_en", "consolidada_en_remision", "modificado"])
+    target.refresh_from_db()
+    return target
+
+
+def _remision_operador_ops(rem):
+    """OPs incluidas en la remisión: la propia + las de sus remisiones consolidadas."""
+    ops = []
+    if rem.orden_id:
+        ops.append(rem.orden)
+    for src in rem.remisiones_consolidadas.select_related("orden").all():
+        if src.orden_id:
+            ops.append(src.orden)
+    return ops
+
+
+def _remision_operador_pdf_ctx(rem):
+    """Contexto del PDF de remisión del Operador: consumo en cm por troquel +
+    cantidad entregada, sin precios salvo que el Admin active `mostrar_valores`."""
+    items = list(rem.items.all())
+    mostrar = bool(rem.mostrar_valores)
+
+    troqueles = []
+    for op in _remision_operador_ops(rem):
+        formato = (
+            op.formatos_cuchillas.exclude(estado="borrador").order_by("-fecha_hora").first()
+            or op.formatos_cuchillas.order_by("-fecha_hora").first()
+        )
+        consumos = [
+            {
+                "concepto": ln["concepto"],
+                "detalle": ln["detalle"],
+                "cantidad": _fmt_num(ln["cantidad"]),
+                "unidad": ln["unidad"],
+            }
+            for ln in (_build_costos_seed(formato) if formato else [])
+        ]
+        troqueles.append({
+            "op_numero": op.numero,
+            "referencia": op.referencia,
+            "cantidad": _fmt_num(op.cantidad or 0),
+            "consumos": consumos,
+        })
+
+    ctx = {
+        "rem": rem,
+        "troqueles": troqueles,
+        "mostrar_valores": mostrar,
+        "logo_uri": _logo_data_uri(),
+    }
+    if mostrar:
+        ctx["items"] = [
+            {"descripcion": it.descripcion, "cantidad": _fmt_num(it.cantidad),
+             "valor_total": _fmt_cop(it.valor_total)}
+            for it in items
+        ]
+        ctx["total_valor"] = _fmt_cop(sum((it.valor_total or 0) for it in items))
     return ctx
 
 
@@ -733,7 +816,7 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
-        if self.action in ("toggle_proceso_completado", "list", "retrieve", "produccion", "buscar", "produccion_pendientes", "enviar_remision", "remision_pdf"):
+        if self.action in ("toggle_proceso_completado", "list", "retrieve", "produccion", "buscar", "produccion_pendientes", "enviar_remision", "remision_pdf", "remisionables_operador", "consolidar_remision_operador", "remision_operador_pdf"):
             return
         _require_admin(request)
 
@@ -1057,6 +1140,85 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         response["Content-Disposition"] = f'attachment; filename="Remision_{rem.numero}.pdf"'
         return response
 
+    @action(detail=False, methods=["get"], url_path="remisionables_operador")
+    def remisionables_operador(self, request):
+        """GET /api/ordenes/remisionables_operador/ — Operador o Admin.
+
+        OPs de troquel cuya remisión aún está pendiente (o aún no existe) y por
+        tanto pueden entrar en una remisión del Operador. Vista sanitizada (sin
+        valores). El front agrupa por cliente y filtra en memoria.
+        """
+        qs = (
+            OrdenProduccion.objects
+            .filter(procesos__proceso_id="troquel", procesos__active=True)
+            .filter(Q(remision__isnull=True) | Q(remision__estado="pendiente"))
+            .select_related("cliente", "remision")
+            .distinct()
+            .order_by("cliente__nombre", F("fecha_entrega").asc(nulls_last=True), "creado")
+        )
+        data = RemisionableOperadorSerializer(qs, many=True, context={"request": request}).data
+        return Response(data)
+
+    @action(detail=False, methods=["post"], url_path="consolidar_remision_operador")
+    def consolidar_remision_operador(self, request):
+        """POST /api/ordenes/consolidar_remision_operador/ — Operador o Admin.
+
+        Body { "orden_ids": [int, ...] }. Asegura una remisión pendiente para
+        cada OP (mismo cliente), fusiona todas en la primera y devuelve
+        { remision_id, remision_numero }. No exige precios del troquel.
+        """
+        ids = request.data.get("orden_ids", [])
+        if not isinstance(ids, list) or not ids:
+            return Response({"error": "Falta orden_ids."}, status=400)
+
+        ops = list(OrdenProduccion.objects.filter(pk__in=ids).select_related("cliente"))
+        if len(ops) != len(set(ids)):
+            return Response({"error": "Alguna OP no existe."}, status=404)
+        cliente_ids = {op.cliente_id for op in ops}
+        if len(cliente_ids) > 1:
+            return Response({"error": "Todas las OP deben ser del mismo cliente."}, status=400)
+
+        # Preserva el orden solicitado por el Operador (la primera es el destino).
+        ops.sort(key=lambda op: ids.index(op.id))
+        remisiones = []
+        for op in ops:
+            rem = Remision.objects.filter(orden=op).first() or _crear_remision(op)
+            if rem.estado != "pendiente":
+                return Response({
+                    "error": f"La remisión {rem.numero} ya fue enviada o consolidada.",
+                }, status=409)
+            remisiones.append(rem)
+
+        target = remisiones[0]
+        fuentes = remisiones[1:]
+        if fuentes:
+            _consolidar_remisiones(target, fuentes)
+        return Response({"remision_id": target.id, "remision_numero": target.numero})
+
+    @action(detail=False, methods=["post"], url_path="remision_operador_pdf")
+    def remision_operador_pdf(self, request):
+        """POST /api/ordenes/remision_operador_pdf/ — Operador o Admin.
+
+        Body { "remision_id": int }. Descarga el PDF de remisión del Operador
+        (consumo en cm por troquel + cantidad entregada, con firma del cliente).
+        Sin valores salvo que el Admin haya activado `mostrar_valores`. Sin
+        bloqueo por precios.
+        """
+        rem_id = request.data.get("remision_id")
+        rem = Remision.objects.filter(pk=rem_id).select_related("cliente", "orden").first()
+        if rem is None:
+            return Response({"error": "Remisión no encontrada."}, status=404)
+        ctx = _remision_operador_pdf_ctx(rem)
+        try:
+            html_pdf = render_to_string("cotizaciones/pdf_remision_operador.html", ctx)
+            pdf_bytes = WeasyprintHTML(string=html_pdf).write_pdf()
+        except Exception as e:
+            traceback.print_exc()
+            return Response({"error": str(e)}, status=502)
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="Remision_{rem.numero}.pdf"'
+        return response
+
     @action(detail=False, methods=["get"], url_path="remisiones_solicitadas")
     def remisiones_solicitadas(self, request):
         """GET /api/ordenes/remisiones_solicitadas/ — solo Admin (via initial).
@@ -1265,24 +1427,7 @@ class RemisionViewSet(viewsets.ModelViewSet):
             if f.estado != "pendiente":
                 return Response({"error": f"La remisión {f.numero} ya fue enviada o consolidada."}, status=409)
 
-        now = timezone.now()
-        next_orden = (target.items.aggregate(m=Max("orden")).get("m") or 0) + 1
-        with transaction.atomic():
-            for f in fuentes:
-                for it in f.items.all():
-                    RemisionItem.objects.create(
-                        remision=target,
-                        descripcion=it.descripcion,
-                        cantidad=it.cantidad,
-                        valor_total=it.valor_total,
-                        orden=next_orden,
-                    )
-                    next_orden += 1
-                f.estado = "consolidada"
-                f.consolidada_en = now
-                f.consolidada_en_remision = target
-                f.save(update_fields=["estado", "consolidada_en", "consolidada_en_remision", "modificado"])
-        target.refresh_from_db()
+        _consolidar_remisiones(target, fuentes)
         return Response(RemisionSerializer(target).data)
 
 

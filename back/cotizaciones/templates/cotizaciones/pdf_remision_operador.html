@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Remisión {{ rem.numero }} — Troqueles INK</title>
+<style>
+  @page {
+    size: A4;
+    margin: 14mm 16mm 14mm 16mm;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 11px;
+    color: #1B1816;
+    background: #fff;
+    line-height: 1.4;
+  }
+
+  .doc {
+    border: 1px solid #e0e0e0;
+    border-top: 4px solid #E8945A;
+  }
+
+  /* ── Header ── */
+  .doc-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 14px 18px 12px;
+    border-bottom: 1px solid #e8e8e8;
+  }
+  .company-name {
+    font-size: 16px;
+    font-weight: 900;
+    letter-spacing: -0.02em;
+    color: #1B1816;
+  }
+  .company-details {
+    font-size: 9px;
+    color: #777;
+    line-height: 1.5;
+    margin-top: 3px;
+  }
+  .brand { text-align: right; }
+  .brand img { height: 30px; object-fit: contain; }
+  .doc-title {
+    font-size: 18px;
+    font-weight: 900;
+    text-transform: uppercase;
+    color: #1B1816;
+    letter-spacing: -0.03em;
+  }
+  .doc-meta {
+    font-size: 10px;
+    color: #888;
+    font-family: monospace;
+    margin-top: 2px;
+  }
+
+  /* ── Client section ── */
+  .client-section {
+    padding: 12px 18px;
+    background: #f7f7f7;
+    border-bottom: 1px solid #e8e8e8;
+  }
+  .sec-label {
+    font-size: 8px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #aaa;
+    margin-bottom: 4px;
+  }
+  .client-name {
+    font-size: 15px;
+    font-weight: 700;
+    color: #1B1816;
+    margin-bottom: 5px;
+  }
+  .client-details { display: flex; flex-wrap: wrap; }
+  .client-detail-item { font-size: 10px; color: #666; margin-right: 18px; margin-bottom: 2px; }
+  .client-detail-item strong { color: #444; font-weight: 600; }
+
+  /* ── Meta strip ── */
+  .meta-strip { display: flex; border-bottom: 1px solid #e8e8e8; }
+  .meta-cell { flex: 1; padding: 9px 18px; border-right: 1px solid #e8e8e8; }
+  .meta-cell:last-child { border-right: none; }
+  .meta-lbl {
+    font-size: 8px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.1em; color: #aaa; display: block; margin-bottom: 2px;
+  }
+  .meta-val { font-size: 11px; font-weight: 600; color: #1B1816; }
+
+  /* ── Troquel blocks ── */
+  .troquel {
+    border-bottom: 1px solid #e8e8e8;
+  }
+  .troquel-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 10px 18px 6px;
+    gap: 12px;
+  }
+  .troquel-ref { font-size: 12px; font-weight: 700; color: #1B1816; }
+  .troquel-op { font-size: 10px; color: #E8945A; font-family: monospace; font-weight: 700; }
+  .troquel-qty { font-size: 10px; color: #666; }
+  .troquel-qty strong { color: #1B1816; }
+
+  table.consumos {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  table.consumos thead th {
+    font-size: 8px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #aaa;
+    text-align: left;
+    padding: 6px 18px;
+    background: #fafafa;
+    border-top: 1px solid #f0f0f0;
+    border-bottom: 1px solid #e8e8e8;
+  }
+  table.consumos tbody td {
+    font-size: 11px;
+    padding: 6px 18px;
+    border-bottom: 1px solid #f0f0f0;
+    vertical-align: top;
+  }
+  table.consumos .col-detalle { color: #666; }
+  table.consumos .col-cant { width: 110px; text-align: right; font-family: monospace; }
+  table.consumos thead th.col-cant { text-align: right; }
+  .no-consumo { padding: 8px 18px; font-size: 10px; color: #aaa; font-style: italic; }
+
+  /* ── Valores (solo si el Admin lo permite) ── */
+  table.items { width: 100%; border-collapse: collapse; }
+  table.items thead th {
+    font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+    color: #aaa; text-align: left; padding: 8px 18px; background: #fafafa;
+    border-bottom: 1px solid #e8e8e8;
+  }
+  table.items tbody td { font-size: 11px; padding: 9px 18px; border-bottom: 1px solid #f0f0f0; }
+  table.items .col-total { width: 130px; text-align: right; font-family: monospace; font-weight: 700; }
+  table.items thead th.col-total { text-align: right; }
+  tr.total-row td {
+    border-top: 2px solid #E8945A; border-bottom: none; font-weight: 700; padding-top: 10px;
+  }
+  tr.total-row .col-total { color: #E8945A; font-size: 13px; }
+  .valores-label {
+    padding: 10px 18px 0; font-size: 8px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.1em; color: #aaa;
+  }
+
+  /* ── Observaciones ── */
+  .nota-section {
+    padding: 10px 18px;
+    background: #fff8f3;
+    border-top: 1px solid #e8e8e8;
+  }
+  .nota-lbl {
+    font-size: 8px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.1em; color: #E8945A; margin-bottom: 3px;
+  }
+  .nota-text { font-size: 10px; color: #555; line-height: 1.6; white-space: pre-wrap; }
+
+  /* ── Firmas ── */
+  .signatures {
+    display: flex;
+    gap: 40px;
+    padding: 34px 18px 14px;
+    border-top: 1px solid #e8e8e8;
+  }
+  .sig-col { flex: 1; }
+  .sig-line { border-top: 1px solid #1B1816; padding-top: 4px; }
+  .sig-title { font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: #888; }
+  .sig-fields { font-size: 9px; color: #666; margin-top: 4px; line-height: 1.8; }
+  .sig-brand { color: #E8945A; font-weight: 700; }
+</style>
+</head>
+<body>
+
+<div class="doc">
+
+  <!-- Header -->
+  <div class="doc-header">
+    <div>
+      <div class="company-name">TROQUELES INK SAS</div>
+      <div class="company-details">
+        NIT 901.614.931-6<br>
+        Bogotá — Colombia<br>
+        troquelesinkcoltador@gmail.com
+      </div>
+    </div>
+    <div class="brand">
+      {% if logo_uri %}<img src="{{ logo_uri }}" alt="Troqueles INK" height="30" width="auto" style="height:30px;width:auto;max-height:30px;"><br>{% endif %}
+      <div class="doc-title">Remisión</div>
+      <div class="doc-meta">{{ rem.numero }} &nbsp;·&nbsp; {{ rem.fecha }}</div>
+    </div>
+  </div>
+
+  <!-- Client -->
+  <div class="client-section">
+    <div class="sec-label">Señores</div>
+    <div class="client-name">{{ rem.cliente.nombre }}</div>
+    <div class="client-details">
+      {% if rem.cliente.nit %}<span class="client-detail-item"><strong>NIT</strong> {{ rem.cliente.nit }}</span>{% endif %}
+      {% if rem.direccion %}<span class="client-detail-item"><strong>Dirección</strong> {{ rem.direccion }}</span>{% endif %}
+      {% if rem.cliente.telefono %}<span class="client-detail-item"><strong>Tel.</strong> {{ rem.cliente.telefono }}</span>{% endif %}
+      {% if rem.ciudad %}<span class="client-detail-item"><strong>Ciudad</strong> {{ rem.ciudad }}</span>{% endif %}
+    </div>
+  </div>
+
+  <!-- Meta -->
+  <div class="meta-strip">
+    <div class="meta-cell">
+      <span class="meta-lbl">Fecha de elaboración</span>
+      <span class="meta-val">{{ rem.fecha }}</span>
+    </div>
+    <div class="meta-cell">
+      <span class="meta-lbl">Troqueles</span>
+      <span class="meta-val">{{ troqueles|length }}</span>
+    </div>
+  </div>
+
+  <!-- Troqueles: consumo en cm por OP -->
+  {% for t in troqueles %}
+  <div class="troquel">
+    <div class="troquel-head">
+      <div>
+        <span class="troquel-ref">{{ t.referencia|default:"Troquel" }}</span>
+        &nbsp;<span class="troquel-op">{{ t.op_numero }}</span>
+      </div>
+      <div class="troquel-qty"><strong>Cantidad entregada:</strong> {{ t.cantidad }}</div>
+    </div>
+    {% if t.consumos %}
+    <table class="consumos">
+      <thead>
+        <tr>
+          <th>Elemento</th>
+          <th>Detalle</th>
+          <th class="col-cant">Consumo</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in t.consumos %}
+        <tr>
+          <td>{{ c.concepto }}</td>
+          <td class="col-detalle">{{ c.detalle }}</td>
+          <td class="col-cant">{{ c.cantidad }} {{ c.unidad }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="no-consumo">Sin formato de cuchillas registrado.</div>
+    {% endif %}
+  </div>
+  {% endfor %}
+
+  <!-- Valores (solo si el Admin lo permite) -->
+  {% if mostrar_valores %}
+  <div class="valores-label">Valores</div>
+  <table class="items">
+    <thead>
+      <tr>
+        <th>Descripción</th>
+        <th class="col-total">Vr. Total</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in items %}
+      <tr>
+        <td>{{ item.descripcion }}</td>
+        <td class="col-total">{{ item.valor_total }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr class="total-row">
+        <td>Total</td>
+        <td class="col-total">{{ total_valor }}</td>
+      </tr>
+    </tfoot>
+  </table>
+  {% endif %}
+
+  {% if rem.observaciones %}
+  <div class="nota-section">
+    <div class="nota-lbl">Observaciones</div>
+    <div class="nota-text">{{ rem.observaciones }}</div>
+  </div>
+  {% endif %}
+
+  <!-- Firmas -->
+  <div class="signatures">
+    <div class="sig-col">
+      <div class="sig-line">
+        <div class="sig-title">Recibido conforme</div>
+        <div class="sig-fields">
+          Nombre: ______________________<br>
+          C.C. / NIT: ___________________<br>
+          Fecha: _______________________
+        </div>
+      </div>
+    </div>
+    <div class="sig-col">
+      <div class="sig-line">
+        <div class="sig-title">Entregado por</div>
+        <div class="sig-fields">
+          <span class="sig-brand">Troqueles ink</span><br>
+          Alexander Restrepo
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

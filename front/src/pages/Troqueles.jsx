@@ -12,7 +12,8 @@ import {
   getOrdenes, deleteOrden, getFormatosCuchillas, getFormatosCuchillasTodos, getOrdenesPendientes,
   getOrdenProduccion, getTroquelModelo, toggleProcesoVisibleOperador,
   updateFormatoCuchillas, getFormatosPendientes, cancelarEnvioFormato,
-  enviarRemisionOperador, pdfRemisionOperador, getRemisionesSolicitadas,
+  getRemisionablesOperador, consolidarRemisionOperador, pdfRemisionOperadorConsolidada,
+  getRemisionesSolicitadas,
 } from '../api'
 import { useSyncPolling } from '../lib/useSyncPolling'
 
@@ -309,13 +310,14 @@ function OperadorTroqueles() {
   const [historial, setHistorial] = useState([])
   const [loadingHistorial, setLoadingHistorial] = useState(false)
   const [editHist, setEditHist] = useState(null)
-  // Envío de remisión: null | 'confirm' | 'blocked' | 'done' | 'ya_enviada'
-  const [remModal, setRemModal] = useState(null)
-  const [remBusy, setRemBusy] = useState(false)
-  const [remError, setRemError] = useState(null)
-  const [remNumero, setRemNumero] = useState('')
-  const [remEmail, setRemEmail] = useState('')
-  const [dlBusy, setDlBusy] = useState(false)
+  // Tab de remisiones del Operador (consolidar varias OP de un cliente en un PDF)
+  const [remisionables, setRemisionables] = useState([])
+  const [loadingRem, setLoadingRem] = useState(false)
+  const [busquedaRem, setBusquedaRem] = useState('')
+  const [selRem, setSelRem] = useState([])          // ids de OP seleccionadas
+  const [selCliente, setSelCliente] = useState(null) // cliente_id de la selección
+  const [genBusy, setGenBusy] = useState(false)
+  const [genError, setGenError] = useState(null)
 
   const loadLista = (silent = false) => {
     if (!silent) setLoadingLista(true)
@@ -337,8 +339,79 @@ function OperadorTroqueles() {
 
   useEffect(() => { if (tab === 'historial') loadHistorial() }, [tab])
 
+  const loadRemisionables = () => {
+    setLoadingRem(true)
+    getRemisionablesOperador()
+      .then(d => setRemisionables(asList(d)))
+      .catch(() => setRemisionables([]))
+      .finally(() => setLoadingRem(false))
+  }
+
+  useEffect(() => { if (tab === 'remisiones') loadRemisionables() }, [tab])
+
   // Tiempo real: refrescar la lista de pendientes solo cuando se está viendo
   useSyncPolling({ ordenes: () => loadLista(true) }, { enabled: !orden && tab === 'pendientes' })
+
+  // Remisionables filtradas por búsqueda y agrupadas por cliente
+  const remisionablesFiltradas = useMemo(() => {
+    const t = norm(busquedaRem.trim())
+    if (!t) return remisionables
+    return remisionables.filter(op => [op.numero, op.cliente_nombre, op.referencia].some(v => norm(v).includes(t)))
+  }, [remisionables, busquedaRem])
+
+  const gruposRem = useMemo(() => {
+    const map = new Map()
+    for (const op of remisionablesFiltradas) {
+      const key = op.cliente_id
+      if (!map.has(key)) map.set(key, { cliente_id: key, cliente_nombre: op.cliente_nombre, ops: [] })
+      map.get(key).ops.push(op)
+    }
+    return [...map.values()]
+  }, [remisionablesFiltradas])
+
+  // Al marcar una OP: si es de otro cliente, reinicia la selección a ese cliente.
+  const toggleRem = (op) => {
+    setGenError(null)
+    if (selCliente !== null && op.cliente_id !== selCliente) {
+      setSelCliente(op.cliente_id)
+      setSelRem([op.id])
+      return
+    }
+    setSelCliente(op.cliente_id)
+    setSelRem(prev => {
+      const next = prev.includes(op.id) ? prev.filter(x => x !== op.id) : [...prev, op.id]
+      if (next.length === 0) setSelCliente(null)
+      return next
+    })
+  }
+
+  const generarRemision = async () => {
+    if (!selRem.length) return
+    setGenBusy(true)
+    setGenError(null)
+    try {
+      const { remision_id } = await consolidarRemisionOperador(selRem)
+      const r = await pdfRemisionOperadorConsolidada(remision_id)
+      if (!r.ok) {
+        const body = await r.json().catch(() => null)
+        throw new Error(body?.error || `HTTP ${r.status}`)
+      }
+      const nombre = (r.headers.get('Content-Disposition') || '').match(/filename="(.+?)"/)?.[1]
+      const blob = await r.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = nombre || 'Remision.pdf'
+      a.click()
+      URL.revokeObjectURL(url)
+      setSelRem([]); setSelCliente(null)
+      loadRemisionables()
+    } catch (e) {
+      setGenError(e.message || 'No se pudo generar la remisión')
+    } finally {
+      setGenBusy(false)
+    }
+  }
 
   const listaFiltrada = useMemo(() => {
     const t = norm(busqueda.trim())
@@ -379,52 +452,6 @@ function OperadorTroqueles() {
 
   const volver = () => { setOrden(null); setFormatos([]); loadLista() }
 
-  const enviarRemision = () => {
-    setRemBusy(true)
-    setRemError(null)
-    enviarRemisionOperador(orden.id, remEmail.trim())
-      .then(d => { setRemNumero(d.remision_numero || ''); setRemModal('done') })
-      .catch(e => {
-        if (e.code === 'precios_pendientes') setRemModal('blocked')
-        else if (e.code === 'ya_enviada') setRemModal('ya_enviada')
-        else { setRemModal(null); setRemError(e.message || 'No se pudo enviar la remisión') }
-      })
-      .finally(() => setRemBusy(false))
-  }
-
-  // Descarga el PDF cliente de la remisión para imprimirlo (mismo bloqueo por precios)
-  const descargarPdf = async () => {
-    setDlBusy(true)
-    setRemError(null)
-    try {
-      const r = await pdfRemisionOperador(orden.id)
-      if (!r.ok) {
-        const body = await r.json().catch(() => null)
-        if (body?.code === 'precios_pendientes') { setRemModal('blocked'); return }
-        throw new Error(body?.error || `HTTP ${r.status}`)
-      }
-      const nombre = (r.headers.get('Content-Disposition') || '').match(/filename="(.+?)"/)?.[1]
-      const blob = await r.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = nombre || `Remision_${orden.numero}.pdf`
-      a.click()
-      URL.revokeObjectURL(url)
-    } catch (e) {
-      setRemError(e.message || 'No se pudo generar el PDF')
-    } finally {
-      setDlBusy(false)
-    }
-  }
-
-  // Al cerrar 'done'/'ya_enviada' se refresca la OP para que el botón cambie de estado
-  const cerrarRemModal = () => {
-    const refrescar = remModal === 'done' || remModal === 'ya_enviada'
-    setRemModal(null)
-    if (refrescar) getOrdenProduccion(orden.id).then(setOrden).catch(() => {})
-  }
-
   if (!orden) {
     const puedeEditar = (f) =>
       f.estado !== 'aprobado' && !!user?.username && f.operador_username === user.username
@@ -432,6 +459,7 @@ function OperadorTroqueles() {
       <>
         <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
           <button className={`btn sm${tab === 'pendientes' ? ' primary' : ''}`} onClick={() => { setTab('pendientes'); setEditHist(null) }}>Pendientes</button>
+          <button className={`btn sm${tab === 'remisiones' ? ' primary' : ''}`} onClick={() => { setTab('remisiones'); setEditHist(null) }}>Remisiones</button>
           <button className={`btn sm${tab === 'historial' ? ' primary' : ''}`} onClick={() => setTab('historial')}>Historial</button>
         </div>
 
@@ -524,6 +552,74 @@ function OperadorTroqueles() {
             )}
           </Section>
         )}
+
+        {tab === 'remisiones' && (
+          <Section
+            title="Remisiones — selecciona troqueles de un cliente"
+            actions={
+              <button className="btn sm primary" disabled={genBusy || !selRem.length} onClick={generarRemision}>
+                {genBusy ? 'Generando…' : `Generar remisión${selRem.length ? ` (${selRem.length})` : ''}`}
+              </button>
+            }
+          >
+            <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', fontSize: 12, color: 'var(--ink-3)' }}>
+              Marca varios troqueles del <strong>mismo cliente</strong> para reunirlos en una sola remisión. El PDF muestra el consumo en cm y la firma del cliente (sin precios, salvo que el administrador los habilite).
+            </div>
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)' }}>
+              <div style={{ position: 'relative', maxWidth: 420 }}>
+                <input
+                  className="input"
+                  placeholder="Buscar por número, cliente, referencia…"
+                  value={busquedaRem}
+                  onChange={e => setBusquedaRem(e.target.value)}
+                  style={{ paddingLeft: 32 }}
+                />
+                <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-3)' }}>
+                  <Icon.Search />
+                </span>
+              </div>
+              {genError && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--danger, #c0392b)' }}>✗ {genError}</div>}
+            </div>
+            {loadingRem ? (
+              <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Cargando…</div>
+            ) : gruposRem.length === 0 ? (
+              <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>
+                {busquedaRem.trim() ? `Sin resultados para «${busquedaRem.trim()}»` : 'No hay troqueles pendientes de remisión.'}
+              </div>
+            ) : (
+              gruposRem.map(g => {
+                const bloqueado = selCliente !== null && g.cliente_id !== selCliente
+                return (
+                  <div key={g.cliente_id} style={{ opacity: bloqueado ? 0.5 : 1 }}>
+                    <div style={{ padding: '8px 16px', background: 'var(--surface-2)', borderBottom: '1px solid var(--line)', fontWeight: 700, fontSize: 13 }}>
+                      {g.cliente_nombre || '—'}
+                    </div>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <tbody>
+                        {g.ops.map((op, idx) => {
+                          const checked = selRem.includes(op.id)
+                          return (
+                            <tr key={op.id}
+                              style={{ borderBottom: '1px solid var(--line)', background: idx % 2 ? 'var(--surface-2)' : 'var(--surface)', cursor: 'pointer' }}
+                              onClick={() => toggleRem(op)}>
+                              <td style={{ padding: '10px 12px', width: 36 }}>
+                                <input type="checkbox" checked={checked} onChange={() => toggleRem(op)} onClick={e => e.stopPropagation()} />
+                              </td>
+                              <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 13 }}>{op.numero}</td>
+                              <td style={{ padding: '10px 12px', color: 'var(--ink-2)' }}>{op.referencia}</td>
+                              <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', color: 'var(--ink-2)' }}>{op.cantidad}</td>
+                              <td style={{ padding: '10px 12px', fontSize: 12, color: 'var(--ink-3)' }}>{op.remision_numero || 'nueva'}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )
+              })
+            )}
+          </Section>
+        )}
       </>
     )
   }
@@ -539,19 +635,6 @@ function OperadorTroqueles() {
               {orden.cliente_nombre && <span style={{ marginLeft: 12 }}>Cliente: {orden.cliente_nombre}</span>}
               <span style={{ marginLeft: 12, fontWeight: 400, color: 'var(--ink-3)' }}>Cantidad: {orden.cantidad}</span>
             </span>
-            {orden.remision_enviada ? (
-              <span style={{ padding: '4px 12px', borderRadius: 999, background: 'var(--surface-2, #f2f2f2)', border: '1px solid var(--line)', fontSize: 12, fontWeight: 600, color: 'var(--ink-3)' }}>
-                ✓ Remisión enviada
-              </span>
-            ) : (
-              <button className="btn sm primary" onClick={() => { setRemError(null); setRemModal('confirm') }}>
-                Enviar remisión
-              </button>
-            )}
-            <button className="btn sm" disabled={dlBusy} onClick={descargarPdf} title="Descarga el PDF de la remisión para imprimirlo">
-              {dlBusy ? 'Generando…' : '⬇ Descargar PDF'}
-            </button>
-            {remError && <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--danger, #c0392b)' }}>{remError}</span>}
           </div>
 
           <Section title="Modelo del troquel">
@@ -629,76 +712,6 @@ function OperadorTroqueles() {
           <Section title="Formato registrado en esta OP">
             <FormatosCuchillasHistory formatos={formatos} loading={loadingFormatos} />
           </Section>
-
-          {remModal === 'confirm' && (
-            <div style={{
-              position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 9999,
-              display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
-            }}>
-              <div style={{ background: 'var(--surface)', borderRadius: 12, maxWidth: 440, width: '100%', padding: 24, boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
-                <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>Enviar remisión</div>
-                <div style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5, marginBottom: 14 }}>
-                  Se enviará la remisión de <strong>{orden.numero}</strong> por correo al cliente y a contaduría.
-                </div>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--ink-2)', marginBottom: 4 }}>
-                  Correo del cliente
-                </label>
-                <input
-                  className="input" type="email" placeholder="correo@cliente.com"
-                  value={remEmail} onChange={e => setRemEmail(e.target.value)}
-                  disabled={remBusy} style={{ width: '100%' }}
-                />
-                <div style={{ fontSize: 11, color: 'var(--ink-3)', margin: '4px 0 16px' }}>
-                  Si lo dejas vacío se usa el correo registrado del cliente.
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                  <button className="btn" onClick={() => setRemModal(null)} disabled={remBusy}>Cancelar</button>
-                  <button className="btn primary" onClick={enviarRemision} disabled={remBusy}>
-                    {remBusy ? 'Enviando…' : 'Sí, enviar'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {remModal === 'blocked' && (
-            <div style={{
-              position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 9999,
-              display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
-            }}>
-              <div style={{ background: 'var(--surface)', borderRadius: 12, maxWidth: 440, width: '100%', padding: 24, boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
-                <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>⚠️ Faltan precios del troquel</div>
-                <div style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5, marginBottom: 18 }}>
-                  El administrador aún no ha completado los precios de este troquel, así que la remisión
-                  no se puede enviar todavía. Ya le llegó el aviso en su pantalla; por favor notifícale.
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                  <button className="btn primary" onClick={() => setRemModal(null)}>Entendido</button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {(remModal === 'done' || remModal === 'ya_enviada') && (
-            <div style={{
-              position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 9999,
-              display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
-            }}>
-              <div style={{ background: 'var(--surface)', borderRadius: 12, maxWidth: 440, width: '100%', padding: 24, boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
-                <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>
-                  {remModal === 'done' ? '✓ Remisión enviada' : 'Remisión ya enviada'}
-                </div>
-                <div style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5, marginBottom: 18 }}>
-                  {remModal === 'done'
-                    ? <>Remisión {remNumero && <strong>{remNumero}</strong>} enviada al cliente por correo.</>
-                    : 'La remisión de esta OP ya fue enviada o consolidada anteriormente.'}
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                  <button className="btn primary" onClick={cerrarRemModal}>Entendido</button>
-                </div>
-              </div>
-            </div>
-          )}
         </>
       )}
     </>

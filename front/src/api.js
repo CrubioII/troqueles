@@ -377,6 +377,29 @@ export const pdfRemisionOperador = (opId) =>
 export const getRemisionesSolicitadas = () =>
   apiFetch(`${BASE}/ordenes/remisiones_solicitadas/`).then(json)
 
+// OPs de troquel remisionables (remisión pendiente o inexistente), sin dinero.
+// El front agrupa por cliente y filtra en memoria.
+export const getRemisionablesOperador = () =>
+  apiFetch(`${BASE}/ordenes/remisionables_operador/`).then(json)
+
+// Crea/consolida una remisión del Operador a partir de varias OP del mismo cliente.
+// Devuelve { remision_id, remision_numero }.
+export const consolidarRemisionOperador = (ordenIds) =>
+  apiFetch(`${BASE}/ordenes/consolidar_remision_operador/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ orden_ids: ordenIds }),
+  }).then(jsonConCodigo)
+
+// Descarga el PDF de remisión del Operador (consumo en cm + firma del cliente).
+// Devuelve el Response crudo: el caller decide entre blob (ok) y json de error.
+export const pdfRemisionOperadorConsolidada = (remisionId) =>
+  apiFetch(`${BASE}/ordenes/remision_operador_pdf/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ remision_id: remisionId }),
+  })
+
 export const buscarOrdenPorNumero = (numero) =>
   apiFetch(`${BASE}/ordenes/buscar/?numero=${encodeURIComponent(numero)}`).then(json)
 
