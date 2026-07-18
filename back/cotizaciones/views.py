@@ -310,11 +310,15 @@ def _remision_operador_ops(rem):
 
 def _remision_operador_pdf_ctx(rem):
     """Contexto del PDF de remisión del Operador: consumo en cm por troquel +
-    cantidad entregada, sin precios salvo que el Admin active `mostrar_valores`."""
-    items = list(rem.items.all())
+    cantidad entregada, sin precios salvo que el Admin active `mostrar_valores`.
+
+    Los valores se calculan al vuelo desde los costos actuales de cada troquel,
+    de modo que si el Admin edita los precios después de generar la remisión,
+    el PDF refleja el total actualizado."""
     mostrar = bool(rem.mostrar_valores)
 
     troqueles = []
+    total_valor = 0
     for op in _remision_operador_ops(rem):
         formato = (
             op.formatos_cuchillas.exclude(estado="borrador").order_by("-fecha_hora").first()
@@ -329,11 +333,14 @@ def _remision_operador_pdf_ctx(rem):
             }
             for ln in (_build_costos_seed(formato) if formato else [])
         ]
+        valor = _troquel_costos_total(op)
+        total_valor += valor
         troqueles.append({
             "op_numero": op.numero,
             "referencia": op.referencia,
             "cantidad": _fmt_num(op.cantidad or 0),
             "consumos": consumos,
+            "valor_total": _fmt_cop(valor),
         })
 
     ctx = {
@@ -344,11 +351,10 @@ def _remision_operador_pdf_ctx(rem):
     }
     if mostrar:
         ctx["items"] = [
-            {"descripcion": it.descripcion, "cantidad": _fmt_num(it.cantidad),
-             "valor_total": _fmt_cop(it.valor_total)}
-            for it in items
+            {"descripcion": t["referencia"] or t["op_numero"], "valor_total": t["valor_total"]}
+            for t in troqueles
         ]
-        ctx["total_valor"] = _fmt_cop(sum((it.valor_total or 0) for it in items))
+        ctx["total_valor"] = _fmt_cop(total_valor)
     return ctx
 
 
@@ -822,8 +828,10 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
-        # Las OP ya remisionadas (100% completadas) salen de los listados de producción.
-        if not self.request.query_params.get("incluir_remisionadas"):
+        # Las OP ya remisionadas (100% completadas) salen de los LISTADOS de producción,
+        # pero siguen accesibles por detalle (retrieve, troquel_costos, etc.) para que el
+        # Admin pueda editar precios aunque ya se haya generado la remisión.
+        if self.action == "list" and not self.request.query_params.get("incluir_remisionadas"):
             qs = qs.filter(remision__isnull=True)
         cliente_id = self.request.query_params.get("cliente")
         if cliente_id:
