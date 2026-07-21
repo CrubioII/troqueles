@@ -194,10 +194,15 @@ class DocumentoClienteListSerializer(serializers.ModelSerializer):
 OP_LOCKED_WHITELIST = {"abono", "observaciones", "fecha", "fecha_entrega", "referencia"}
 
 
+def _proceso_troquel(obj):
+    """Fila de proceso 'troquel' de la OP, o None. Usa la caché del prefetch."""
+    return next((p for p in obj.procesos.all() if p.proceso_id == "troquel"), None)
+
+
 class OpProcesoSerializer(serializers.ModelSerializer):
     class Meta:
         model = OpProceso
-        fields = ["id", "proceso_id", "active", "costo", "costo_override", "extras", "completado", "completado_en", "visible_operador"]
+        fields = ["id", "proceso_id", "active", "costo", "costo_override", "extras", "completado", "completado_en", "visible_operador", "prioridad"]
         read_only_fields = ["id", "completado", "completado_en"]
 
 
@@ -208,6 +213,7 @@ class OrdenListSerializer(serializers.ModelSerializer):
     saldo = serializers.SerializerMethodField()
     progreso = serializers.SerializerMethodField()
     visible_operador_troquel = serializers.SerializerMethodField()
+    prioridad_troquel = serializers.SerializerMethodField()
 
     class Meta:
         model = OrdenProduccion
@@ -215,12 +221,16 @@ class OrdenListSerializer(serializers.ModelSerializer):
             "id", "numero", "fecha", "fecha_entrega", "cliente_nombre", "referencia",
             "cantidad", "valor_total_efectivo", "abono", "saldo",
             "cotizacion", "cotizacion_numero", "creado", "modificado",
-            "progreso", "visible_operador_troquel",
+            "progreso", "visible_operador_troquel", "prioridad_troquel",
         ]
 
     def get_visible_operador_troquel(self, obj):
-        p = next((p for p in obj.procesos.all() if p.proceso_id == "troquel"), None)
+        p = _proceso_troquel(obj)
         return bool(p.visible_operador) if p else False
+
+    def get_prioridad_troquel(self, obj):
+        p = _proceso_troquel(obj)
+        return p.prioridad if p else None
 
     def get_valor_total_efectivo(self, obj):
         return _orden_valor_total_efectivo(obj)
@@ -474,10 +484,15 @@ class OrdenOperadorSerializer(serializers.ModelSerializer):
     troquel_modelo = serializers.SerializerMethodField()
     cliente_nombre = serializers.CharField(source="cliente.nombre", read_only=True, default="")
     remision_enviada = serializers.SerializerMethodField()
+    prioridad_troquel = serializers.SerializerMethodField()
 
     class Meta:
         model = OrdenProduccion
-        fields = ["id", "numero", "fecha_entrega", "cliente_nombre", "referencia", "cantidad", "procesos", "troquel_modelo", "remision_enviada"]
+        fields = ["id", "numero", "fecha_entrega", "cliente_nombre", "referencia", "cantidad", "procesos", "troquel_modelo", "remision_enviada", "prioridad_troquel"]
+
+    def get_prioridad_troquel(self, obj):
+        p = _proceso_troquel(obj)
+        return p.prioridad if p else None
 
     def get_procesos(self, obj):
         return [

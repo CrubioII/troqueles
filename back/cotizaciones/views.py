@@ -9,7 +9,7 @@ from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from django.core.mail import EmailMessage
 from django.db import connection, transaction
-from django.db.models import F, Max, ProtectedError, Q
+from django.db.models import F, Max, OuterRef, ProtectedError, Q, Subquery
 from django.http import HttpResponse
 from django.template.loader import render_to_string
 from django.conf import settings
@@ -968,9 +968,50 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
             proceso = op.procesos.get(proceso_id=proceso_id)
         except OpProceso.DoesNotExist:
             return Response({"error": "Proceso no encontrado en esta OP."}, status=404)
-        proceso.visible_operador = bool(request.data.get("visible_operador"))
-        proceso.save(update_fields=["visible_operador"])
+        visible = bool(request.data.get("visible_operador"))
+        proceso.visible_operador = visible
+        # La prioridad acompaña a la selección: al marcar entra al final de la cola,
+        # al desmarcar se libera para no dejar huecos numéricos al reordenar.
+        if visible:
+            if proceso.prioridad is None:
+                ultima = OpProceso.objects.filter(
+                    proceso_id=proceso_id, visible_operador=True
+                ).aggregate(m=Max("prioridad"))["m"]
+                proceso.prioridad = (ultima or 0) + 1
+        else:
+            proceso.prioridad = None
+        proceso.save(update_fields=["visible_operador", "prioridad"])
         return Response(OpProcesoSerializer(proceso).data)
+
+    @action(detail=False, methods=["post"], url_path=r"procesos/(?P<proceso_id>[^/.]+)/prioridades")
+    def set_proceso_prioridades(self, request, proceso_id=None):
+        """POST /api/ordenes/procesos/{proceso_id}/prioridades/ — Body: { orden_ids: [id, ...] }.
+
+        Reordena la cola del Operador: la posición en la lista es la prioridad
+        (1 = primero). Solo se numeran las OPs visibles que llegan en la lista.
+        """
+        orden_ids = request.data.get("orden_ids")
+        if not isinstance(orden_ids, list):
+            return Response({"error": "Se espera 'orden_ids' como lista."}, status=400)
+
+        procesos = {
+            p.orden_id: p
+            for p in OpProceso.objects.filter(proceso_id=proceso_id, orden_id__in=orden_ids)
+        }
+        faltantes = [i for i in orden_ids if i not in procesos]
+        if faltantes:
+            return Response(
+                {"error": f"OPs sin proceso '{proceso_id}': {faltantes}"}, status=400
+            )
+
+        with transaction.atomic():
+            actualizados = []
+            for pos, orden_id in enumerate(orden_ids, start=1):
+                proceso = procesos[orden_id]
+                proceso.prioridad = pos
+                actualizados.append(proceso)
+            OpProceso.objects.bulk_update(actualizados, ["prioridad"])
+        return Response({"ok": True, "total": len(actualizados)})
 
     @action(detail=True, methods=["get"], url_path="produccion")
     def produccion(self, request, pk=None):
@@ -1001,12 +1042,13 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
     def produccion_pendientes(self, request):
         """GET /api/ordenes/produccion_pendientes/?proceso=troquel — lista para el Operador.
 
-        OPs con un proceso activo pendiente (no completado), ordenadas por fecha de
-        entrega ascendente (las más próximas a vencer primero; sin fecha al final).
+        OPs con un proceso activo pendiente (no completado). Ordenadas por la
+        prioridad que el Admin le dio al proceso (1 = primero; sin prioridad al
+        final) y, a igualdad, por fecha de entrega ascendente.
         Vista sanitizada: sin valores monetarios (el cliente sí es visible).
         """
         proceso_id = (request.query_params.get("proceso") or "").strip()
-        qs = OrdenProduccion.objects.select_related("cliente")
+        qs = OrdenProduccion.objects.select_related("cliente").prefetch_related("procesos")
         if proceso_id:
             # Todas estas condiciones van en un solo filter() para que apliquen a
             # la MISMA fila de proceso (no a filas distintas de la misma OP).
@@ -1023,6 +1065,22 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
                 # OPs con formato esperando aprobación del Admin no están
                 # pendientes para el Operador (los devueltos sí reaparecen).
                 qs = qs.exclude(formatos_cuchillas__estado="pendiente")
+            # La prioridad del Admin manda sobre la fecha de entrega. Se anota con
+            # subconsulta: order_by sobre 'procesos__' abriría un segundo JOIN.
+            qs = qs.annotate(
+                prioridad_proceso=Subquery(
+                    OpProceso.objects.filter(
+                        orden=OuterRef("pk"), proceso_id=proceso_id
+                    ).values("prioridad")[:1]
+                )
+            ).order_by(
+                F("prioridad_proceso").asc(nulls_last=True),
+                F("fecha_entrega").asc(nulls_last=True),
+                "creado",
+            )
+            return Response(
+                OrdenOperadorSerializer(qs, many=True, context={"request": request}).data
+            )
         qs = qs.order_by(F("fecha_entrega").asc(nulls_last=True), "creado")
         data = OrdenOperadorSerializer(qs, many=True, context={"request": request}).data
         return Response(data)

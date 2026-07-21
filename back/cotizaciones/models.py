@@ -284,6 +284,9 @@ class OpProceso(models.Model):
     # El Admin marca qué OPs de este proceso aparecen en la pantalla del Operador.
     # Oculto por defecto: nada llega al Operador hasta que el Admin lo marca.
     visible_operador = models.BooleanField(default=False)
+    # Orden de trabajo que el Admin le da a los procesos visibles: 1 = primero.
+    # null = sin prioridad asignada; el Operador las ve al final, por fecha de entrega.
+    prioridad = models.PositiveIntegerField(null=True, blank=True)
 
     class Meta:
         unique_together = ("orden", "proceso_id")

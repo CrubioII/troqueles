@@ -298,6 +298,14 @@ export const toggleProcesoVisibleOperador = (opId, procesoId, visible) =>
     body: JSON.stringify({ visible_operador: visible }),
   }).then(json)
 
+// Reordena la cola del Operador: la posición en orden_ids es la prioridad (1 = primero)
+export const setProcesoPrioridades = (procesoId, ordenIds) =>
+  apiFetch(`${BASE}/ordenes/procesos/${procesoId}/prioridades/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ orden_ids: ordenIds }),
+  }).then(json)
+
 // ─────────────── Remisiones ───────────────
 
 export const getRemisiones = (params = '') =>
