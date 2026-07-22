@@ -822,7 +822,7 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
-        if self.action in ("toggle_proceso_completado", "list", "retrieve", "produccion", "buscar", "produccion_pendientes", "enviar_remision", "remision_pdf", "remisionables_operador", "consolidar_remision_operador", "remision_operador_pdf"):
+        if self.action in ("toggle_proceso_completado", "list", "retrieve", "produccion", "buscar", "produccion_pendientes", "enviar_remision", "remision_pdf", "cancelar_remision", "remisionables_operador", "consolidar_remision_operador", "remision_operador_pdf"):
             return
         _require_admin(request)
 
@@ -1205,6 +1205,27 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         response = HttpResponse(pdf_bytes, content_type="application/pdf")
         response["Content-Disposition"] = f'attachment; filename="Remision_{rem.numero}.pdf"'
         return response
+
+    @action(detail=True, methods=["post"], url_path="cancelar_remision")
+    def cancelar_remision(self, request, pk=None):
+        """POST /api/ordenes/{id}/cancelar_remision/ — Operador o Admin.
+
+        Elimina la remisión pendiente de la OP (si existe) para sacarla de la
+        cola y poder generarla de nuevo más adelante. Bloqueado si ya fue
+        enviada, liquidada o consolidada (estado != pendiente).
+        """
+        op = OrdenProduccion.objects.filter(pk=pk).first()
+        if op is None:
+            return Response({"error": "OP no encontrada."}, status=404)
+        rem = Remision.objects.filter(orden=op).first()
+        if rem is None:
+            return Response({"ok": True})
+        if rem.estado != "pendiente":
+            return Response({
+                "error": f"La remisión {rem.numero} ya fue enviada o consolidada.",
+            }, status=409)
+        rem.delete()  # cascada: borra también sus RemisionItem
+        return Response({"ok": True})
 
     @action(detail=False, methods=["get"], url_path="remisionables_operador")
     def remisionables_operador(self, request):

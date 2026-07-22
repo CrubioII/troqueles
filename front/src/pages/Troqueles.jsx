@@ -13,6 +13,7 @@ import {
   getOrdenProduccion, getTroquelModelo, toggleProcesoVisibleOperador,
   updateFormatoCuchillas, getFormatosPendientes, cancelarEnvioFormato,
   getRemisionablesOperador, consolidarRemisionOperador, pdfRemisionOperadorConsolidada,
+  cancelarRemisionOperador,
   getRemisionesSolicitadas, setProcesoPrioridades,
 } from '../api'
 import { useSyncPolling } from '../lib/useSyncPolling'
@@ -441,6 +442,7 @@ function OperadorTroqueles() {
   const [selCliente, setSelCliente] = useState(null) // cliente_id de la selección
   const [genBusy, setGenBusy] = useState(false)
   const [genError, setGenError] = useState(null)
+  const [cancelRemBusy, setCancelRemBusy] = useState(null) // id de OP cuya remisión se está cancelando
 
   const loadLista = (silent = false) => {
     if (!silent) setLoadingLista(true)
@@ -533,6 +535,21 @@ function OperadorTroqueles() {
       setGenError(e.message || 'No se pudo generar la remisión')
     } finally {
       setGenBusy(false)
+    }
+  }
+
+  const cancelarRemision = async (op) => {
+    if (!window.confirm(`¿Eliminar la remisión ${op.remision_numero} de ${op.numero}? Se puede volver a generar más adelante.`)) return
+    setCancelRemBusy(op.id)
+    setGenError(null)
+    try {
+      await cancelarRemisionOperador(op.id)
+      setSelRem(prev => prev.filter(id => id !== op.id))
+      loadRemisionables()
+    } catch (e) {
+      setGenError(e?.message || 'No se pudo cancelar la remisión')
+    } finally {
+      setCancelRemBusy(null)
     }
   }
 
@@ -718,7 +735,7 @@ function OperadorTroqueles() {
                     <div style={{ padding: '8px 16px', background: 'var(--surface-2)', borderBottom: '1px solid var(--line)', fontWeight: 700, fontSize: 13 }}>
                       {g.cliente_nombre || '—'}
                     </div>
-                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
                       <tbody>
                         {g.ops.map((op, idx) => {
                           const checked = selRem.includes(op.id)
@@ -729,10 +746,23 @@ function OperadorTroqueles() {
                               <td style={{ padding: '10px 12px', width: 36 }}>
                                 <input type="checkbox" checked={checked} onChange={() => toggleRem(op)} onClick={e => e.stopPropagation()} />
                               </td>
-                              <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 13 }}>{op.numero}</td>
-                              <td style={{ padding: '10px 12px', color: 'var(--ink-2)' }}>{op.referencia}</td>
-                              <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', color: 'var(--ink-2)' }}>{op.cantidad}</td>
-                              <td style={{ padding: '10px 12px', fontSize: 12, color: 'var(--ink-3)' }}>{op.remision_numero || 'nueva'}</td>
+                              <td style={{ padding: '10px 12px', width: 90, fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 13 }}>{op.numero}</td>
+                              <td style={{ padding: '10px 12px', color: 'var(--ink-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{op.referencia}</td>
+                              <td style={{ padding: '10px 12px', width: 70, fontFamily: 'JetBrains Mono, monospace', color: 'var(--ink-2)' }}>{op.cantidad}</td>
+                              <td style={{ padding: '10px 12px', width: 110, fontSize: 12, color: 'var(--ink-3)' }}>{op.remision_numero || 'nueva'}</td>
+                              <td style={{ padding: '10px 12px', width: 40, textAlign: 'center' }}>
+                                {op.remision_numero && (
+                                  <button
+                                    className="btn"
+                                    style={{ padding: '4px 6px', color: 'var(--danger)', borderColor: 'transparent' }}
+                                    title="Eliminar remisión pendiente"
+                                    disabled={cancelRemBusy === op.id}
+                                    onClick={e => { e.stopPropagation(); cancelarRemision(op) }}
+                                  >
+                                    <Icon.Trash />
+                                  </button>
+                                )}
+                              </td>
                             </tr>
                           )
                         })}

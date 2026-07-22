@@ -390,6 +390,10 @@ export const getRemisionesSolicitadas = () =>
 export const getRemisionablesOperador = () =>
   apiFetch(`${BASE}/ordenes/remisionables_operador/`).then(json)
 
+// Elimina la remisión pendiente de una OP para sacarla de la cola del Operador.
+export const cancelarRemisionOperador = (opId) =>
+  apiFetch(`${BASE}/ordenes/${opId}/cancelar_remision/`, { method: 'POST' }).then(jsonConCodigo)
+
 // Crea/consolida una remisión del Operador a partir de varias OP del mismo cliente.
 // Devuelve { remision_id, remision_numero }.
 export const consolidarRemisionOperador = (ordenIds) =>
