@@ -4,7 +4,6 @@ import { useAuth } from '../context/AuthContext'
 import { ProgressBar } from '../components/core'
 import { Icon } from '../components/Icons'
 import {
-  TroquelCostos, ModeloTroquelGestion,
   FormatosCuchillasHistory, FormatoCuchillasForm, ModeloViewer,
   NuevaTareaTroquelModal,
 } from '../components/Troquel'
@@ -62,11 +61,6 @@ function AdminTroqueles() {
   const navigate = useNavigate()
   const [ordenes, setOrdenes] = useState([])
   const [loading, setLoading] = useState(true)
-  const [sel, setSel] = useState(null)         // OP seleccionada para gestionar troquel
-  const [formatos, setFormatos] = useState([])
-  const [loadingFormatos, setLoadingFormatos] = useState(false)
-  const [costRefresh, setCostRefresh] = useState(0)
-  const [editFormato, setEditFormato] = useState(null)   // formato en edición (Admin)
   const [showNueva, setShowNueva] = useState(false)      // modal Nueva tarea de troquel
   const [pendientes, setPendientes] = useState([])       // formatos esperando aprobación (contador)
   const [solicitudes, setSolicitudes] = useState([])     // envíos de remisión bloqueados por falta de precios
@@ -110,27 +104,13 @@ function AdminTroqueles() {
     return ordenes.filter(o => [o.numero, o.cliente_nombre, o.referencia].some(v => norm(v).includes(t)))
   }, [ordenes, busqueda])
 
-  const loadFormatos = (ordenId) => {
-    setLoadingFormatos(true)
-    getFormatosCuchillas(ordenId)
-      .then(d => setFormatos(asList(d)))
-      .catch(() => setFormatos([]))
-      .finally(() => setLoadingFormatos(false))
-  }
-
-  const selectOrden = (ord) => {
-    setSel(ord)
-    setEditFormato(null)
-    loadFormatos(ord.id)
-    setCostRefresh(k => k + 1)
-  }
+  const abrirGestion = (ord) => navigate(`/produccion/troqueles/${ord.id}`)
 
   const handleDelete = (e, ord) => {
     e.stopPropagation()
     if (confirmDelete === ord.id) {
       setOrdenes(prev => prev.filter(o => o.id !== ord.id))
       setConfirmDelete(null)
-      if (sel?.id === ord.id) setSel(null)
       deleteOrden(ord.id).catch(() => {
         setOrdenes(prev => [ord, ...prev].sort(byEntrega))
       })
@@ -190,10 +170,10 @@ function AdminTroqueles() {
     reordenar(cola)
   }
 
-  // Abre la sección de costos de la OP solicitada (o la cola de revisión si no está en la lista)
+  // Abre la gestión de la OP solicitada (o la cola de revisión si no está en la lista)
   const irAPrecios = (s) => {
     const row = ordenes.find(o => o.id === s.id)
-    if (row) selectOrden(row)
+    if (row) abrirGestion(row)
     else navigate('/produccion/troqueles/revision')
   }
 
@@ -260,8 +240,8 @@ function AdminTroqueles() {
                 const ent = fmtEntrega(ord.fecha_entrega)
                 return (
                   <tr key={ord.id}
-                    style={{ borderBottom: '1px solid var(--line)', background: sel?.id === ord.id ? 'var(--accent-soft, #fdf0e6)' : (idx % 2 ? 'var(--surface-2)' : 'var(--surface)'), cursor: 'pointer' }}
-                    onClick={() => selectOrden(ord)}>
+                    style={{ borderBottom: '1px solid var(--line)', background: idx % 2 ? 'var(--surface-2)' : 'var(--surface)', cursor: 'pointer' }}
+                    onClick={() => abrirGestion(ord)}>
                     <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 13, color: 'var(--ink-3)', width: 40 }}>{idx + 1}</td>
                     <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 12 }}>{ord.numero}</td>
                     <td style={{ padding: '10px 12px', fontSize: 12, fontWeight: 600, color: ent.color }}>{ent.txt}</td>
@@ -322,8 +302,8 @@ function AdminTroqueles() {
             <tbody>
               {ordenesFiltradas.map((ord, idx) => (
                 <tr key={ord.id}
-                  style={{ borderBottom: '1px solid var(--line)', background: sel?.id === ord.id ? 'var(--accent-soft, #fdf0e6)' : (idx % 2 ? 'var(--surface-2)' : 'var(--surface)'), cursor: 'pointer' }}
-                  onClick={() => selectOrden(ord)}>
+                  style={{ borderBottom: '1px solid var(--line)', background: idx % 2 ? 'var(--surface-2)' : 'var(--surface)', cursor: 'pointer' }}
+                  onClick={() => abrirGestion(ord)}>
                   <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 12 }}>{ord.numero}</td>
                   <td style={{ padding: '10px 12px', fontSize: 12, fontWeight: 600, color: fmtEntrega(ord.fecha_entrega).color }}>{fmtEntrega(ord.fecha_entrega).txt}</td>
                   <td style={{ padding: '10px 12px', fontWeight: 600 }}>{ord.cliente_nombre}</td>
@@ -364,51 +344,12 @@ function AdminTroqueles() {
         )}
       </Section>
 
-      {sel && (
-        <>
-          <div style={{ marginTop: 20, fontSize: 13, fontWeight: 700, color: 'var(--ink-2)' }}>
-            Gestión de troquel · <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{sel.numero}</span> — {sel.referencia}
-          </div>
-
-          <Section title="Modelo del troquel">
-            <ModeloTroquelGestion
-              ordenId={sel.id}
-              orden={sel}
-              onSaved={() => setCostRefresh(k => k + 1)}
-              onOrdenSaved={() => loadOrdenes().then(list => {
-                const row = list.find(o => o.id === sel.id)
-                if (row) setSel(row)
-              })}
-            />
-          </Section>
-
-          <Section title="Costos (del formato de cuchillas)">
-            <TroquelCostos ordenId={sel.id} refreshKey={costRefresh} />
-          </Section>
-
-          <Section title="Auditoría — Formato de cuchillas registrado">
-            {editFormato ? (
-              <FormatoCuchillasForm
-                formato={editFormato}
-                onUpdated={() => { setEditFormato(null); loadFormatos(sel.id); setCostRefresh(k => k + 1) }}
-                onCancel={() => setEditFormato(null)}
-              />
-            ) : (
-              <FormatosCuchillasHistory formatos={formatos} loading={loadingFormatos} onEdit={setEditFormato} />
-            )}
-          </Section>
-        </>
-      )}
-
       {showNueva && (
         <NuevaTareaTroquelModal
           onClose={() => setShowNueva(false)}
           onCreated={(orden) => {
             setShowNueva(false)
-            loadOrdenes().then(list => {
-              const row = list.find(o => o.id === orden.id)
-              if (row) selectOrden(row)
-            })
+            abrirGestion(orden)
           }}
         />
       )}
