@@ -367,6 +367,15 @@ export const createRegistroMaquina = (data) =>
 export const getOrdenProduccion = (id) =>
   apiFetch(`${BASE}/ordenes/${id}/produccion/?incluir_remisionadas=1`).then(json)
 
+// El Operador (o Admin) edita referencia / fecha_entrega / cliente de la OP.
+// Cada cambio queda auditado server-side (quién / cuándo / antes → después).
+export const editarCamposOrden = (id, data) =>
+  apiFetch(`${BASE}/ordenes/${id}/editar-campos/`, { method: 'PATCH', body: JSON.stringify(data) }).then(json)
+
+// Historial de auditoría de la OP (Admin).
+export const getOrdenCambios = (id) =>
+  apiFetch(`${BASE}/ordenes/${id}/cambios/`).then(json)
+
 // El Operador (o Admin) envía la remisión de la OP al cliente + contaduría.
 // email opcional: reemplaza el correo registrado del cliente.
 export const enviarRemisionOperador = (opId, email = '') =>

@@ -14,6 +14,7 @@ from django.http import HttpResponse
 from django.template.loader import render_to_string
 from django.conf import settings
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from weasyprint import HTML as WeasyprintHTML
 
 
@@ -60,6 +61,7 @@ from .models import (
     RegistroMaquina, TroquelModelo, FormatoCuchillas,
     Remision, RemisionItem,
 )
+from .models import ORDEN_CAMPOS_AUDITADOS, orden_valor_legible, registrar_cambios_orden
 from .serializers import (
     ClienteSerializer,
     PapelSerializer,
@@ -74,6 +76,7 @@ from .serializers import (
     TroquelModeloSerializer,
     FormatoCuchillasSerializer,
     OrdenOperadorSerializer,
+    OrdenCambioSerializer,
     RemisionableOperadorSerializer,
     RemisionSerializer,
     RemisionListSerializer,
@@ -822,7 +825,7 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
-        if self.action in ("toggle_proceso_completado", "list", "retrieve", "produccion", "buscar", "produccion_pendientes", "enviar_remision", "remision_pdf", "cancelar_remision", "remisionables_operador", "consolidar_remision_operador", "remision_operador_pdf"):
+        if self.action in ("toggle_proceso_completado", "list", "retrieve", "produccion", "buscar", "produccion_pendientes", "enviar_remision", "remision_pdf", "cancelar_remision", "remisionables_operador", "consolidar_remision_operador", "remision_operador_pdf", "editar_campos"):
             return
         _require_admin(request)
 
@@ -1021,6 +1024,66 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         """
         op = self.get_object()
         return Response(OrdenOperadorSerializer(op, context={"request": request}).data)
+
+    @action(detail=True, methods=["patch"], url_path="editar-campos")
+    def editar_campos(self, request, pk=None):
+        """PATCH /api/ordenes/{id}/editar-campos/ — Operador (o Admin) edita referencia,
+        fecha_entrega y cliente de la OP. Cada cambio queda auditado en OrdenCambio.
+
+        En OPs derivadas de una cotización el cliente queda bloqueado (coherente con
+        OP_LOCKED_WHITELIST); referencia y fecha_entrega siguen editables.
+        """
+        op = self.get_object()
+        data = request.data or {}
+
+        # Campos permitidos según origen de la OP.
+        campos_permitidos = ["referencia", "fecha_entrega"]
+        if op.cotizacion_id is None:
+            campos_permitidos.append("cliente")
+
+        errores = {}
+        pendientes = {}  # campo -> valor validado a asignar
+        if "referencia" in data:
+            pendientes["referencia"] = str(data.get("referencia") or "").strip()
+        if "fecha_entrega" in data:
+            fe = data.get("fecha_entrega")
+            if fe in (None, ""):
+                pendientes["fecha_entrega"] = None
+            else:
+                parsed = parse_date(str(fe))
+                if parsed is None:
+                    errores["fecha_entrega"] = "Fecha inválida (use AAAA-MM-DD)."
+                else:
+                    pendientes["fecha_entrega"] = parsed
+        if "cliente" in data and "cliente" in campos_permitidos:
+            cliente_id = data.get("cliente")
+            cliente = Cliente.objects.filter(pk=cliente_id).first() if cliente_id else None
+            if cliente is None:
+                errores["cliente"] = "Cliente no encontrado."
+            else:
+                pendientes["cliente"] = cliente
+
+        if errores:
+            return Response(errores, status=400)
+
+        # Auditoría: valores previos de los campos que realmente se van a tocar.
+        previos = {
+            campo: orden_valor_legible(op, campo)
+            for campo in ORDEN_CAMPOS_AUDITADOS if campo in pendientes
+        }
+        for campo, valor in pendientes.items():
+            setattr(op, campo, valor)
+        op.save()
+        if previos:
+            registrar_cambios_orden(op, previos, request.user)
+        return Response(OrdenOperadorSerializer(op, context={"request": request}).data)
+
+    @action(detail=True, methods=["get"], url_path="cambios")
+    def cambios(self, request, pk=None):
+        """GET /api/ordenes/{id}/cambios/ — historial de auditoría de la OP (Admin)."""
+        op = self.get_object()
+        qs = op.cambios.select_related("usuario").all()
+        return Response(OrdenCambioSerializer(qs, many=True).data)
 
     @action(detail=False, methods=["get"], url_path="buscar")
     def buscar(self, request):

@@ -270,6 +270,55 @@ class OrdenProduccion(models.Model):
         return f"{self.numero} · {self.cliente}"
 
 
+# Campos de la OP cuyas ediciones se auditan (referencia/entrega/cliente).
+ORDEN_CAMPOS_AUDITADOS = ("referencia", "fecha_entrega", "cliente")
+
+
+class OrdenCambio(models.Model):
+    """Auditoría de ediciones de campos clave de una OP (quién/cuándo/antes/después)."""
+
+    orden = models.ForeignKey(OrdenProduccion, on_delete=models.CASCADE, related_name="cambios")
+    campo = models.CharField(max_length=50)  # 'referencia' | 'fecha_entrega' | 'cliente'
+    valor_anterior = models.CharField(max_length=300, blank=True, default="")
+    valor_nuevo = models.CharField(max_length=300, blank=True, default="")
+    usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="cambios_orden",
+    )
+    fecha_hora = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-fecha_hora", "-id"]
+
+    def __str__(self):
+        return f"{self.orden.numero} · {self.campo}"
+
+
+def orden_valor_legible(orden, campo):
+    """Valor de `campo` en `orden` como texto legible para la auditoría."""
+    if campo == "cliente":
+        return orden.cliente.nombre if orden.cliente_id else ""
+    valor = getattr(orden, campo)
+    return "" if valor is None else str(valor)
+
+
+def registrar_cambios_orden(orden, previos, user):
+    """Diffea los valores previos contra el estado actual de `orden` y crea filas OrdenCambio.
+
+    previos = {campo: valor_legible_anterior}. Solo registra los campos que cambiaron.
+    """
+    for campo, anterior in previos.items():
+        nuevo = orden_valor_legible(orden, campo)
+        if str(anterior or "") != str(nuevo or ""):
+            OrdenCambio.objects.create(
+                orden=orden,
+                campo=campo,
+                valor_anterior=str(anterior or ""),
+                valor_nuevo=str(nuevo or ""),
+                usuario=user if getattr(user, "is_authenticated", False) else None,
+            )
+
+
 class OpProceso(models.Model):
     """Un proceso de producción activado o no en una OP. Espeja CotizacionProceso."""
 

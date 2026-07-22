@@ -14,6 +14,7 @@ import {
   getRemisionablesOperador, consolidarRemisionOperador, pdfRemisionOperadorConsolidada,
   cancelarRemisionOperador,
   getRemisionesSolicitadas, setProcesoPrioridades,
+  getClientes, editarCamposOrden,
 } from '../api'
 import { useSyncPolling } from '../lib/useSyncPolling'
 
@@ -358,6 +359,116 @@ function AdminTroqueles() {
 }
 
 // ─────────────── Vista Operador ───────────────
+
+// El Operador puede corregir referencia / fecha de entrega / cliente de la OP.
+// Cada cambio queda auditado server-side (quién / cuándo). El cliente se bloquea
+// cuando la OP proviene de una cotización (coherente con el backend).
+function OperadorOpDatos({ orden, onSaved }) {
+  const locked = !!orden.desde_cotizacion
+  const [referencia, setReferencia] = useState(orden.referencia || '')
+  const [fechaEntrega, setFechaEntrega] = useState(orden.fecha_entrega || '')
+  const [clienteId, setClienteId] = useState(orden.cliente || null)
+  const [clienteNombre, setClienteNombre] = useState(orden.cliente_nombre || '')
+  const [suggestions, setSuggestions] = useState([])
+  const [showSugg, setShowSugg] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
+  const [ok, setOk] = useState(false)
+
+  useEffect(() => {
+    setReferencia(orden.referencia || '')
+    setFechaEntrega(orden.fecha_entrega || '')
+    setClienteId(orden.cliente || null)
+    setClienteNombre(orden.cliente_nombre || '')
+    setSuggestions([]); setShowSugg(false); setError(null); setOk(false)
+  }, [orden.id])
+
+  const dirty =
+    referencia !== (orden.referencia || '') ||
+    fechaEntrega !== (orden.fecha_entrega || '') ||
+    clienteId !== (orden.cliente || null)
+
+  const buscarClientes = (q) => {
+    setClienteNombre(q)
+    setClienteId(null)   // sin sugerencia elegida no hay cliente válido
+    setOk(false)
+    if (!q || q.trim().length < 2) { setSuggestions([]); setShowSugg(false); return }
+    getClientes(q)
+      .then(d => { const l = asList(d); setSuggestions(l); setShowSugg(l.length > 0) })
+      .catch(() => { setSuggestions([]); setShowSugg(false) })
+  }
+
+  const elegirCliente = (c) => { setClienteId(c.id); setClienteNombre(c.nombre); setShowSugg(false) }
+
+  const guardar = () => {
+    setError(null); setOk(false)
+    const payload = { referencia: referencia.trim(), fecha_entrega: fechaEntrega || null }
+    if (!locked) {
+      if (!clienteId) { setError('Selecciona un cliente de la lista.'); return }
+      payload.cliente = clienteId
+    }
+    setSaving(true)
+    editarCamposOrden(orden.id, payload)
+      .then(full => { setOk(true); onSaved && onSaved(full) })
+      .catch(e => setError(e?.message || 'No se pudieron guardar los cambios'))
+      .finally(() => setSaving(false))
+  }
+
+  const lbl = { fontSize: 11, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }
+  return (
+    <div style={{ marginTop: 16 }} className="section">
+      <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)', fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 12 }}>
+        <span><span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{orden.numero}</span> — Datos de la OP</span>
+        <span style={{ marginLeft: 'auto', fontWeight: 400, color: 'var(--ink-3)' }}>Cantidad: {orden.cantidad}</span>
+      </div>
+      <div style={{ padding: 16, display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-end' }}>
+        <div style={{ flex: '1 1 220px', minWidth: 200 }}>
+          <div style={lbl}>Cliente{locked && ' (bloqueado — OP de cotización)'}</div>
+          <div style={{ position: 'relative' }}>
+            <input
+              className="input"
+              style={{ width: '100%' }}
+              placeholder="Buscar cliente…"
+              value={clienteNombre}
+              disabled={locked}
+              onChange={e => buscarClientes(e.target.value)}
+              onBlur={() => setTimeout(() => setShowSugg(false), 150)}
+              onFocus={() => suggestions.length > 0 && setShowSugg(true)}
+            />
+            {showSugg && (
+              <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 200, background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 6, boxShadow: '0 4px 16px rgba(0,0,0,0.12)', marginTop: 2 }}>
+                {suggestions.map(c => (
+                  <div
+                    key={c.id}
+                    onMouseDown={() => elegirCliente(c)}
+                    style={{ padding: '9px 12px', cursor: 'pointer', fontSize: 13 }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                  >{c.nombre}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        <div style={{ flex: '1 1 220px', minWidth: 200 }}>
+          <div style={lbl}>Referencia</div>
+          <input className="input" style={{ width: '100%' }} value={referencia} onChange={e => { setReferencia(e.target.value); setOk(false) }} />
+        </div>
+        <div style={{ flex: '0 0 auto' }}>
+          <div style={lbl}>Fecha de entrega</div>
+          <input className="input" type="date" value={fechaEntrega || ''} onChange={e => { setFechaEntrega(e.target.value); setOk(false) }} />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <button className="btn sm primary" disabled={!dirty || saving} onClick={guardar}>
+            {saving ? 'Guardando…' : 'Guardar cambios'}
+          </button>
+          {ok && <span style={{ fontSize: 12, color: 'var(--ok, #2e8b57)' }}>✓ Guardado</span>}
+          {error && <span style={{ fontSize: 12, color: 'var(--danger, #c0392b)' }}>{error}</span>}
+        </div>
+      </div>
+    </div>
+  )
+}
 
 function OperadorTroqueles() {
   const { user } = useAuth()
@@ -724,13 +835,7 @@ function OperadorTroqueles() {
       <button className="btn" style={{ marginBottom: 4 }} onClick={volver}><Icon.ArrowLeft /> Volver a la lista</button>
       {orden && (
         <>
-          <div style={{ marginTop: 16, fontSize: 13, fontWeight: 700, color: 'var(--ink-2)', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-            <span>
-              <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{orden.numero}</span> — {orden.referencia}
-              {orden.cliente_nombre && <span style={{ marginLeft: 12 }}>Cliente: {orden.cliente_nombre}</span>}
-              <span style={{ marginLeft: 12, fontWeight: 400, color: 'var(--ink-3)' }}>Cantidad: {orden.cantidad}</span>
-            </span>
-          </div>
+          <OperadorOpDatos orden={orden} onSaved={setOrden} />
 
           <Section title="Modelo del troquel">
             <ModeloViewer modelo={orden.troquel_modelo} />

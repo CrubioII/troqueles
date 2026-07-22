@@ -4,9 +4,9 @@ import { Icon } from '../components/Icons'
 import { ProgressBar } from '../components/core'
 import {
   ModeloTroquelGestion, TroquelCostos,
-  FormatosCuchillasHistory, FormatoCuchillasForm,
+  FormatosCuchillasHistory, FormatoCuchillasForm, OrdenCambiosHistory,
 } from '../components/Troquel'
-import { getOrden, getFormatosCuchillas } from '../api'
+import { getOrden, getFormatosCuchillas, getOrdenCambios } from '../api'
 
 const asList = (data) => (Array.isArray(data) ? data : (data?.results || []))
 
@@ -47,6 +47,8 @@ export default function TroquelGestion() {
   const [loadingFormatos, setLoadingFormatos] = useState(false)
   const [costRefresh, setCostRefresh] = useState(0)
   const [editFormato, setEditFormato] = useState(null)   // formato en edición (Admin)
+  const [cambios, setCambios] = useState([])
+  const [loadingCambios, setLoadingCambios] = useState(false)
 
   const loadOrden = () =>
     getOrden(id)
@@ -62,10 +64,19 @@ export default function TroquelGestion() {
       .finally(() => setLoadingFormatos(false))
   }
 
+  const loadCambios = () => {
+    setLoadingCambios(true)
+    getOrdenCambios(id)
+      .then(d => setCambios(asList(d)))
+      .catch(() => setCambios([]))
+      .finally(() => setLoadingCambios(false))
+  }
+
   useEffect(() => {
     setLoading(true)
     loadOrden()
     loadFormatos()
+    loadCambios()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
@@ -156,6 +167,10 @@ export default function TroquelGestion() {
               ) : (
                 <FormatosCuchillasHistory formatos={formatos} loading={loadingFormatos} onEdit={setEditFormato} />
               )}
+            </Section>
+
+            <Section title="Historial de cambios (referencia, entrega, cliente)">
+              <OrdenCambiosHistory cambios={cambios} loading={loadingCambios} />
             </Section>
           </>
         )}

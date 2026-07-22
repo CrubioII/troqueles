@@ -686,6 +686,38 @@ export function FormatosCuchillasHistory({ formatos, loading, onEdit, showOrden 
   )
 }
 
+// ────────── Historial de cambios de la OP (referencia / entrega / cliente) ──────────
+
+export function OrdenCambiosHistory({ cambios, loading }) {
+  if (loading) return <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Cargando…</div>
+  if (!cambios || !cambios.length) return <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Sin cambios registrados.</div>
+  const headers = ['Fecha / Hora', 'Usuario', 'Campo', 'Antes', 'Después']
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead>
+          <tr style={{ borderBottom: '2px solid var(--line)' }}>
+            {headers.map((h, i) => (
+              <th key={i} style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--ink-3)', background: 'var(--surface-2)', whiteSpace: 'nowrap' }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {cambios.map((c, idx) => (
+            <tr key={c.id} style={{ borderBottom: '1px solid var(--line)', background: idx % 2 ? 'var(--surface-2)' : 'var(--surface)' }}>
+              <td style={{ padding: '8px 12px', fontFamily: 'JetBrains Mono, monospace', fontSize: 11, whiteSpace: 'nowrap' }}>{fmtFecha(c.fecha_hora)}</td>
+              <td style={{ padding: '8px 12px', fontWeight: 600 }}>{c.usuario_username || '—'}</td>
+              <td style={{ padding: '8px 12px', fontWeight: 600, fontSize: 12 }}>{c.campo_label || c.campo}</td>
+              <td style={{ padding: '8px 12px', fontSize: 12, color: 'var(--ink-3)' }}>{c.valor_anterior || '—'}</td>
+              <td style={{ padding: '8px 12px', fontSize: 12, fontWeight: 600 }}>{c.valor_nuevo || '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 // ────────── Costos de troquel (Admin) ──────────
 
 export function TroquelCostos({ ordenId, refreshKey, onDirtyChange }) {

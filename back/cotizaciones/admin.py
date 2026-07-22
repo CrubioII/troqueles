@@ -1,7 +1,7 @@
 from django.contrib import admin
 from .models import (
     Cliente, Papel, Cotizacion, CotizacionProceso, OrdenProduccion, OpProceso,
-    TroquelModelo, FormatoCuchillas, Remision, RemisionItem,
+    OrdenCambio, TroquelModelo, FormatoCuchillas, Remision, RemisionItem,
 )
 
 
@@ -62,6 +62,17 @@ class OrdenProduccionAdmin(admin.ModelAdmin):
         ("Condiciones", {"fields": ["condicion_pago", "condicion_custom", "tipo_facturacion", "observaciones"]}),
         ("Auditoría", {"fields": ["creado", "modificado"], "classes": ["collapse"]}),
     ]
+
+
+@admin.register(OrdenCambio)
+class OrdenCambioAdmin(admin.ModelAdmin):
+    list_display = ["orden", "campo", "valor_anterior", "valor_nuevo", "usuario", "fecha_hora"]
+    list_filter = ["campo"]
+    search_fields = ["orden__numero", "usuario__username"]
+    readonly_fields = ["orden", "campo", "valor_anterior", "valor_nuevo", "usuario", "fecha_hora"]
+
+    def has_add_permission(self, request):
+        return False
 
 
 @admin.register(TroquelModelo)

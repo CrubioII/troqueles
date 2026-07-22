@@ -1,7 +1,8 @@
 import unicodedata
 
 from rest_framework import serializers
-from .models import Cliente, Papel, Cotizacion, CotizacionProceso, DocumentoCliente, DocumentoClienteItem, OrdenProduccion, OpProceso, RegistroMaquina, TroquelModelo, FormatoCuchillas, Remision, RemisionItem
+from .models import Cliente, Papel, Cotizacion, CotizacionProceso, DocumentoCliente, DocumentoClienteItem, OrdenProduccion, OpProceso, OrdenCambio, RegistroMaquina, TroquelModelo, FormatoCuchillas, Remision, RemisionItem
+from .models import ORDEN_CAMPOS_AUDITADOS, orden_valor_legible, registrar_cambios_orden
 
 
 class ClienteSerializer(serializers.ModelSerializer):
@@ -357,9 +358,17 @@ class OrdenSerializer(serializers.ModelSerializer):
             # OP desde COT: solo liquidación editable
             validated_data = {k: v for k, v in validated_data.items() if k in OP_LOCKED_WHITELIST}
             procesos_data = None
+        # Auditoría: valores previos de los campos auditados que se van a tocar.
+        previos = {
+            campo: orden_valor_legible(instance, campo)
+            for campo in ORDEN_CAMPOS_AUDITADOS if campo in validated_data
+        }
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
+        if previos:
+            request = self.context.get("request")
+            registrar_cambios_orden(instance, previos, request.user if request else None)
         if procesos_data is not None:
             old_state = {p.proceso_id: (p.completado, p.completado_en) for p in instance.procesos.all()}
             instance.procesos.all().delete()
@@ -485,10 +494,14 @@ class OrdenOperadorSerializer(serializers.ModelSerializer):
     cliente_nombre = serializers.CharField(source="cliente.nombre", read_only=True, default="")
     remision_enviada = serializers.SerializerMethodField()
     prioridad_troquel = serializers.SerializerMethodField()
+    desde_cotizacion = serializers.SerializerMethodField()
 
     class Meta:
         model = OrdenProduccion
-        fields = ["id", "numero", "fecha_entrega", "cliente_nombre", "referencia", "cantidad", "procesos", "troquel_modelo", "remision_enviada", "prioridad_troquel"]
+        fields = ["id", "numero", "fecha_entrega", "cliente", "cliente_nombre", "referencia", "cantidad", "procesos", "troquel_modelo", "remision_enviada", "prioridad_troquel", "desde_cotizacion"]
+
+    def get_desde_cotizacion(self, obj):
+        return obj.cotizacion_id is not None
 
     def get_prioridad_troquel(self, obj):
         p = _proceso_troquel(obj)
@@ -509,6 +522,22 @@ class OrdenOperadorSerializer(serializers.ModelSerializer):
         if modelo is None:
             return None
         return TroquelModeloOperadorSerializer(modelo, context=self.context).data
+
+
+class OrdenCambioSerializer(serializers.ModelSerializer):
+    """Auditoría de un cambio de campo de una OP (para mostrar quién/cuándo/antes/después)."""
+
+    CAMPO_LABELS = {"referencia": "Referencia", "fecha_entrega": "Fecha de entrega", "cliente": "Cliente"}
+
+    campo_label = serializers.SerializerMethodField()
+    usuario_username = serializers.CharField(source="usuario.username", read_only=True, default="")
+
+    class Meta:
+        model = OrdenCambio
+        fields = ["id", "fecha_hora", "campo", "campo_label", "valor_anterior", "valor_nuevo", "usuario_username"]
+
+    def get_campo_label(self, obj):
+        return self.CAMPO_LABELS.get(obj.campo, obj.campo)
 
 
 class RemisionableOperadorSerializer(serializers.ModelSerializer):
