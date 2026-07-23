@@ -416,7 +416,7 @@ function OperadorOpDatos({ orden, onSaved }) {
 
   const lbl = { fontSize: 11, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }
   return (
-    <div style={{ marginTop: 16 }} className="section">
+    <div style={{ marginTop: 16, overflow: 'visible' }} className="section">
       <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)', fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 12 }}>
         <span><span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{orden.numero}</span> — Datos de la OP</span>
         <span style={{ marginLeft: 'auto', fontWeight: 400, color: 'var(--ink-3)' }}>Cantidad: {orden.cantidad}</span>
@@ -436,7 +436,7 @@ function OperadorOpDatos({ orden, onSaved }) {
               onFocus={() => suggestions.length > 0 && setShowSugg(true)}
             />
             {showSugg && (
-              <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 200, background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 6, boxShadow: '0 4px 16px rgba(0,0,0,0.12)', marginTop: 2 }}>
+              <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 200, background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 6, boxShadow: '0 4px 16px rgba(0,0,0,0.12)', marginTop: 2, maxHeight: 240, overflowY: 'auto' }}>
                 {suggestions.map(c => (
                   <div
                     key={c.id}
