@@ -205,11 +205,11 @@ function ColaPendientes({ pendientes, loading, onRevisar, onReload }) {
                             {g.cliente} <span style={{ color: 'var(--ink-3)', fontWeight: 500 }}>· {g.formatos.length}</span>
                           </td>
                         </tr>
-                        {g.formatos.map((f, idx) => {
+                        {g.formatos.map((f) => {
                           const ent = fmtEntrega(f.fecha_entrega)
                           return (
                             <tr key={f.id}
-                              style={{ borderBottom: '1px solid var(--line)', background: idx % 2 ? 'var(--surface-2)' : 'var(--surface)', cursor: 'pointer' }}
+                              style={{ borderBottom: '1px solid var(--line)', background: 'var(--surface)', cursor: 'pointer' }}
                               onClick={() => onRevisar(f)}>
                               <td style={{ padding: '12px' }} onClick={e => e.stopPropagation()}>
                                 <input type="checkbox" checked={sel.has(f.id)} onChange={() => toggle(f.id)} />
