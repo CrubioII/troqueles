@@ -193,6 +193,40 @@ def _troquel_costos_total(op):
     return _costos_items_total(modelo.costos_items) if modelo else 0
 
 
+def _troquel_costos_incompletos(op):
+    """True si al troquel le faltan precios: no hay modelo/costos, o alguna línea
+    con cantidad > 0 quedó en precio 0 (concepto sin cotizar)."""
+    modelo = TroquelModelo.objects.filter(orden=op).first()
+    items = (modelo.costos_items if modelo else None) or []
+    if not items:
+        return True
+    return any(
+        float(i.get("cantidad") or 0) > 0 and float(i.get("precio") or 0) <= 0
+        for i in items
+    )
+
+
+def _aprobar_formato_cuchillas(formato, user):
+    """Aprueba un formato de cuchillas: lo marca aprobado, completa el proceso
+    troquel de la OP, siembra costos si faltan y dispara la creación de remisión.
+    Lógica compartida por la acción individual y la aprobación en lote."""
+    formato.estado = "aprobado"
+    formato.devolucion_motivo = ""
+    formato.revisado_por = user
+    formato.revisado_en = timezone.now()
+    formato.save(update_fields=["estado", "devolucion_motivo", "revisado_por", "revisado_en"])
+    if formato.orden_id:
+        formato.orden.procesos.filter(proceso_id="troquel").update(
+            completado=True, completado_en=timezone.now()
+        )
+        # Bootstrap defensivo: si aún no hay líneas de costo, siémbralas.
+        # No re-sincroniza si existen, para no pisar ediciones del Admin.
+        modelo = TroquelModelo.objects.filter(orden=formato.orden).first()
+        if not modelo or not modelo.costos_items:
+            _sync_troquel_costos(formato.orden)
+        _maybe_crear_remision(formato.orden)
+
+
 def _write_troquel_costo_proceso(op, total):
     op.procesos.filter(proceso_id="troquel").update(costo=total)
 
@@ -1791,22 +1825,45 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
         formato = self.get_object()
         if formato.estado == "borrador":
             return Response({"error": "El operador canceló el envío de este formato."}, status=409)
-        formato.estado = "aprobado"
-        formato.devolucion_motivo = ""
-        formato.revisado_por = request.user
-        formato.revisado_en = timezone.now()
-        formato.save(update_fields=["estado", "devolucion_motivo", "revisado_por", "revisado_en"])
-        if formato.orden_id:
-            formato.orden.procesos.filter(proceso_id="troquel").update(
-                completado=True, completado_en=timezone.now()
-            )
-            # Bootstrap defensivo: si aún no hay líneas de costo, siémbralas.
-            # No re-sincroniza si existen, para no pisar ediciones del Admin.
-            modelo = TroquelModelo.objects.filter(orden=formato.orden).first()
-            if not modelo or not modelo.costos_items:
-                _sync_troquel_costos(formato.orden)
-            _maybe_crear_remision(formato.orden)
+        _aprobar_formato_cuchillas(formato, request.user)
         return Response(self.get_serializer(formato).data)
+
+    @action(detail=False, methods=["post"], url_path="aprobar_lote")
+    def aprobar_lote(self, request):
+        """POST /api/formatos-cuchillas/aprobar_lote/ — Body: { ids: [...] }.
+
+        Aprueba en lote los formatos pendientes; salta los que tengan costos
+        incompletos o ya no estén pendientes, informando cuáles.
+        """
+        _require_admin(request)
+        ids = request.data.get("ids", [])
+        if not isinstance(ids, list) or not ids:
+            return Response({"error": "Falta ids."}, status=400)
+        formatos = FormatoCuchillas.objects.select_related(
+            "orden", "orden__cliente"
+        ).filter(pk__in=ids)
+        aprobados, sin_costos, ya_resueltos = [], [], []
+        for formato in formatos:
+            if formato.estado != "pendiente":
+                ya_resueltos.append(formato.id)
+            elif not formato.orden_id or _troquel_costos_incompletos(formato.orden):
+                sin_costos.append({
+                    "id": formato.id,
+                    "orden_numero": formato.orden.numero if formato.orden_id else None,
+                    "cliente_nombre": (
+                        formato.orden.cliente.nombre
+                        if formato.orden_id and formato.orden.cliente_id else None
+                    ),
+                })
+            else:
+                with transaction.atomic():
+                    _aprobar_formato_cuchillas(formato, request.user)
+                aprobados.append(formato.id)
+        return Response({
+            "aprobados": aprobados,
+            "sin_costos": sin_costos,
+            "ya_resueltos": ya_resueltos,
+        })
 
     @action(detail=True, methods=["post"], url_path="devolver")
     def devolver(self, request, pk=None):

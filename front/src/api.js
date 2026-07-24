@@ -495,6 +495,14 @@ export const getFormatosPendientes = () =>
 export const aprobarFormatoCuchillas = (id) =>
   apiFetch(`${BASE}/formatos-cuchillas/${id}/aprobar/`, { method: 'POST' }).then(jsonConError)
 
+// Aprobación en lote (Admin): { aprobados, sin_costos, ya_resueltos }
+export const aprobarFormatosLote = (ids) =>
+  apiFetch(`${BASE}/formatos-cuchillas/aprobar_lote/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids }),
+  }).then(jsonConError)
+
 export const devolverFormatoCuchillas = (id, motivo = '') =>
   apiFetch(`${BASE}/formatos-cuchillas/${id}/devolver/`, {
     method: 'POST',
