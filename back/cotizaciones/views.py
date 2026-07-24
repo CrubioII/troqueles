@@ -940,6 +940,11 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         if proceso_id:
             ids = proceso_id.split(",")
             qs = qs.filter(procesos__proceso_id__in=ids, procesos__active=True).distinct()
+            # Una OP con formato de cuchillas enviado (pendiente → Revisar troqueles) o
+            # aprobado (→ remisión) sale de "OPs en Troquel". Los devueltos/borrador siguen
+            # en la lista porque el troquel aún está en curso con el Operador.
+            if self.action == "list" and "troquel" in ids:
+                qs = qs.exclude(formatos_cuchillas__estado__in=["pendiente", "aprobado"])
         return qs
 
     def get_serializer_class(self):
