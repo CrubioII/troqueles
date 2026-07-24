@@ -55,7 +55,7 @@ function ColaPendientes({ pendientes, loading, onRevisar }) {
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ borderBottom: '2px solid var(--line)' }}>
-              {['OP #', 'Cliente', 'Operador', 'Registrado', 'Entrega', ''].map((h, i) => (
+              {['OP #', 'Cliente', 'Referencia', 'Operador', 'Registrado', 'Entrega', ''].map((h, i) => (
                 <th key={i} style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--ink-3)', background: 'var(--surface-2)' }}>{h}</th>
               ))}
             </tr>
@@ -69,6 +69,7 @@ function ColaPendientes({ pendientes, loading, onRevisar }) {
                   onClick={() => onRevisar(f)}>
                   <td style={{ padding: '12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 13 }}>{f.orden_numero}</td>
                   <td style={{ padding: '12px', fontWeight: 600 }}>{f.cliente_nombre || '—'}</td>
+                  <td style={{ padding: '12px', color: 'var(--ink-2)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.referencia || '—'}</td>
                   <td style={{ padding: '12px' }}>{f.operador_username || '—'}</td>
                   <td style={{ padding: '12px', fontSize: 12, color: 'var(--ink-2)' }}>{fmtFechaHora(f.fecha_hora)}</td>
                   <td style={{ padding: '12px', fontSize: 12, fontWeight: 600, color: ent.color }}>{ent.txt}</td>
@@ -167,7 +168,13 @@ function RevisionDetalle({ formato, onVolver, onResuelto }) {
       </Section>
 
       <Section title="Costos (del formato de cuchillas)">
-        <TroquelCostos ordenId={formato.orden} refreshKey={0} onDirtyChange={setCostosDirty} />
+        <TroquelCostos
+          ordenId={formato.orden}
+          refreshKey={0}
+          onDirtyChange={setCostosDirty}
+          clienteId={orden?.cliente}
+          clienteNombre={formato.cliente_nombre || orden?.cliente_nombre}
+        />
       </Section>
 
       {error && <div style={{ marginTop: 12, color: 'var(--danger, #c0392b)', fontSize: 13 }}>{error}</div>}

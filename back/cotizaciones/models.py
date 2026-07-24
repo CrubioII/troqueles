@@ -12,6 +12,10 @@ class Cliente(models.Model):
     direccion = models.CharField(max_length=300, blank=True, default='')
     ciudad = models.CharField(max_length=120, blank=True, default='')
     tipo = models.CharField(max_length=20, choices=TIPO_CHOICES, default="final")
+    # Precios unitarios por concepto de troquel para este cliente (defaults que se
+    # aplican al sembrar los costos de cualquier troquel suyo). Clave estable por
+    # concepto: cuchilla/grafa/ch/sacabocados/perforaciones/gan y caucho:{tipo}.
+    precios_troquel = models.JSONField(default=dict, blank=True)
     creado = models.DateTimeField(auto_now_add=True)
 
     class Meta:

@@ -81,6 +81,7 @@ function AdminTroqueles() {
 
   useEffect(() => { loadPendientes(); loadSolicitudes() }, [])
   useSyncPolling({
+    ordenes: () => loadOrdenes(),
     formatos_pendientes: loadPendientes,
     remisiones_solicitadas: loadSolicitudes,
   })
@@ -326,15 +327,12 @@ function AdminTroqueles() {
                     </label>
                   </td>
                   <td style={{ padding: '10px 12px' }} onClick={e => e.stopPropagation()}>
-                    <div style={{ display: 'flex', gap: 4 }}>
-                      <button className="btn sm" onClick={() => navigate(`/ordenes/${ord.id}`)}>Abrir OP</button>
-                      <button
-                        className={'btn sm' + (confirmDelete === ord.id ? ' danger' : '')}
-                        onClick={e => handleDelete(e, ord)}
-                      >
-                        {confirmDelete === ord.id ? '¿Eliminar?' : 'Eliminar'}
-                      </button>
-                    </div>
+                    <button
+                      className={'btn sm' + (confirmDelete === ord.id ? ' danger' : '')}
+                      onClick={e => handleDelete(e, ord)}
+                    >
+                      {confirmDelete === ord.id ? '¿Eliminar?' : 'Eliminar'}
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -486,6 +484,7 @@ function OperadorTroqueles() {
   const [historial, setHistorial] = useState([])
   const [loadingHistorial, setLoadingHistorial] = useState(false)
   const [editHist, setEditHist] = useState(null)
+  const [busquedaHist, setBusquedaHist] = useState('')
   // Tab de remisiones del Operador (consolidar varias OP de un cliente en un PDF)
   const [remisionables, setRemisionables] = useState([])
   const [loadingRem, setLoadingRem] = useState(false)
@@ -611,6 +610,12 @@ function OperadorTroqueles() {
     return lista.filter(op => [op.numero, op.cliente_nombre, op.referencia].some(v => norm(v).includes(t)))
   }, [lista, busqueda])
 
+  const historialFiltrado = useMemo(() => {
+    const t = norm(busquedaHist.trim())
+    if (!t) return historial
+    return historial.filter(f => [f.orden_numero, f.cliente_nombre, f.referencia].some(v => norm(v).includes(t)))
+  }, [historial, busquedaHist])
+
   const loadFormatos = (ordenId) => {
     setLoadingFormatos(true)
     getFormatosCuchillas(ordenId)
@@ -676,13 +681,33 @@ function OperadorTroqueles() {
 
         {tab === 'historial' && !editHist && (
           <Section title="Historial de formatos de cuchillas">
-            <FormatosCuchillasHistory
-              formatos={historial}
-              loading={loadingHistorial}
-              showOrden
-              onEdit={setEditHist}
-              canEdit={puedeEditar}
-            />
+            {!loadingHistorial && historial.length > 0 && (
+              <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)' }}>
+                <div style={{ position: 'relative', maxWidth: 420 }}>
+                  <input
+                    className="input"
+                    placeholder="Buscar por OP, cliente, referencia…"
+                    value={busquedaHist}
+                    onChange={e => setBusquedaHist(e.target.value)}
+                    style={{ paddingLeft: 32 }}
+                  />
+                  <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-3)' }}>
+                    <Icon.Search />
+                  </span>
+                </div>
+              </div>
+            )}
+            {!loadingHistorial && historial.length > 0 && historialFiltrado.length === 0 ? (
+              <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Sin resultados para «{busquedaHist.trim()}»</div>
+            ) : (
+              <FormatosCuchillasHistory
+                formatos={historialFiltrado}
+                loading={loadingHistorial}
+                compact
+                onEdit={setEditHist}
+                canEdit={puedeEditar}
+              />
+            )}
           </Section>
         )}
 

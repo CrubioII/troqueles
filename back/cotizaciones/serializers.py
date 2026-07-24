@@ -431,6 +431,7 @@ class FormatoCuchillasSerializer(serializers.ModelSerializer):
     operador_username = serializers.CharField(source="operador.username", read_only=True, default="")
     revisado_por_username = serializers.CharField(source="revisado_por.username", read_only=True, default="")
     fecha_entrega = serializers.DateField(source="orden.fecha_entrega", read_only=True, default=None)
+    referencia = serializers.CharField(source="orden.referencia", read_only=True, default="")
     cliente_nombre = serializers.SerializerMethodField()
 
     def get_cliente_nombre(self, obj):
@@ -466,7 +467,7 @@ class FormatoCuchillasSerializer(serializers.ModelSerializer):
     class Meta:
         model = FormatoCuchillas
         fields = [
-            "id", "orden", "orden_numero", "cliente_nombre", "fecha_entrega",
+            "id", "orden", "orden_numero", "cliente_nombre", "fecha_entrega", "referencia",
             "cuchilla_cm", "cuchilla_puntos", "grafa_cm", "grafa_puntos", "grafa_altura",
             "ch_cm", "ch_medida", "sac_cm", "sac_medida", "sac_cantidad", "perfo_cm", "perfo_medida",
             "desperdicio_cm", "cauchos", "gan",

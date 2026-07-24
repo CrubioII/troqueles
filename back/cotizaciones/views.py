@@ -94,21 +94,31 @@ def _require_admin(request):
 CAUCHO_LABELS = dict(FormatoCuchillas.CAUCHO_TIPO_CHOICES)
 
 
-def _build_costos_seed(formato):
-    """Líneas de costo derivadas de un formato de cuchillas (una por concepto con datos)."""
+def _build_costos_seed(formato, precios=None):
+    """Líneas de costo derivadas de un formato de cuchillas (una por concepto con datos).
+
+    Cada línea lleva una `price_key` estable por concepto (para los cauchos,
+    `caucho:{tipo}`; para el resto, su propio `key`). `precios` es el mapa de precios
+    por cliente (price_key → precio); cuando trae un valor > 0 se usa como precio
+    inicial en vez de 0.
+    """
+    precios = precios or {}
     lines = []
 
-    def add(key, concepto, detalle, unidad, cantidad):
+    def add(key, concepto, detalle, unidad, cantidad, price_key=None):
+        pk = price_key or key
         lines.append({
-            "key": key, "concepto": concepto, "detalle": detalle or "",
-            "unidad": unidad, "cantidad": float(cantidad or 0), "precio": 0,
+            "key": key, "price_key": pk, "concepto": concepto, "detalle": detalle or "",
+            "unidad": unidad, "cantidad": float(cantidad or 0),
+            "precio": float(precios.get(pk) or 0),
         })
 
     for idx, fila in enumerate(formato.cauchos or []):
         tipo = fila.get("tipo") or ""
         cm = float(fila.get("cm") or 0)
         if cm > 0:
-            add(f"caucho-{idx}", CAUCHO_LABELS.get(tipo, tipo or "Caucho"), "", "cm", cm)
+            add(f"caucho-{idx}", CAUCHO_LABELS.get(tipo, tipo or "Caucho"), "", "cm", cm,
+                price_key=f"caucho:{tipo}" if tipo else "caucho")
     # Cuchilla y desperdicio se cobran juntos: una sola línea con el total,
     # desglosando en el detalle cuánto corresponde a cada uno.
     cuchilla_cm = float(formato.cuchilla_cm or 0)
@@ -151,17 +161,19 @@ def _sync_troquel_costos(op):
     for item in (modelo.costos_items or []):
         if str(item.get("key", "")).startswith("caucho-") and float(item.get("precio") or 0) > 0:
             prev_caucho_precio.setdefault(item.get("concepto"), item.get("precio"))
-    seed = _build_costos_seed(formato)
+    # Precios por defecto del cliente (rellenan las líneas que el Admin no fijó).
+    precios = (op.cliente.precios_troquel or {}) if op.cliente_id else {}
+    seed = _build_costos_seed(formato, precios)
     for line in seed:
         old = prev.get(line["key"])
         if old:
-            line["precio"] = old.get("precio") or 0
+            # Precio por-OP escrito a mano manda; si es 0, conserva el default del cliente.
+            line["precio"] = old.get("precio") or line["precio"]
             if line["key"] == "gan":
                 line["cantidad"] = old.get("cantidad") or line["cantidad"]
-        # Solo se conservan precios ya escritos por el Admin (misma línea o
-        # mismo tipo de caucho); nunca se auto-rellenan.
+        # Precio previo del mismo tipo de caucho; si no hay, conserva el default del cliente.
         if line["key"].startswith("caucho-") and not float(line["precio"] or 0):
-            line["precio"] = prev_caucho_precio.get(line["concepto"]) or 0
+            line["precio"] = prev_caucho_precio.get(line["concepto"]) or line["precio"]
     modelo.costos_items = seed
     modelo.save(update_fields=["costos_items", "modificado"])
     _write_troquel_costo_proceso(op, _costos_items_total(seed))
@@ -183,6 +195,17 @@ def _troquel_costos_total(op):
 
 def _write_troquel_costo_proceso(op, total):
     op.procesos.filter(proceso_id="troquel").update(costo=total)
+
+
+def _troquel_visible_operador(formato, visible):
+    """Marca/desmarca la visibilidad del proceso troquel en la cola del Operador.
+
+    Al enviar el formato a revisión se oculta (visible=False) para que la OP salga
+    sola de la cola; al devolver/cancelar reaparece (visible=True). No toca la
+    prioridad, para conservar el orden si la OP regresa a la cola.
+    """
+    if formato.orden_id:
+        formato.orden.procesos.filter(proceso_id="troquel").update(visible_operador=visible)
 
 
 def _crear_remision(op):
@@ -485,6 +508,41 @@ class ClienteViewSet(viewsets.ModelViewSet):
                 "saldo_pendiente": saldo_pendiente,
             })
         return Response({"inactivos": inactivos, "clientes": clientes})
+
+    @action(detail=True, methods=["get", "patch"], url_path="precios_troquel")
+    def precios_troquel(self, request, pk=None):
+        """GET/PATCH /api/clientes/{id}/precios_troquel/ — precios de troquel por cliente (solo Admin).
+
+        Precios unitarios por concepto (price_key → precio) que se usan como valor
+        por defecto al sembrar los costos de cualquier troquel del cliente. PATCH body
+        {"precios": {...}}: se fusiona sobre lo existente y re-siembra los troqueles del
+        cliente (solo rellena líneas en 0; nunca pisa un precio ya escrito por-OP).
+        """
+        _require_admin(request)
+        cliente = self.get_object()
+        if request.method == "PATCH":
+            raw = request.data.get("precios")
+            if not isinstance(raw, dict):
+                return Response({"error": "precios debe ser un objeto."}, status=400)
+            precios = dict(cliente.precios_troquel or {})
+            for k, v in raw.items():
+                try:
+                    precio = float(v or 0)
+                except (TypeError, ValueError):
+                    return Response({"error": "Los precios deben ser numéricos."}, status=400)
+                if precio < 0:
+                    return Response({"error": "Los precios no pueden ser negativos."}, status=400)
+                precios[str(k)] = precio
+            cliente.precios_troquel = precios
+            cliente.save(update_fields=["precios_troquel"])
+            # Rellena los troqueles del cliente con los nuevos defaults (conservando
+            # los precios que el Admin ya escribió por-OP).
+            ops = OrdenProduccion.objects.filter(
+                cliente=cliente, procesos__proceso_id="troquel", procesos__active=True
+            ).distinct()
+            for op in ops:
+                _sync_troquel_costos(op)
+        return Response({"precios": cliente.precios_troquel or {}})
 
     @action(detail=True, methods=["get"])
     def perfil(self, request, pk=None):
@@ -1174,6 +1232,7 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
                     return Response({"error": "cantidad y precio no pueden ser negativos."}, status=400)
                 items.append({
                     "key": str(i.get("key") or ""),
+                    "price_key": str(i.get("price_key") or i.get("key") or ""),
                     "concepto": str(i.get("concepto") or "")[:100],
                     "detalle": str(i.get("detalle") or "")[:200],
                     "unidad": str(i.get("unidad") or "")[:10],
@@ -1655,6 +1714,10 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
             formato = serializer.save(operador=self.request.user, estado=estado)
         if formato.estado != "borrador" and formato.orden_id:
             _sync_troquel_costos(formato.orden)
+        # Solo al enviar a revisión (pendiente) sale de la cola del Operador;
+        # un devuelto guardado como avance sigue visible para corregirlo.
+        if formato.estado == "pendiente" and formato.orden_id:
+            _troquel_visible_operador(formato, False)
 
     def update(self, request, *args, **kwargs):
         self._check_update_permission(request)
@@ -1691,6 +1754,9 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
             formato = serializer.save(operador=self.request.user)
         if formato.estado != "borrador" and formato.orden_id:
             _sync_troquel_costos(formato.orden)
+        # Solo al enviar a revisión (pendiente) sale de la cola del Operador.
+        if formato.estado == "pendiente" and formato.orden_id:
+            _troquel_visible_operador(formato, False)
 
     def destroy(self, request, *args, **kwargs):
         _require_admin(request)
@@ -1711,6 +1777,7 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
         if not updated:
             return Response({"error": "El formato ya fue revisado por el administrador."}, status=409)
         formato.refresh_from_db()
+        _troquel_visible_operador(formato, True)  # vuelve a la cola del Operador
         return Response(self.get_serializer(formato).data)
 
     @action(detail=True, methods=["post"], url_path="aprobar")
@@ -1760,6 +1827,6 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
         formato.save(update_fields=["estado", "devolucion_motivo", "revisado_por", "revisado_en"])
         if formato.orden_id:
             formato.orden.procesos.filter(proceso_id="troquel").update(
-                completado=False, completado_en=None
+                completado=False, completado_en=None, visible_operador=True
             )
         return Response(self.get_serializer(formato).data)

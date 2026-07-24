@@ -443,6 +443,17 @@ export const saveTroquelCostos = (id, items) =>
     body: JSON.stringify({ items }),
   }).then(json)
 
+// Precios de troquel por cliente (solo Admin): defaults por concepto (price_key → precio)
+export const getClientePreciosTroquel = (id) =>
+  apiFetch(`${BASE}/clientes/${id}/precios_troquel/`).then(json)
+
+export const saveClientePreciosTroquel = (id, precios) =>
+  apiFetch(`${BASE}/clientes/${id}/precios_troquel/`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ precios }),
+  }).then(json)
+
 // Modelo del troquel (Admin)
 export const getTroquelModelo = (ordenId) =>
   apiFetch(`${BASE}/troquel-modelos/?orden=${ordenId}`).then(json)

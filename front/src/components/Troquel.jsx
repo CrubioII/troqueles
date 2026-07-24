@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { fmtCOP, fmtNum, NumField, Checkbox, MoneyInput } from './core'
 import {
   getTroquelModelo, saveTroquelModelo, getTroquelCostos, saveTroquelCostos,
+  saveClientePreciosTroquel,
   getFormatosCuchillas, createFormatoCuchillas, updateFormatoCuchillas,
   getClientes, createCliente, createOrden, patchOrden,
 } from '../api'
@@ -589,9 +590,59 @@ export function EstadoFormatoBadge({ estado }) {
   )
 }
 
-export function FormatosCuchillasHistory({ formatos, loading, onEdit, showOrden = false, canEdit = () => true }) {
+export function FormatosCuchillasHistory({ formatos, loading, onEdit, showOrden = false, compact = false, canEdit = () => true }) {
   if (loading) return <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Cargando…</div>
   if (!formatos.length) return <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Sin formatos registrados.</div>
+
+  // Vista compacta (historial del operador): un resumen por fila, sin todo el formulario.
+  if (compact) {
+    const chdrs = ['OP #', 'Referencia', 'Cliente', 'Fecha / Hora', 'Estado', 'Operador', 'Cuchilla (cm)']
+    if (onEdit) chdrs.push('')
+    return (
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ borderBottom: '2px solid var(--line)' }}>
+              {chdrs.map((h, i) => (
+                <th key={i} style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--ink-3)', background: 'var(--surface-2)', whiteSpace: 'nowrap' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {formatos.map((f, idx) => {
+              const totalCuchilla = (Number(f.cuchilla_cm) || 0) + (Number(f.desperdicio_cm) || 0)
+              const editable = !!onEdit && canEdit(f)
+              const zebra = idx % 2 ? 'var(--surface-2)' : 'var(--surface)'
+              return (
+                <tr
+                  key={f.id}
+                  title={editable ? 'Clic para editar' : undefined}
+                  onClick={editable ? () => onEdit(f) : undefined}
+                  onMouseEnter={editable ? (e) => { e.currentTarget.style.background = 'var(--accent-soft, #eef4fd)' } : undefined}
+                  onMouseLeave={editable ? (e) => { e.currentTarget.style.background = zebra } : undefined}
+                  style={{ borderBottom: '1px solid var(--line)', background: zebra, cursor: editable ? 'pointer' : 'default' }}
+                >
+                  <td style={{ padding: '8px 12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>{f.orden_numero || '—'}</td>
+                  <td style={{ padding: '8px 12px', color: 'var(--ink-2)', fontSize: 12, maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.referencia || '—'}</td>
+                  <td style={{ padding: '8px 12px', fontWeight: 600, fontSize: 12 }}>{f.cliente_nombre || '—'}</td>
+                  <td style={{ padding: '8px 12px', fontFamily: 'JetBrains Mono, monospace', fontSize: 11, whiteSpace: 'nowrap' }}>{fmtFecha(f.fecha_hora)}</td>
+                  <td style={{ padding: '8px 12px' }}><EstadoFormatoBadge estado={f.estado} /></td>
+                  <td style={{ padding: '8px 12px', fontWeight: 600, fontSize: 12 }}>{f.operador_username || '—'}</td>
+                  <td style={{ padding: '8px 12px', fontWeight: 700, whiteSpace: 'nowrap' }}>{totalCuchilla > 0 ? fmtNum(totalCuchilla, 2) : '—'}</td>
+                  {onEdit && (
+                    <td style={{ padding: '8px 12px' }}>
+                      {editable && <button className="btn sm" onClick={(e) => { e.stopPropagation(); onEdit(f) }}>Editar</button>}
+                    </td>
+                  )}
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+
   const headers = ['Fecha / Hora', 'Estado', 'Operador', 'Cuchilla', 'Desperdicio', 'Total', 'Grafa', 'Caucho', 'Puntos', 'ch / sac / perfo / gan', 'Tiempos (enc/cuch/cauch)']
   if (showOrden) headers.unshift('OP #', 'Cliente')
   if (onEdit) headers.push('')
@@ -720,13 +771,15 @@ export function OrdenCambiosHistory({ cambios, loading }) {
 
 // ────────── Costos de troquel (Admin) ──────────
 
-export function TroquelCostos({ ordenId, refreshKey, onDirtyChange }) {
+export function TroquelCostos({ ordenId, refreshKey, onDirtyChange, clienteId, clienteNombre }) {
   const [items, setItems] = useState(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
   const [okMsg, setOkMsg] = useState(false)
   const [dirty, setDirty] = useState(false)
+  const [savingCliente, setSavingCliente] = useState(false)
+  const [okClienteMsg, setOkClienteMsg] = useState(false)
 
   // El padre (p.ej. la revisión) necesita saber si hay costos sin guardar
   useEffect(() => { onDirtyChange && onDirtyChange(dirty) }, [dirty])
@@ -752,6 +805,25 @@ export function TroquelCostos({ ordenId, refreshKey, onDirtyChange }) {
       .then(data => { setItems(data.items || []); setDirty(false); setOkMsg(true) })
       .catch(() => setError('No se pudieron guardar los costos'))
       .finally(() => setSaving(false))
+  }
+
+  // Guarda los precios unitarios como defaults del cliente y rellena los demás
+  // troqueles suyos que estén sin precio. Primero persiste los costos de esta OP
+  // para que su valor escrito a mano no se pierda al re-sembrar.
+  const guardarPreciosCliente = () => {
+    if (!clienteId || !items) return
+    const precios = {}
+    for (const it of items) {
+      const precio = Number(it.precio) || 0
+      if (it.price_key && precio > 0) precios[it.price_key] = precio
+    }
+    setSavingCliente(true); setError(null); setOkMsg(false); setOkClienteMsg(false)
+    saveTroquelCostos(ordenId, items.map(({ total, ...it }) => it))
+      .then(() => saveClientePreciosTroquel(clienteId, precios))
+      .then(() => getTroquelCostos(ordenId))
+      .then(data => { setItems(data.items || []); setDirty(false); setOkClienteMsg(true) })
+      .catch(() => setError('No se pudieron guardar los precios del cliente'))
+      .finally(() => setSavingCliente(false))
   }
 
   if (loading) return <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Calculando…</div>
@@ -806,11 +878,17 @@ export function TroquelCostos({ ordenId, refreshKey, onDirtyChange }) {
           </tbody>
         </table>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderTop: '1px solid var(--line)' }}>
-        <button className="btn btn-primary" onClick={save} disabled={saving || !dirty}>
+      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10, padding: '10px 12px', borderTop: '1px solid var(--line)' }}>
+        <button className="btn btn-primary" onClick={save} disabled={saving || savingCliente || !dirty}>
           {saving ? 'Guardando…' : 'Guardar costos'}
         </button>
+        {clienteId && (
+          <button className="btn" onClick={guardarPreciosCliente} disabled={saving || savingCliente} title="Usa estos precios como predeterminados del cliente y rellena sus otros troqueles sin precio">
+            {savingCliente ? 'Guardando…' : `Guardar precios para ${clienteNombre || 'este cliente'}`}
+          </button>
+        )}
         {okMsg && <span style={{ fontSize: 12, color: 'var(--ok, #2e9e5b)' }}>Costos guardados ✓</span>}
+        {okClienteMsg && <span style={{ fontSize: 12, color: 'var(--ok, #2e9e5b)' }}>Precios del cliente guardados ✓</span>}
         {error && <span style={{ fontSize: 12, color: 'var(--danger, #c0392b)' }}>{error}</span>}
       </div>
     </div>
