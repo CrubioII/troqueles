@@ -7,6 +7,7 @@ import {
   CONDICIONES_PAGO_OP, TIPOS_FACTURACION,
   SheetDiagram, Checkbox, MoneyInput, StatusPicker, NumField,
 } from './core'
+import { CHARGE_MODES, applyChargeMode } from '../lib/opQuoteShared'
 
 // =========================================================
 // Section 1 — Datos Generales
@@ -309,13 +310,35 @@ export function SectionPapel({ d, set, calc, papelCatalog }) {
 // =========================================================
 // Section 3 — Procesos
 // =========================================================
-function ImpresionSide({ titulo, activo, onToggle, tipo, onTipo, colores, onColores, costo, onCosto }) {
+function ChargeModeSelect({ value, onChange, style }) {
+  return (
+    <select
+      className="select"
+      style={{ fontSize: 11, ...style }}
+      value={value || 'fijo'}
+      onChange={e => onChange(e.target.value)}
+    >
+      {CHARGE_MODES.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+    </select>
+  )
+}
+
+function ChargeBreakdown({ cm }) {
+  if (!cm || !cm.unidades) return null
+  return (
+    <div style={{ fontSize: 10, color: 'var(--ink-3)', textAlign: 'right', marginTop: 2 }}>
+      {cm.detalle} = <span className="mono">{fmtCOP(cm.costo)}</span>
+    </div>
+  )
+}
+
+function ImpresionSide({ titulo, activo, onToggle, tipo, onTipo, colores, onColores, costo, onCosto, chargeMode, onChargeMode, valorBase, onValorBase, cm }) {
   return (
     <div className={'impresion-side' + (activo ? ' active' : ' inactive')}>
       <div className="impresion-side-header" onClick={onToggle}>
         <Checkbox checked={activo} onChange={onToggle} />
         <span className="side-title">{titulo}</span>
-        {activo && <span className="side-cost mono">{fmtCOP(costo)}</span>}
+        {activo && <span className="side-cost mono">{fmtCOP(cm ? cm.costo : costo)}</span>}
       </div>
       {activo && (
         <div className="impresion-side-body">
@@ -337,8 +360,13 @@ function ImpresionSide({ titulo, activo, onToggle, tipo, onTipo, colores, onColo
             />
           </div>
           <div className="field">
-            <label className="field-label">Costo {titulo.toLowerCase()} <span className="editable-flag"><Icon.Pencil /></span></label>
-            <MoneyInput value={costo} onChange={onCosto} className="admin-editable" />
+            <label className="field-label">Modo de cobro</label>
+            <ChargeModeSelect value={chargeMode} onChange={onChargeMode} />
+          </div>
+          <div className="field">
+            <label className="field-label">{cm ? 'Tarifa' : `Costo ${titulo.toLowerCase()}`} <span className="editable-flag"><Icon.Pencil /></span></label>
+            <MoneyInput value={cm ? valorBase : costo} onChange={cm ? onValorBase : onCosto} className="admin-editable" />
+            <ChargeBreakdown cm={cm} />
           </div>
         </div>
       )}
@@ -346,9 +374,13 @@ function ImpresionSide({ titulo, activo, onToggle, tipo, onTipo, colores, onColo
   )
 }
 
-function ImpresionRow({ pdef, p, onToggle, onUpdate }) {
+function ImpresionRow({ pdef, p, onToggle, onUpdate, cantidadProduccion }) {
   const active = !!p.active
-  const costoTotal = (active && p.tiroActive ? (p.costoTiro || 0) : 0) + (active && p.retiroActive ? (p.costoRetiro || 0) : 0)
+  const tiroCm = applyChargeMode(p.tiroChargeMode, p.tiroValorBase, cantidadProduccion)
+  const retiroCm = applyChargeMode(p.retiroChargeMode, p.retiroValorBase, cantidadProduccion)
+  const costoTiro = tiroCm ? tiroCm.costo : (p.costoTiro || 0)
+  const costoRetiro = retiroCm ? retiroCm.costo : (p.costoRetiro || 0)
+  const costoTotal = (active && p.tiroActive ? costoTiro : 0) + (active && p.retiroActive ? costoRetiro : 0)
   return (
     <div className={'proc-row impresion-row' + (active ? ' active' : '')}>
       <div className="impresion-top">
@@ -377,6 +409,9 @@ function ImpresionRow({ pdef, p, onToggle, onUpdate }) {
             tipo={p.tiroTipo} onTipo={(v) => onUpdate({ tiroTipo: v })}
             colores={p.tiroColores} onColores={(v) => onUpdate({ tiroColores: v })}
             costo={p.costoTiro || 0} onCosto={(v) => onUpdate({ costoTiro: v })}
+            chargeMode={p.tiroChargeMode} onChargeMode={(v) => onUpdate({ tiroChargeMode: v })}
+            valorBase={p.tiroValorBase || 0} onValorBase={(v) => onUpdate({ tiroValorBase: v })}
+            cm={tiroCm}
           />
           <ImpresionSide
             titulo="Retiro"
@@ -384,6 +419,9 @@ function ImpresionRow({ pdef, p, onToggle, onUpdate }) {
             tipo={p.retiroTipo} onTipo={(v) => onUpdate({ retiroTipo: v })}
             colores={p.retiroColores} onColores={(v) => onUpdate({ retiroColores: v })}
             costo={p.costoRetiro || 0} onCosto={(v) => onUpdate({ costoRetiro: v })}
+            chargeMode={p.retiroChargeMode} onChargeMode={(v) => onUpdate({ retiroChargeMode: v })}
+            valorBase={p.retiroValorBase || 0} onValorBase={(v) => onUpdate({ retiroValorBase: v })}
+            cm={retiroCm}
           />
         </div>
       )}
@@ -391,7 +429,7 @@ function ImpresionRow({ pdef, p, onToggle, onUpdate }) {
   )
 }
 
-function LaminadoSide({ titulo, activo, onToggle, tipoLaminado, onTipo, precioM2, onPrecioM2, costoAuto, tipoMetalizado, onTipoMetalizado, metalizadoOtros, onMetalizadoOtros }) {
+function LaminadoSide({ titulo, activo, onToggle, tipoLaminado, onTipo, precioM2, onPrecioM2, costoAuto, tipoMetalizado, onTipoMetalizado, metalizadoOtros, onMetalizadoOtros, chargeMode, onChargeMode, valorBase, onValorBase, cm }) {
   return (
     <div className={'impresion-side' + (activo ? ' active' : ' inactive')}>
       <div className="impresion-side-header" onClick={onToggle}>
@@ -428,16 +466,30 @@ function LaminadoSide({ titulo, activo, onToggle, tipoLaminado, onTipo, precioM2
             </div>
           )}
           <div className="field">
-            <label className="field-label">Precio $/m² <span className="editable-flag"><Icon.Pencil /></span></label>
-            <MoneyInput value={precioM2} onChange={onPrecioM2} className="admin-editable" suffix="" />
+            <label className="field-label">Modo de cobro</label>
+            <ChargeModeSelect value={chargeMode} onChange={onChargeMode} />
           </div>
+          {cm ? (
+            <div className="field">
+              <label className="field-label">Tarifa <span className="editable-flag"><Icon.Pencil /></span></label>
+              <MoneyInput value={valorBase} onChange={onValorBase} className="admin-editable" suffix="" />
+              <ChargeBreakdown cm={cm} />
+            </div>
+          ) : (
+            <div className="field">
+              <label className="field-label">Precio $/m² <span className="editable-flag"><Icon.Pencil /></span></label>
+              <MoneyInput value={precioM2} onChange={onPrecioM2} className="admin-editable" suffix="" />
+            </div>
+          )}
         </div>
       )}
     </div>
   )
 }
 
-function LaminadoRow({ pdef, p, onToggle, onUpdate, autoVal }) {
+function LaminadoRow({ pdef, p, onToggle, onUpdate, autoVal, cantidadProduccion }) {
+  const tiroCm = applyChargeMode(p.tiroChargeMode, p.tiroValorBase, cantidadProduccion)
+  const retiroCm = applyChargeMode(p.retiroChargeMode, p.retiroValorBase, cantidadProduccion)
   const active = !!p.active
   const costoTiro = autoVal?.tiro || 0
   const costoRetiro = autoVal?.retiro || 0
@@ -472,6 +524,9 @@ function LaminadoRow({ pdef, p, onToggle, onUpdate, autoVal }) {
             costoAuto={costoTiro}
             tipoMetalizado={p.tiroTipoMetalizado} onTipoMetalizado={(v) => onUpdate({ tiroTipoMetalizado: v })}
             metalizadoOtros={p.tiroMetalizadoOtros} onMetalizadoOtros={(v) => onUpdate({ tiroMetalizadoOtros: v })}
+            chargeMode={p.tiroChargeMode} onChargeMode={(v) => onUpdate({ tiroChargeMode: v })}
+            valorBase={p.tiroValorBase || 0} onValorBase={(v) => onUpdate({ tiroValorBase: v })}
+            cm={tiroCm}
           />
           <LaminadoSide
             titulo="Retiro"
@@ -481,6 +536,9 @@ function LaminadoRow({ pdef, p, onToggle, onUpdate, autoVal }) {
             costoAuto={costoRetiro}
             tipoMetalizado={p.retiroTipoMetalizado} onTipoMetalizado={(v) => onUpdate({ retiroTipoMetalizado: v })}
             metalizadoOtros={p.retiroMetalizadoOtros} onMetalizadoOtros={(v) => onUpdate({ retiroMetalizadoOtros: v })}
+            chargeMode={p.retiroChargeMode} onChargeMode={(v) => onUpdate({ retiroChargeMode: v })}
+            valorBase={p.retiroValorBase || 0} onValorBase={(v) => onUpdate({ retiroValorBase: v })}
+            cm={retiroCm}
           />
         </div>
       )}
@@ -488,8 +546,9 @@ function LaminadoRow({ pdef, p, onToggle, onUpdate, autoVal }) {
   )
 }
 
-function ProcRowDefault({ pdef, p, onToggle, onUpdate, autoVal }) {
+function ProcRowDefault({ pdef, p, onToggle, onUpdate, autoVal, cantidadProduccion }) {
   const active = !!p.active
+  const cm = applyChargeMode(p.chargeMode, p.valorBase, cantidadProduccion)
   return (
     <div className={'proc-row' + (active ? ' active' : '')}>
       <Checkbox checked={active} onChange={onToggle} />
@@ -525,19 +584,38 @@ function ProcRowDefault({ pdef, p, onToggle, onUpdate, autoVal }) {
             <Icon.Info /><span>{pdef.note}</span>
           </div>
         )}
+        {active && (
+          <ChargeModeSelect
+            style={{ flex: '0 0 110px', marginLeft: 'auto' }}
+            value={p.chargeMode}
+            onChange={(v) => onUpdate({ chargeMode: v, costoOverride: null })}
+          />
+        )}
       </div>
       <div className="proc-cost">
         <div style={{ position: 'relative' }}>
-          <MoneyInput
-            className={pdef.autoCalc ? 'calc admin-editable' : 'admin-editable'}
-            style={{ fontWeight: active ? 600 : 400 }}
-            value={p.costoOverride != null ? p.costoOverride : (pdef.autoCalc ? autoVal : p.costo)}
-            onChange={(v) => {
-              if (pdef.autoCalc) onUpdate({ costoOverride: v })
-              else onUpdate({ costo: v, costoOverride: null })
-            }}
-          />
-          {p.costoOverride != null && pdef.autoCalc && (
+          {cm && p.costoOverride == null ? (
+            <>
+              <MoneyInput
+                className="admin-editable"
+                style={{ fontWeight: active ? 600 : 400 }}
+                value={p.valorBase || 0}
+                onChange={(v) => onUpdate({ valorBase: v })}
+              />
+              <ChargeBreakdown cm={cm} />
+            </>
+          ) : (
+            <MoneyInput
+              className={pdef.autoCalc ? 'calc admin-editable' : 'admin-editable'}
+              style={{ fontWeight: active ? 600 : 400 }}
+              value={p.costoOverride != null ? p.costoOverride : (pdef.autoCalc ? autoVal : p.costo)}
+              onChange={(v) => {
+                if (pdef.autoCalc || cm) onUpdate({ costoOverride: v })
+                else onUpdate({ costo: v, costoOverride: null })
+              }}
+            />
+          )}
+          {p.costoOverride != null && (pdef.autoCalc || cm) && (
             <span
               style={{ position: 'absolute', left: 6, top: '50%', transform: 'translateY(-50%)', cursor: 'pointer', color: 'var(--accent)', fontSize: 11, fontWeight: 600 }}
               onClick={() => onUpdate({ costoOverride: null })}
@@ -556,7 +634,7 @@ function ProcRow(props) {
   return <ProcRowDefault {...props} />
 }
 
-export function SectionProcesos({ procesos, setProc, autoValues }) {
+export function SectionProcesos({ procesos, setProc, autoValues, cantidadProduccion }) {
   return (
     <div>
       {PROCESS_GROUPS.map(g => {
@@ -573,6 +651,7 @@ export function SectionProcesos({ procesos, setProc, autoValues }) {
                 pdef={pdef}
                 p={procesos[pdef.id]}
                 autoVal={autoValues[pdef.id]}
+                cantidadProduccion={cantidadProduccion}
                 onToggle={() => setProc(pdef.id, { active: !procesos[pdef.id]?.active })}
                 onUpdate={(patch) => setProc(pdef.id, patch)}
               />

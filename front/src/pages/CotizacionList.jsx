@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Icon } from '../components/Icons'
 import { fmtNum, STATUS_DEFS } from '../components/core'
-import { getCotizaciones, deleteCotizacion, getDashboardStats } from '../api'
+import { getCotizaciones, deleteCotizacion, duplicarCotizacion, getDashboardStats } from '../api'
 import { useAuth } from '../context/AuthContext'
 import { useSyncPolling } from '../lib/useSyncPolling'
 import { EmbudoChart } from '../components/charts/DashboardCharts'
@@ -112,6 +112,20 @@ export default function CotizacionList() {
   const handleStatus = (st) => {
     setStatusFilter(st)
     applyFilters(search, st)
+  }
+
+  const [duplicating, setDuplicating] = useState(null)
+
+  const handleDuplicate = (e, cot) => {
+    e.stopPropagation()
+    if (duplicating) return
+    setDuplicating(cot.id)
+    duplicarCotizacion(cot.id)
+      .then(nueva => navigate(`/cotizaciones/${nueva.id}`))
+      .catch(() => {
+        setDuplicating(null)
+        alert('No se pudo duplicar la cotización')
+      })
   }
 
   const handleDelete = (e, cot) => {
@@ -330,6 +344,17 @@ export default function CotizacionList() {
                           >
                             Abrir
                           </button>
+                          {isAdmin && (
+                            <button
+                              className="btn"
+                              style={{ padding: '4px 8px', flexShrink: 0, opacity: duplicating === cot.id ? 0.5 : 1 }}
+                              title="Duplicar cotización (misma referencia, nueva tarifa)"
+                              disabled={duplicating === cot.id}
+                              onClick={e => handleDuplicate(e, cot)}
+                            >
+                              <Icon.Duplicate />
+                            </button>
+                          )}
                           <div style={{ width: 34, display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
                             {isAdmin && cot.estado !== 'convertida' && (
                               confirmDelete === cot.id ? (

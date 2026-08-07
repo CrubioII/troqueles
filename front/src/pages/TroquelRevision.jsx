@@ -180,7 +180,8 @@ function ColaPendientes({ pendientes, loading, onRevisar, onReload }) {
             {filtradas.length === 0 ? (
               <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Sin resultados para «{busqueda.trim()}»</div>
             ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+              <table style={{ width: '100%', minWidth: 680, borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ borderBottom: '2px solid var(--line)' }}>
                     <th style={{ ...th, width: 36 }}>
@@ -230,6 +231,7 @@ function ColaPendientes({ pendientes, loading, onRevisar, onReload }) {
                   })}
                 </tbody>
               </table>
+              </div>
             )}
           </>
         )}

@@ -101,6 +101,12 @@ class Cotizacion(models.Model):
     tipo_facturacion = models.CharField(max_length=20, choices=TIPO_FACTURACION_CHOICES, default="factura")
     observaciones = models.TextField(blank=True, default="")
 
+    # Opciones de cobro alternativas para el mismo producto (p. ej. tarifa con o
+    # sin suministros del cliente). El PDF cliente muestra un bloque por opción.
+    # Shape (definido por el front): {"baseTitulo": str,
+    #   "alternativas": [{"titulo": str, "tarifas": {procRowId: tarifa}}]}
+    opciones = models.JSONField(default=dict, blank=True)
+
     creado = models.DateTimeField(auto_now_add=True)
     modificado = models.DateTimeField(auto_now=True)
 

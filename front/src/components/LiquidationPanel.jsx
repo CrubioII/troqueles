@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Icon } from './Icons'
 import { fmtCOP, fmtNum } from './core'
 import { pdfInterno } from '../api'
+import { computeCalcConTarifas, buildOpcionesPdf } from '../lib/opQuoteShared'
 
 function LiqInput({ value, onChange, isOverridden, onReset, big }) {
   const display = Number(Math.round(value || 0)).toLocaleString('es-CO')
@@ -28,18 +29,27 @@ function LiqInput({ value, onChange, isOverridden, onReset, big }) {
 
 export default function LiquidationPanel({
   d, set, calc, onSave, onSaveAndSend, saving, originalEstado,
-  mode = 'cot', locked = false, onPdfAdmin, onPdfProduccion,
+  mode = 'cot', locked = false, onPdfAdmin, onPdfProduccion, procesos = null,
 }) {
   const isOp = mode === 'op'
   const isConvertida = !isOp && (originalEstado || d.estado) === 'convertida'
   const [dlPdf, setDlPdf] = useState(false)
   const [collapsed, setCollapsed] = useState(() => typeof window !== 'undefined' && window.innerWidth < 900)
 
+  // Opciones de cobro alternativas (mismo producto, tarifas distintas)
+  const opciones = d.opciones || { baseTitulo: '', alternativas: [] }
+  const alternativas = opciones.alternativas || []
+  const directRows = calc.procRows.filter(p => p.directo)
+  const setOpciones = (patch) => set({ opciones: { ...opciones, ...patch } })
+  const updateAlt = (i, patch) => setOpciones({ alternativas: alternativas.map((o, j) => (j === i ? { ...o, ...patch } : o)) })
+  const removeAlt = (i) => setOpciones({ alternativas: alternativas.filter((_, j) => j !== i) })
+  const addAlt = () => setOpciones({ alternativas: [...alternativas, { titulo: '', tarifas: {} }] })
+
   const handlePdfInterno = async () => {
     if (!d.id) return
     setDlPdf(true)
     try {
-      const r = await pdfInterno(d.id, calc)
+      const r = await pdfInterno(d.id, calc, procesos ? buildOpcionesPdf(d, procesos, calc) : null)
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       const blob = await r.blob()
       const url = URL.createObjectURL(blob)
@@ -91,9 +101,12 @@ export default function LiquidationPanel({
               <td>Papel</td>
               <td className="mono">{fmtCOP(calc.costoPapel)}</td>
             </tr>
-            {calc.procRows.map((p) => (
+            {calc.procRows.filter(p => !p.directo).map((p) => (
               <tr key={p.id} className="indent">
-                <td>{p.nombre}</td>
+                <td>
+                  {p.nombre}
+                  {p.detalle && <div className="muted" style={{ fontSize: 10 }}>{p.detalle}</div>}
+                </td>
                 <td className="mono">{fmtCOP(p.costo)}</td>
               </tr>
             ))}
@@ -138,6 +151,24 @@ export default function LiquidationPanel({
               <td>× Valor unitario {!locked && <span className="editable-flag"><Icon.Pencil /></span>}</td>
               <td>{liqCell(calc.valorUnitario, 'valorUnitarioOverride')}</td>
             </tr>
+            {calc.procRows.some(p => p.directo) && (
+              <>
+                <tr>
+                  <td colSpan="2" style={{ paddingTop: 6, fontSize: 10, color: 'var(--ink-3)' }}>
+                    + Cobros por cantidad <span className="muted" style={{ fontWeight: 400 }}>· la tarifa ya incluye el margen</span>
+                  </td>
+                </tr>
+                {calc.procRows.filter(p => p.directo).map((p) => (
+                  <tr key={p.id} className="indent">
+                    <td>
+                      {p.nombre}
+                      {p.detalle && <div className="muted" style={{ fontSize: 10 }}>{p.detalle}</div>}
+                    </td>
+                    <td className="mono">{fmtCOP(p.costo)}</td>
+                  </tr>
+                ))}
+              </>
+            )}
             <tr className="subtotal">
               <td>Valor Total</td>
               <td>{liqCell(calc.valorTotal, 'valorTotalOverride')}</td>
@@ -175,6 +206,95 @@ export default function LiquidationPanel({
             )}
           </tbody>
         </table>
+
+        {!isOp && !locked && procesos && (directRows.length > 0 || alternativas.length > 0) && (
+          <div style={{ marginTop: 14, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--ink-3)', marginBottom: 8 }}>
+              Opciones de cobro en el PDF
+            </div>
+
+            {/* Opción 1 · la cotización actual */}
+            <div style={{ border: '1px solid var(--border)', borderRadius: 6, padding: '8px 10px', marginBottom: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>Opción 1</span>
+                <input
+                  type="text"
+                  className="liq-input"
+                  style={{ flex: 1, width: 'auto', textAlign: 'left', fontSize: 11 }}
+                  placeholder="p. ej. Con suministros del cliente"
+                  value={opciones.baseTitulo || ''}
+                  onChange={e => setOpciones({ baseTitulo: e.target.value })}
+                />
+                <span className="mono" style={{ fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' }}>{fmtCOP(calc.valorTotal)}</span>
+              </div>
+              <div className="muted" style={{ fontSize: 10, marginTop: 4 }}>Usa las tarifas de arriba tal como están.</div>
+            </div>
+
+            {/* Alternativas: misma cotización, otra tarifa */}
+            {alternativas.map((o, i) => {
+              const vc = computeCalcConTarifas(d, procesos, o.tarifas || {})
+              return (
+                <div key={i} style={{ border: '1px solid var(--border)', borderRadius: 6, padding: '8px 10px', marginBottom: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>Opción {i + 2}</span>
+                    <input
+                      type="text"
+                      className="liq-input"
+                      style={{ flex: 1, width: 'auto', textAlign: 'left', fontSize: 11 }}
+                      placeholder="p. ej. Sin suministros del cliente"
+                      value={o.titulo || ''}
+                      onChange={e => updateAlt(i, { titulo: e.target.value })}
+                    />
+                    <span
+                      onClick={() => removeAlt(i)}
+                      title="Quitar esta opción"
+                      style={{ cursor: 'pointer', color: 'var(--danger, #c0392b)', fontSize: 13, fontWeight: 700, padding: '0 2px' }}
+                    >✕</span>
+                  </div>
+                  {directRows.map(r => {
+                    const vRow = vc.procRows.find(x => x.id === r.id)
+                    const tarifaAlt = o.tarifas?.[r.id] ?? r.tarifa
+                    return (
+                      <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                        <span style={{ flex: 1, fontSize: 11 }}>
+                          {r.nombre}
+                          {vRow?.detalle && <div className="muted" style={{ fontSize: 10 }}>{vRow.detalle}</div>}
+                        </span>
+                        <LiqInput
+                          value={tarifaAlt}
+                          onChange={v => updateAlt(i, { tarifas: { ...(o.tarifas || {}), [r.id]: v } })}
+                          isOverridden={o.tarifas?.[r.id] != null && o.tarifas[r.id] !== r.tarifa}
+                          onReset={() => {
+                            const t = { ...(o.tarifas || {}) }
+                            delete t[r.id]
+                            updateAlt(i, { tarifas: t })
+                          }}
+                        />
+                      </div>
+                    )
+                  })}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, paddingTop: 6, borderTop: '1px dashed var(--border)' }}>
+                    <span style={{ fontSize: 11, fontWeight: 700 }}>Total cliente · Opción {i + 2}</span>
+                    <span className="mono" style={{ fontSize: 11, fontWeight: 700 }}>{fmtCOP(vc.valorTotal)}</span>
+                  </div>
+                </div>
+              )
+            })}
+
+            <button
+              className="btn"
+              style={{ width: '100%', justifyContent: 'center', fontSize: 11 }}
+              onClick={addAlt}
+            >
+              + Otra opción de cobro (misma cotización)
+            </button>
+            {alternativas.length > 0 && (
+              <div className="muted" style={{ fontSize: 10, marginTop: 6 }}>
+                El PDF y el correo al cliente mostrarán un bloque por opción. Guarda la cotización para conservarlas.
+              </div>
+            )}
+          </div>
+        )}
 
         <div style={{ marginTop: 14, padding: 10, background: 'var(--surface-2)', borderRadius: 6, fontSize: 11, color: 'var(--ink-3)', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
           <Icon.Calc />

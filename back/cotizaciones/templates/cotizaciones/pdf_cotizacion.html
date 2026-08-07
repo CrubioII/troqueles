@@ -70,6 +70,11 @@
     color: #807A6E;
     border-bottom: 1px solid #E8E1D2;
   }
+  .opcion-title {
+    background: #FBE9DA;
+    color: #B8541C;
+    font-size: 11px;
+  }
 
   /* ── Tables ── */
   table { width: 100%; border-collapse: collapse; }
@@ -97,6 +102,27 @@
     border-top: 1px solid #E8E1D2;
   }
   .total-row .num { color: #B8541C; font-size: 14px; }
+
+  /* ── Firma ── */
+  .firma {
+    margin-top: 28px;
+    page-break-inside: avoid;
+  }
+  .firma img {
+    height: 52px;
+    display: block;
+    margin-bottom: 4px;
+  }
+  .firma-nombre {
+    font-size: 12px;
+    color: #1B1816;
+    padding-top: 4px;
+  }
+  .firma-cel {
+    font-size: 12px;
+    font-weight: 700;
+    color: #1B1816;
+  }
 
   /* ── Footer ── */
   .footer {
@@ -157,6 +183,27 @@
     </div>
   </div>
 
+  {% if opciones %}
+  <!-- Opciones de cobro: un bloque por opción (mismo producto, tarifas distintas) -->
+  {% for op in opciones %}
+  <div class="section">
+    <div class="section-title opcion-title">Opción {{ forloop.counter }}{% if op.titulo %} — {{ op.titulo }}{% endif %}</div>
+    <table>
+      {% if op.proc_rows %}
+      <tr><th>Proceso</th><th class="num">Costo</th></tr>
+      {% for p in op.proc_rows %}
+      <tr><td>{{ p.nombre }}{% if p.detalle %}<div style="font-size:8.5px;color:#807A6E;">{{ p.detalle }}</div>{% endif %}</td><td class="num">{{ p.costo }}</td></tr>
+      {% endfor %}
+      {% endif %}
+      {% if op.mostrar_papel %}<tr><td class="lbl">Papel</td><td class="num">{{ op.costo_papel }}</td></tr>{% endif %}
+      <tr><td class="lbl">Total costos OP</td><td class="num">{{ op.total_costos_op }}</td></tr>
+      <tr><td class="lbl">{{ op.valor_unitario_label|default:"Valor unitario" }}</td><td class="num">{{ op.valor_unitario }}</td></tr>
+      <tr><td class="lbl">Cantidad</td><td class="num">{{ cot.cantidad }} u</td></tr>
+      <tr class="total-row"><td style="white-space:nowrap;">Total cliente</td><td class="num">{{ op.valor_total }}</td></tr>
+    </table>
+  </div>
+  {% endfor %}
+  {% else %}
   <!-- Processes -->
   {% if proc_rows %}
   <div class="section">
@@ -164,7 +211,7 @@
     <table>
       <tr><th>Proceso</th><th class="num">Costo</th></tr>
       {% for p in proc_rows %}
-      <tr><td>{{ p.nombre }}</td><td class="num">{{ p.costo }}</td></tr>
+      <tr><td>{{ p.nombre }}{% if p.detalle %}<div style="font-size:8.5px;color:#807A6E;">{{ p.detalle }}</div>{% endif %}</td><td class="num">{{ p.costo }}</td></tr>
       {% endfor %}
     </table>
   </div>
@@ -174,13 +221,14 @@
   <div class="section">
     <div class="section-title">Liquidación</div>
     <table>
-      <tr><td class="lbl">Papel</td><td class="num">{{ costo_papel }}</td></tr>
+      {% if mostrar_papel %}<tr><td class="lbl">Papel</td><td class="num">{{ costo_papel }}</td></tr>{% endif %}
       <tr><td class="lbl">Total costos OP</td><td class="num">{{ total_costos_op }}</td></tr>
-      <tr><td class="lbl">Valor unitario</td><td class="num">{{ valor_unitario }}</td></tr>
+      <tr><td class="lbl">{{ valor_unitario_label|default:"Valor unitario" }}</td><td class="num">{{ valor_unitario }}</td></tr>
       <tr><td class="lbl">Cantidad</td><td class="num">{{ cot.cantidad }} u</td></tr>
       <tr class="total-row"><td>Total cliente</td><td class="num">{{ valor_total }}</td></tr>
     </table>
   </div>
+  {% endif %}
 
   <!-- Observations -->
   {% if cot.observaciones %}
@@ -192,8 +240,15 @@
   </div>
   {% endif %}
 
+  <!-- Firma -->
+  <div class="firma">
+    {% if firma_uri %}<img src="{{ firma_uri }}" alt="Firma">{% endif %}
+    <div class="firma-nombre">ALEXANDER RESTREPO HURTADO</div>
+    <div class="firma-cel">Celular 3163612828</div>
+  </div>
+
   <div class="footer">
-    Troqueles INK · Documento generado automáticamente · {{ cot.numero }}
+    Cra. 1 # 16-102 Cali – Colombia · Cel 3163612828 · contabilidad@troquelesink.com
   </div>
 
 </body>

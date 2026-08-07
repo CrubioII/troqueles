@@ -19,6 +19,7 @@ from weasyprint import HTML as WeasyprintHTML
 
 
 _LOGO_PATH = os.path.join(settings.BASE_DIR, "cotizaciones", "static", "cotizaciones", "logo.png")
+_FIRMA_PATH = os.path.join(settings.BASE_DIR, "cotizaciones", "static", "cotizaciones", "firma.png")
 
 # Pre-warm WeasyPrint font engine so the first real PDF request isn't slow
 def _warmup_weasyprint():
@@ -36,6 +37,31 @@ def _logo_data_uri():
             return "data:image/png;base64," + base64.b64encode(f.read()).decode()
     except Exception:
         return ""
+
+
+def _firma_data_uri():
+    try:
+        with open(_FIRMA_PATH, "rb") as f:
+            return "data:image/png;base64," + base64.b64encode(f.read()).decode()
+    except Exception:
+        return ""
+
+
+def _fmt_opcion_cot(o):
+    """Formatea un bloque de opción de cobro (payload del front) para los templates."""
+    return {
+        "titulo": str(o.get("titulo", ""))[:80],
+        "proc_rows": [
+            {"nombre": p.get("nombre", ""), "costo": _fmt_cop(p.get("costo", 0)), "detalle": str(p.get("detalle", ""))[:120]}
+            for p in o.get("proc_rows", [])
+        ],
+        "costo_papel": _fmt_cop(o.get("costo_papel", 0)),
+        "mostrar_papel": float(o.get("costo_papel", 0) or 0) > 0,
+        "total_costos_op": _fmt_cop(o.get("total_costos_op", 0)),
+        "valor_unitario": _fmt_cop(o.get("valor_unitario", 0)),
+        "valor_unitario_label": str(o.get("valor_unitario_label", "") or "Valor unitario")[:40],
+        "valor_total": _fmt_cop(o.get("valor_total", 0)),
+    }
 
 
 def _fmt_cop(n):
@@ -368,53 +394,56 @@ def _remision_operador_ops(rem):
     return ops
 
 
-def _remision_operador_pdf_ctx(rem):
-    """Contexto del PDF de remisión del Operador: consumo en cm por troquel +
-    cantidad entregada, sin precios salvo que el Admin active `mostrar_valores`.
-
-    Los valores se calculan al vuelo desde los costos actuales de cada troquel,
-    de modo que si el Admin edita los precios después de generar la remisión,
-    el PDF refleja el total actualizado."""
-    mostrar = bool(rem.mostrar_valores)
-
+def _remision_operador_pdf_ctx(rem, admin=False):
+    """Contexto del PDF de remisión: consumo en cm por troquel + cantidad
+    entregada. Por defecto (admin=False) nunca lleva precios: los valores
+    monetarios son de uso interno y solo se incluyen cuando admin=True, en
+    cuyo caso se toman de TroquelModelo.costos_items (precios ya definidos
+    por el Admin) en vez de re-derivarlos del formato con precio en 0."""
     troqueles = []
-    total_valor = 0
+    total_general = 0.0
     for op in _remision_operador_ops(rem):
         formato = (
             op.formatos_cuchillas.exclude(estado="borrador").order_by("-fecha_hora").first()
             or op.formatos_cuchillas.order_by("-fecha_hora").first()
         )
+        if admin:
+            modelo = TroquelModelo.objects.filter(orden=op).first()
+            raw_items = list(modelo.costos_items) if modelo and modelo.costos_items else []
+        else:
+            raw_items = _build_costos_seed(formato) if formato else []
         consumos = [
             {
                 "concepto": ln["concepto"],
                 "detalle": ln["detalle"],
                 "cantidad": _fmt_num(ln["cantidad"]),
                 "unidad": ln["unidad"],
+                **({
+                    "precio": _fmt_cop(ln.get("precio")),
+                    "total": _fmt_cop(float(ln.get("cantidad") or 0) * float(ln.get("precio") or 0)),
+                } if admin else {}),
             }
-            for ln in (_build_costos_seed(formato) if formato else [])
+            for ln in raw_items
         ]
-        valor = _troquel_costos_total(op)
-        total_valor += valor
-        troqueles.append({
+        troquel = {
             "op_numero": op.numero,
             "referencia": op.referencia,
             "cantidad": _fmt_num(op.cantidad or 0),
             "consumos": consumos,
-            "valor_total": _fmt_cop(valor),
-        })
+        }
+        if admin:
+            troquel_total = _costos_items_total(raw_items)
+            troquel["total"] = _fmt_cop(troquel_total)
+            total_general += troquel_total
+        troqueles.append(troquel)
 
     ctx = {
         "rem": rem,
         "troqueles": troqueles,
-        "mostrar_valores": mostrar,
         "logo_uri": _logo_data_uri(),
     }
-    if mostrar:
-        ctx["items"] = [
-            {"descripcion": t["referencia"] or t["op_numero"], "valor_total": t["valor_total"]}
-            for t in troqueles
-        ]
-        ctx["total_valor"] = _fmt_cop(total_valor)
+    if admin:
+        ctx["total_general"] = _fmt_cop(total_general)
     return ctx
 
 
@@ -659,6 +688,31 @@ class CotizacionViewSet(viewsets.ModelViewSet):
         _require_admin(request)
         return super().destroy(request, *args, **kwargs)
 
+    @action(detail=True, methods=["post"], url_path="duplicar")
+    def duplicar(self, request, pk=None):
+        """POST /api/cotizaciones/{id}/duplicar/ — copia la COT (y sus procesos) como borrador nuevo.
+
+        Permite cotizar el mismo producto con condiciones distintas (p. ej. tarifa
+        con o sin suministros del cliente) sin re-digitar todo.
+        """
+        _require_admin(request)
+        cot = self.get_object()
+        procesos = list(cot.procesos.all())
+        with transaction.atomic():
+            copia = cot
+            copia.pk = None
+            copia.id = None
+            copia.numero = ""
+            copia.estado = "borrador"
+            copia.fecha = timezone.localdate()
+            copia.save()
+            for p in procesos:
+                p.pk = None
+                p.id = None
+                p.cotizacion = copia
+                p.save()
+        return Response(CotizacionSerializer(copia).data, status=201)
+
     @action(detail=True, methods=["post"], url_path="enviar")
     def enviar_correo(self, request, pk=None):
         """POST /api/cotizaciones/{id}/enviar/ — envía cotización por correo con PDF adjunto."""
@@ -674,13 +728,18 @@ class CotizacionViewSet(viewsets.ModelViewSet):
         raw_rows = request.data.get("proc_rows", [])
         ctx = {
             "cot": cot,
-            "proc_rows": [{"nombre": p.get("nombre", ""), "costo": _fmt_cop(p.get("costo", 0))} for p in raw_rows],
+            "proc_rows": [{"nombre": p.get("nombre", ""), "costo": _fmt_cop(p.get("costo", 0)), "detalle": str(p.get("detalle", ""))[:120]} for p in raw_rows],
             "costo_papel": _fmt_cop(request.data.get("costo_papel", 0)),
+            "mostrar_papel": float(request.data.get("costo_papel", 0) or 0) > 0,
             "total_costos_op": _fmt_cop(request.data.get("total_costos_op", 0)),
             "valor_unitario": _fmt_cop(request.data.get("valor_unitario", 0)),
+            "valor_unitario_label": str(request.data.get("valor_unitario_label", "") or "Valor unitario")[:40],
             "valor_total": _fmt_cop(request.data.get("valor_total", 0)),
             "logo_uri": _logo_data_uri(),
+            "firma_uri": _firma_data_uri(),
         }
+        raw_opciones = request.data.get("opciones") or []
+        ctx["opciones"] = [_fmt_opcion_cot(o) for o in raw_opciones] if len(raw_opciones) >= 2 else []
 
         try:
             html_email = render_to_string("cotizaciones/email_cotizacion.html", ctx)
@@ -723,13 +782,18 @@ class CotizacionViewSet(viewsets.ModelViewSet):
         raw_rows = request.data.get("proc_rows", [])
         ctx = {
             "cot": cot,
-            "proc_rows": [{"nombre": p.get("nombre", ""), "costo": _fmt_cop(p.get("costo", 0))} for p in raw_rows],
+            "proc_rows": [{"nombre": p.get("nombre", ""), "costo": _fmt_cop(p.get("costo", 0)), "detalle": str(p.get("detalle", ""))[:120]} for p in raw_rows],
             "costo_papel": _fmt_cop(request.data.get("costo_papel", 0)),
+            "mostrar_papel": float(request.data.get("costo_papel", 0) or 0) > 0,
             "total_costos_op": _fmt_cop(request.data.get("total_costos_op", 0)),
             "valor_unitario": _fmt_cop(request.data.get("valor_unitario", 0)),
+            "valor_unitario_label": str(request.data.get("valor_unitario_label", "") or "Valor unitario")[:40],
             "valor_total": _fmt_cop(request.data.get("valor_total", 0)),
             "logo_uri": _logo_data_uri(),
+            "firma_uri": _firma_data_uri(),
         }
+        raw_opciones = request.data.get("opciones") or []
+        ctx["opciones"] = [_fmt_opcion_cot(o) for o in raw_opciones] if len(raw_opciones) >= 2 else []
         try:
             html_pdf = render_to_string("cotizaciones/pdf_cotizacion.html", ctx)
             pdf_bytes = WeasyprintHTML(string=html_pdf).write_pdf()
@@ -983,10 +1047,12 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         saldo = float(data.get("valor_total", 0) or 0) - float(op.abono or 0)
         return {
             "op": op,
-            "proc_rows": [{"nombre": p.get("nombre", ""), "costo": _fmt_cop(p.get("costo", 0))} for p in raw_rows],
+            "proc_rows": [{"nombre": p.get("nombre", ""), "costo": _fmt_cop(p.get("costo", 0)), "detalle": str(p.get("detalle", ""))[:120]} for p in raw_rows],
             "costo_papel": _fmt_cop(data.get("costo_papel", 0)),
+            "mostrar_papel": float(data.get("costo_papel", 0) or 0) > 0,
             "total_costos_op": _fmt_cop(data.get("total_costos_op", 0)),
             "valor_unitario": _fmt_cop(data.get("valor_unitario", 0)),
+            "valor_unitario_label": str(data.get("valor_unitario_label", "") or "Valor unitario")[:40],
             "valor_total": _fmt_cop(data.get("valor_total", 0)),
             "abono": _fmt_cop(op.abono),
             "saldo": _fmt_cop(saldo),
@@ -1018,7 +1084,7 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         raw_rows = request.data.get("proc_rows", [])
         ctx = {
             "op": op,
-            "proc_rows": [{"nombre": p.get("nombre", "")} for p in raw_rows],
+            "proc_rows": [{"nombre": p.get("nombre", ""), "detalle": str(p.get("detalle", ""))[:120]} for p in raw_rows],
             "unidades_por_pliego": request.data.get("unidades_por_pliego", ""),
             "pliegos_necesarios": request.data.get("pliegos_necesarios", ""),
             "papel_referencia": request.data.get("papel_referencia", ""),
@@ -1598,8 +1664,8 @@ class RemisionViewSet(viewsets.ModelViewSet):
         """
         rem = self.get_object()
         es_admin = (request.data.get("tipo") or request.query_params.get("tipo")) == "admin"
-        ctx = _remision_pdf_ctx(rem, admin=es_admin)
-        template = "cotizaciones/pdf_remision_admin.html" if es_admin else "cotizaciones/pdf_remision.html"
+        ctx = _remision_operador_pdf_ctx(rem, admin=es_admin)
+        template = "cotizaciones/pdf_remision_admin.html" if es_admin else "cotizaciones/pdf_remision_operador.html"
         try:
             html_pdf = render_to_string(template, ctx)
             pdf_bytes = WeasyprintHTML(string=html_pdf).write_pdf()

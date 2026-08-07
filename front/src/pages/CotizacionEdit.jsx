@@ -276,7 +276,7 @@ export default function CotizacionEdit() {
               <span>· Costo procesos:</span> <span className="v mono">{fmtCOP(calc.totalProcesos)}</span>
             </>}
           >
-            <SectionProcesos procesos={procesos} setProc={setProc} autoValues={calc.autoValues} />
+            <SectionProcesos procesos={procesos} setProc={setProc} autoValues={calc.autoValues} cantidadProduccion={calc.cantidadProduccion} />
             <div className="note" style={{ marginTop: 14 }}>
               <Icon.Info />
               <span>Los procesos marcados aquí se convertirán automáticamente en las tareas activas de la Orden de Producción al confirmar la cotización.</span>
@@ -334,7 +334,7 @@ export default function CotizacionEdit() {
         {isAdmin && (
           <div className="column-side">
             <LiquidationPanel
-                d={d} set={set} calc={calc}
+                d={d} set={set} calc={calc} procesos={procesos}
                 saving={saving}
                 originalEstado={originalEstado}
                 onSave={() => save()}

@@ -138,6 +138,13 @@ export const updateCotizacion = (id, data) =>
     body: JSON.stringify(data),
   }).then(json)
 
+// Copia una cotización (con sus procesos) como borrador nuevo — mismo producto,
+// condiciones distintas (p. ej. tarifa con o sin suministros del cliente)
+export const duplicarCotizacion = (id) =>
+  apiFetch(`${BASE}/cotizaciones/${id}/duplicar/`, {
+    method: 'POST',
+  }).then(json)
+
 export const deleteCotizacion = (id) =>
   apiFetch(`${BASE}/cotizaciones/${id}/`, {
     method: 'DELETE',
@@ -150,31 +157,35 @@ export const cambiarEstado = (id, estado) =>
     body: JSON.stringify({ estado }),
   }).then(json)
 
-export const enviarCotizacion = (id, email, calc, extraEmails = []) =>
+export const enviarCotizacion = (id, email, calc, extraEmails = [], opciones = null) =>
   apiFetch(`${BASE}/cotizaciones/${id}/enviar/`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       email,
       extra_emails: extraEmails,
-      proc_rows: (calc?.procRows || []).map(p => ({ nombre: p.nombre, costo: p.costo })),
+      proc_rows: (calc?.procRows || []).map(p => ({ nombre: p.nombre, costo: p.costo, detalle: p.detalle || '' })),
       costo_papel: calc?.costoPapel ?? 0,
-      total_costos_op: calc?.totalCostosOP ?? 0,
-      valor_unitario: calc?.valorUnitario ?? 0,
+      total_costos_op: (calc?.totalCostosOP ?? 0) + (calc?.totalCobrosDirectos ?? 0),
+      valor_unitario: calc?.valorUnitarioDoc ?? calc?.valorUnitario ?? 0,
+      valor_unitario_label: calc?.valorUnitarioLabel || 'Valor unitario',
       valor_total: calc?.valorTotal ?? 0,
+      opciones: opciones || [],
     }),
   }).then(json)
 
-export const pdfInterno = (id, calc) =>
+export const pdfInterno = (id, calc, opciones = null) =>
   apiFetch(`${BASE}/cotizaciones/${id}/pdf_interno/`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      proc_rows: (calc?.procRows || []).map(p => ({ nombre: p.nombre, costo: p.costo })),
+      proc_rows: (calc?.procRows || []).map(p => ({ nombre: p.nombre, costo: p.costo, detalle: p.detalle || '' })),
       costo_papel: calc?.costoPapel ?? 0,
-      total_costos_op: calc?.totalCostosOP ?? 0,
-      valor_unitario: calc?.valorUnitario ?? 0,
+      total_costos_op: (calc?.totalCostosOP ?? 0) + (calc?.totalCobrosDirectos ?? 0),
+      valor_unitario: calc?.valorUnitarioDoc ?? calc?.valorUnitario ?? 0,
+      valor_unitario_label: calc?.valorUnitarioLabel || 'Valor unitario',
       valor_total: calc?.valorTotal ?? 0,
+      opciones: opciones || [],
     }),
   })
 
@@ -264,10 +275,11 @@ export const pdfOpAdmin = (id, calc, d) =>
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      proc_rows: (calc?.procRows || []).map(p => ({ nombre: p.nombre, costo: p.costo })),
+      proc_rows: (calc?.procRows || []).map(p => ({ nombre: p.nombre, costo: p.costo, detalle: p.detalle || '' })),
       costo_papel: calc?.costoPapel ?? 0,
-      total_costos_op: calc?.totalCostosOP ?? 0,
-      valor_unitario: calc?.valorUnitario ?? 0,
+      total_costos_op: (calc?.totalCostosOP ?? 0) + (calc?.totalCobrosDirectos ?? 0),
+      valor_unitario: calc?.valorUnitarioDoc ?? calc?.valorUnitario ?? 0,
+      valor_unitario_label: calc?.valorUnitarioLabel || 'Valor unitario',
       valor_total: calc?.valorTotal ?? 0,
     }),
   })
@@ -277,7 +289,7 @@ export const pdfOpProduccion = (id, calc, papelReferencia = '') =>
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      proc_rows: (calc?.procRows || []).map(p => ({ nombre: p.nombre })),
+      proc_rows: (calc?.procRows || []).map(p => ({ nombre: p.nombre, detalle: p.detalleUnidades || '' })),
       unidades_por_pliego: calc?.unidadesPorPliego ?? '',
       pliegos_necesarios: calc?.pliegosNecesarios ?? '',
       papel_referencia: papelReferencia,

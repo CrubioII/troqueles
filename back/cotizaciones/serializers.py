@@ -69,6 +69,7 @@ class CotizacionSerializer(serializers.ModelSerializer):
             "total_costos_override", "subtotal_override",
             "margen",
             "condicion_pago", "condicion_custom", "tipo_facturacion", "observaciones",
+            "opciones",
             "creado", "modificado",
             "procesos",
             "valor_unitario_efectivo", "valor_total_efectivo",

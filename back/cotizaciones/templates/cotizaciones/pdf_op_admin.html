@@ -184,7 +184,7 @@
     <table>
       <tr><th>Proceso</th><th class="num">Costo</th></tr>
       {% for p in proc_rows %}
-      <tr><td>{{ p.nombre }}</td><td class="num">{{ p.costo }}</td></tr>
+      <tr><td>{{ p.nombre }}{% if p.detalle %}<div style="font-size:8.5px;color:#807A6E;">{{ p.detalle }}</div>{% endif %}</td><td class="num">{{ p.costo }}</td></tr>
       {% endfor %}
     </table>
   </div>
@@ -194,10 +194,10 @@
   <div class="section">
     <div class="section-title">Liquidación</div>
     <table>
-      <tr><td class="lbl">Papel</td><td class="num">{{ costo_papel }}</td></tr>
+      {% if mostrar_papel %}<tr><td class="lbl">Papel</td><td class="num">{{ costo_papel }}</td></tr>{% endif %}
       <tr><td class="lbl">Total costos OP</td><td class="num">{{ total_costos_op }}</td></tr>
       <tr><td class="lbl">Margen</td><td class="num">{{ op.margen }} %</td></tr>
-      <tr><td class="lbl">Valor unitario</td><td class="num">{{ valor_unitario }}</td></tr>
+      <tr><td class="lbl">{{ valor_unitario_label|default:"Valor unitario" }}</td><td class="num">{{ valor_unitario }}</td></tr>
       <tr><td class="lbl">Cantidad</td><td class="num">{{ op.cantidad }} u</td></tr>
       <tr class="total-row"><td>Valor total</td><td class="num">{{ valor_total }}</td></tr>
       <tr><td class="lbl">Abono</td><td class="num">{{ abono }}</td></tr>

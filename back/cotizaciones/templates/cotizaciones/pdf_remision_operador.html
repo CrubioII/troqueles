@@ -190,7 +190,7 @@
       <div class="company-name">TROQUELES INK SAS</div>
       <div class="company-details">
         NIT 901.614.931-6<br>
-        Bogotá — Colombia<br>
+        Cra. 4 #19-01, COMUNA 3, Cali, Valle del Cauca<br>
         troquelesinkcoltador@gmail.com
       </div>
     </div>
@@ -260,33 +260,6 @@
   </div>
   {% endfor %}
 
-  <!-- Valores (solo si el Admin lo permite) -->
-  {% if mostrar_valores %}
-  <div class="valores-label">Valores</div>
-  <table class="items">
-    <thead>
-      <tr>
-        <th>Descripción</th>
-        <th class="col-total">Vr. Total</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for item in items %}
-      <tr>
-        <td>{{ item.descripcion }}</td>
-        <td class="col-total">{{ item.valor_total }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-    <tfoot>
-      <tr class="total-row">
-        <td>Total</td>
-        <td class="col-total">{{ total_valor }}</td>
-      </tr>
-    </tfoot>
-  </table>
-  {% endif %}
-
   {% if rem.observaciones %}
   <div class="nota-section">
     <div class="nota-lbl">Observaciones</div>
@@ -310,8 +283,7 @@
       <div class="sig-line">
         <div class="sig-title">Entregado por</div>
         <div class="sig-fields">
-          <span class="sig-brand">Troqueles ink</span><br>
-          Alexander Restrepo
+          <span class="sig-brand">Troqueles ink</span>
         </div>
       </div>
     </div>

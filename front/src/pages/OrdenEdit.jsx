@@ -327,7 +327,7 @@ export default function OrdenEdit() {
                   <span>· Costo procesos:</span> <span className="v mono">{fmtCOP(calc.totalProcesos)}</span>
                 </>}
               >
-                <SectionProcesos procesos={procesos} setProc={setProc} autoValues={calc.autoValues} />
+                <SectionProcesos procesos={procesos} setProc={setProc} autoValues={calc.autoValues} cantidadProduccion={calc.cantidadProduccion} />
               </Section>
 
               <Section

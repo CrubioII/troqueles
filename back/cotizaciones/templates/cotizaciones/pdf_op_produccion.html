@@ -144,7 +144,7 @@
     <table>
       <tr><th>Proceso</th><th class="check-col">Hecho</th></tr>
       {% for p in proc_rows %}
-      <tr><td>{{ p.nombre }}</td><td class="check-col"><span class="check-box"></span></td></tr>
+      <tr><td>{{ p.nombre }}{% if p.detalle %}<div style="font-size:8.5px;color:#807A6E;">{{ p.detalle }}</div>{% endif %}</td><td class="check-col"><span class="check-box"></span></td></tr>
       {% endfor %}
     </table>
   </div>

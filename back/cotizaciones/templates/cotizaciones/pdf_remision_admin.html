@@ -57,6 +57,11 @@
     font-family: monospace;
     margin-top: 2px;
   }
+  .uso-interno {
+    display: inline-block; margin-top: 4px; padding: 2px 8px;
+    font-size: 8px; font-weight: 700; letter-spacing: 0.15em;
+    color: #b03a2e; border: 1px solid #b03a2e; border-radius: 3px;
+  }
 
   /* ── Client section ── */
   .client-section {
@@ -92,41 +97,71 @@
   }
   .meta-val { font-size: 11px; font-weight: 600; color: #1B1816; }
 
-  /* ── Items table ── */
-  table.items {
+  /* ── Troquel blocks ── */
+  .troquel {
+    border-bottom: 1px solid #e8e8e8;
+  }
+  .troquel-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 10px 18px 6px;
+    gap: 12px;
+  }
+  .troquel-ref { font-size: 12px; font-weight: 700; color: #1B1816; }
+  .troquel-op { font-size: 10px; color: #E8945A; font-family: monospace; font-weight: 700; }
+  .troquel-qty { font-size: 10px; color: #666; }
+  .troquel-qty strong { color: #1B1816; }
+
+  table.consumos {
     width: 100%;
     border-collapse: collapse;
   }
-  table.items thead th {
+  table.consumos thead th {
     font-size: 8px;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: #aaa;
     text-align: left;
-    padding: 8px 18px;
+    padding: 6px 18px;
     background: #fafafa;
+    border-top: 1px solid #f0f0f0;
     border-bottom: 1px solid #e8e8e8;
   }
-  table.items tbody td {
+  table.consumos tbody td {
     font-size: 11px;
-    padding: 9px 18px;
+    padding: 6px 18px;
     border-bottom: 1px solid #f0f0f0;
     vertical-align: top;
   }
-  .col-num { width: 34px; color: #E8945A; font-weight: 700; }
-  .col-cant { width: 70px; text-align: right; font-family: monospace; }
-  .col-total { width: 110px; text-align: right; font-family: monospace; font-weight: 700; }
-  table.items thead th.col-cant, table.items thead th.col-total { text-align: right; }
-  .item-desc { color: #1B1816; }
+  table.consumos .col-detalle { color: #666; }
+  table.consumos .col-cant { width: 100px; text-align: right; font-family: monospace; }
+  table.consumos .col-precio { width: 100px; text-align: right; font-family: monospace; }
+  table.consumos .col-imp { width: 110px; text-align: right; font-family: monospace; font-weight: 700; }
+  table.consumos thead th.col-cant,
+  table.consumos thead th.col-precio,
+  table.consumos thead th.col-imp { text-align: right; }
+  .no-consumo { padding: 8px 18px; font-size: 10px; color: #aaa; font-style: italic; }
 
-  tr.total-row td {
-    border-top: 2px solid #E8945A;
-    border-bottom: none;
-    font-weight: 700;
-    padding-top: 10px;
+  tr.subtotal-row td {
+    border-top: 1px solid #e8e8e8; border-bottom: none;
+    font-weight: 700; padding-top: 8px; padding-bottom: 10px;
   }
-  tr.total-row .col-total { color: #E8945A; font-size: 13px; }
+  tr.subtotal-row .col-imp { color: #E8945A; }
+
+  /* ── Total general ── */
+  .total-general {
+    display: flex; justify-content: flex-end; align-items: baseline; gap: 10px;
+    padding: 12px 18px; border-bottom: 1px solid #e8e8e8;
+  }
+  .total-general .lbl {
+    font-size: 8px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.1em; color: #aaa;
+  }
+  .total-general .val {
+    font-size: 15px; font-weight: 900; color: #E8945A; font-family: monospace;
+  }
 
   /* ── Observaciones ── */
   .nota-section {
@@ -140,42 +175,18 @@
   }
   .nota-text { font-size: 10px; color: #555; line-height: 1.6; white-space: pre-wrap; }
 
-  .signature {
-    padding: 12px 18px;
-    text-align: right;
-    font-weight: 700;
-    font-size: 11px;
-    color: #1B1816;
-    line-height: 1.6;
+  /* ── Firmas ── */
+  .signatures {
+    display: flex;
+    gap: 40px;
+    padding: 34px 18px 14px;
     border-top: 1px solid #e8e8e8;
   }
-  .signature .sig-brand { color: #E8945A; }
-
-  /* ── Marcador de documento interno ── */
-  .uso-interno {
-    display: inline-block; margin-top: 4px; padding: 2px 8px;
-    font-size: 8px; font-weight: 700; letter-spacing: 0.15em;
-    color: #b03a2e; border: 1px solid #b03a2e; border-radius: 3px;
-  }
-
-  /* ── Detalle de costos (troquel) ── */
-  .costos-section { border-top: 1px solid #e8e8e8; padding: 10px 18px 14px; }
-  .costos-title {
-    font-size: 8px; font-weight: 700; text-transform: uppercase;
-    letter-spacing: 0.1em; color: #E8945A; margin-bottom: 6px;
-  }
-  table.costos { width: 100%; border-collapse: collapse; font-size: 10px; }
-  table.costos th {
-    text-align: left; font-size: 8px; text-transform: uppercase;
-    letter-spacing: 0.08em; color: #999; padding: 4px 6px;
-    border-bottom: 1px solid #e8e8e8;
-  }
-  table.costos td { padding: 4px 6px; border-bottom: 1px solid #f2f2f2; color: #333; }
-  table.costos th.num, table.costos td.num {
-    text-align: right; font-family: monospace;
-  }
-  table.costos tr.costos-total td { font-weight: 700; border-bottom: none; color: #1B1816; }
-  table.costos tr.costos-total td.num { color: #E8945A; font-size: 12px; }
+  .sig-col { flex: 1; }
+  .sig-line { border-top: 1px solid #1B1816; padding-top: 4px; }
+  .sig-title { font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: #888; }
+  .sig-fields { font-size: 9px; color: #666; margin-top: 4px; line-height: 1.8; }
+  .sig-brand { color: #E8945A; font-weight: 700; }
 </style>
 </head>
 <body>
@@ -188,7 +199,7 @@
       <div class="company-name">TROQUELES INK SAS</div>
       <div class="company-details">
         NIT 901.614.931-6<br>
-        Bogotá — Colombia<br>
+        Cra. 4 #19-01, COMUNA 3, Cali, Valle del Cauca<br>
         troquelesinkcoltador@gmail.com
       </div>
     </div>
@@ -219,79 +230,59 @@
       <span class="meta-val">{{ rem.fecha }}</span>
     </div>
     <div class="meta-cell">
-      <span class="meta-lbl">OP origen</span>
-      <span class="meta-val">{{ rem.orden.numero }}</span>
+      <span class="meta-lbl">Troqueles</span>
+      <span class="meta-val">{{ troqueles|length }}</span>
     </div>
   </div>
 
-  <!-- Items -->
-  <table class="items">
-    <thead>
-      <tr>
-        <th class="col-num">Item</th>
-        <th>Descripción</th>
-        <th class="col-cant">Cantidad</th>
-        <th class="col-total">Vr. Total</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for item in items %}
-      <tr>
-        <td class="col-num">{{ forloop.counter }}</td>
-        <td class="item-desc">{{ item.descripcion }}</td>
-        <td class="col-cant">{{ item.cantidad }}</td>
-        <td class="col-total">{{ item.valor_total }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-    <tfoot>
-      <tr class="total-row">
-        <td></td>
-        <td class="item-desc">Total entregado</td>
-        <td class="col-cant">{{ total_cantidad }}</td>
-        <td class="col-total"></td>
-      </tr>
-      <tr class="total-row">
-        <td></td>
-        <td class="item-desc">Total</td>
-        <td class="col-cant"></td>
-        <td class="col-total">{{ total_valor }}</td>
-      </tr>
-    </tfoot>
-  </table>
-
-  {% if costos %}
-  <!-- Detalle de costos del troquel (solo documento interno) -->
-  <div class="costos-section">
-    <div class="costos-title">Detalle de costos — Troquel OP {{ rem.orden.numero }}</div>
-    <table class="costos">
+  <!-- Troqueles: consumo en cm + costos por OP -->
+  {% for t in troqueles %}
+  <div class="troquel">
+    <div class="troquel-head">
+      <div>
+        <span class="troquel-ref">{{ t.referencia|default:"Troquel" }}</span>
+        &nbsp;<span class="troquel-op">{{ t.op_numero }}</span>
+      </div>
+      <div class="troquel-qty"><strong>Cantidad entregada:</strong> {{ t.cantidad }}</div>
+    </div>
+    {% if t.consumos %}
+    <table class="consumos">
       <thead>
         <tr>
-          <th>Concepto</th>
+          <th>Elemento</th>
           <th>Detalle</th>
-          <th class="num">Cantidad</th>
-          <th class="num">Precio unit.</th>
-          <th class="num">Total</th>
+          <th class="col-cant">Consumo</th>
+          <th class="col-precio">Precio unit.</th>
+          <th class="col-imp">Total</th>
         </tr>
       </thead>
       <tbody>
-        {% for c in costos %}
+        {% for c in t.consumos %}
         <tr>
           <td>{{ c.concepto }}</td>
-          <td>{{ c.detalle }}</td>
-          <td class="num">{{ c.cantidad }} {{ c.unidad }}</td>
-          <td class="num">{{ c.precio }}</td>
-          <td class="num">{{ c.total }}</td>
+          <td class="col-detalle">{{ c.detalle }}</td>
+          <td class="col-cant">{{ c.cantidad }} {{ c.unidad }}</td>
+          <td class="col-precio">{{ c.precio }}</td>
+          <td class="col-imp">{{ c.total }}</td>
         </tr>
         {% endfor %}
-        <tr class="costos-total">
-          <td colspan="4">Total costos troquel</td>
-          <td class="num">{{ costos_total }}</td>
+        <tr class="subtotal-row">
+          <td colspan="4">Subtotal troquel</td>
+          <td class="col-imp">{{ t.total }}</td>
         </tr>
       </tbody>
     </table>
+    {% else %}
+    <div class="no-consumo">Sin formato de cuchillas registrado.</div>
+    {% endif %}
   </div>
-  {% endif %}
+  {% endfor %}
+
+  <!-- Total general -->
+  <div class="total-general">
+    <span class="lbl">Total general</span>
+    <span class="val">{{ total_general }}</span>
+  </div>
 
   {% if rem.observaciones %}
   <div class="nota-section">
@@ -300,9 +291,26 @@
   </div>
   {% endif %}
 
-  <div class="signature">
-    <span class="sig-brand">Troqueles ink</span><br>
-    Alexander Restrepo
+  <!-- Firmas -->
+  <div class="signatures">
+    <div class="sig-col">
+      <div class="sig-line">
+        <div class="sig-title">Recibido conforme</div>
+        <div class="sig-fields">
+          Nombre: ______________________<br>
+          C.C. / NIT: ___________________<br>
+          Fecha: _______________________
+        </div>
+      </div>
+    </div>
+    <div class="sig-col">
+      <div class="sig-line">
+        <div class="sig-title">Entregado por</div>
+        <div class="sig-fields">
+          <span class="sig-brand">Troqueles ink</span>
+        </div>
+      </div>
+    </div>
   </div>
 
 </div>
