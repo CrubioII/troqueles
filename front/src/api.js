@@ -333,6 +333,11 @@ export const updateRemision = (id, data) =>
     body: JSON.stringify(data),
   }).then(json)
 
+// Desglose por concepto del troquel (mismos datos que van al PDF y al correo,
+// ya formateados en COP)
+export const getRemisionDesglose = (id) =>
+  apiFetch(`${BASE}/remisiones/${id}/desglose/`).then(json)
+
 export const liquidarRemision = (id, email, extraEmails = []) =>
   apiFetch(`${BASE}/remisiones/${id}/liquidar/`, {
     method: 'POST',

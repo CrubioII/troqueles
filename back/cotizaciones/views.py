@@ -338,6 +338,11 @@ def _remision_pdf_ctx(rem, admin=False):
         "total_valor": _fmt_cop(total_valor),
         "logo_uri": _logo_data_uri(),
     }
+    # Desglose por concepto del troquel (cuchilla, madera, goma…) con precio
+    # unitario, tal como lo dejó el Admin en TroquelModelo.costos_items.
+    det = _remision_operador_pdf_ctx(rem, admin=True)
+    ctx["troqueles"] = det["troqueles"]
+    ctx["total_general"] = det["total_general"]
     if admin:
         modelo = TroquelModelo.objects.filter(orden=rem.orden).first() if rem.orden_id else None
         costos = list(modelo.costos_items) if modelo else []
@@ -451,7 +456,8 @@ def _liquidar_remision(rem, email=None, extra_emails=None):
     """Envía el PDF CLIENTE por correo y marca la remisión liquidada.
 
     Destinatarios: email (o el del cliente) + CONTADURIA_EMAIL + extra_emails.
-    Nunca usa la plantilla admin (sin desglose de costos).
+    Tanto el cuerpo del correo como el PDF adjunto llevan el desglose por
+    concepto del troquel y el total a pagar en COP.
     Devuelve (payload_dict, http_status).
     """
     recipients = []
@@ -471,10 +477,11 @@ def _liquidar_remision(rem, email=None, extra_emails=None):
     try:
         html_pdf = render_to_string("cotizaciones/pdf_remision.html", ctx)
         pdf_bytes = WeasyprintHTML(string=html_pdf).write_pdf()
+        html_email = render_to_string("cotizaciones/email_remision.html", ctx)
 
         msg = EmailMessage(
             subject=f"Remisión {rem.numero} — Troqueles INK",
-            body=html_pdf,
+            body=html_email,
             from_email=settings.DEFAULT_FROM_EMAIL,
             to=recipients,
         )
@@ -1676,6 +1683,21 @@ class RemisionViewSet(viewsets.ModelViewSet):
         response = HttpResponse(pdf_bytes, content_type="application/pdf")
         response["Content-Disposition"] = f'attachment; filename="{filename}"'
         return response
+
+    @action(detail=True, methods=["get"], url_path="desglose")
+    def desglose(self, request, pk=None):
+        """GET /api/remisiones/{id}/desglose/ — solo Admin (via initial).
+
+        Desglose por concepto del/los troquel(es) de la remisión (incluidas las
+        consolidadas), con precio unitario y subtotal. Mismos datos que van al
+        PDF y al correo, ya formateados en COP.
+        """
+        rem = self.get_object()
+        det = _remision_operador_pdf_ctx(rem, admin=True)
+        return Response({
+            "troqueles": det["troqueles"],
+            "total_general": det["total_general"],
+        })
 
     @action(detail=True, methods=["post"], url_path="liquidar")
     def liquidar(self, request, pk=None):

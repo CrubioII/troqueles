@@ -179,4 +179,6 @@ EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "Troqueles INK <noreply@troqueles.ink>")
 
 # Correo del sector de contaduría: recibe copia de cada remisión liquidada.
-CONTADURIA_EMAIL = os.environ.get("CONTADURIA_EMAIL", "")
+# El `or` (y no un default de .get) es intencional: la variable puede venir
+# definida pero vacía, y en ese caso también debe caer al valor por defecto.
+CONTADURIA_EMAIL = os.environ.get("CONTADURIA_EMAIL") or "contabilidad@troquelesink.com"

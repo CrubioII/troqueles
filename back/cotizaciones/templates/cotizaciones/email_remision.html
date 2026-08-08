@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Remisión {{ rem.numero }} — Troqueles INK</title>
+</head>
+<body style="margin:0;padding:0;background:#FAF7F1;font-family:Arial,sans-serif;color:#1B1816;">
+
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#FAF7F1;padding:32px 0;">
+  <tr><td align="center">
+    <table width="600" cellpadding="0" cellspacing="0" style="background:#FFFFFF;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+
+      <!-- Header -->
+      <tr>
+        <td style="background:#1B1816;padding:20px 32px;">
+          <table width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td>
+                <span style="display:inline-block;background:#B8541C;color:#fff;font-weight:700;font-size:13px;padding:4px 10px;border-radius:4px;letter-spacing:.05em;">TI</span>
+                <span style="color:#fff;font-weight:700;font-size:15px;margin-left:10px;">Troqueles INK</span>
+              </td>
+              <td align="right">
+                <span style="color:#807A6E;font-size:12px;">{{ rem.fecha }}</span>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+
+      <!-- Remisión number -->
+      <tr>
+        <td style="background:#B8541C;padding:12px 32px;">
+          <span style="color:#fff;font-size:18px;font-weight:700;letter-spacing:.02em;">Remisión {{ rem.numero }}</span>
+          {% if rem.orden.numero %}<span style="background:rgba(255,255,255,0.2);color:#fff;font-size:11px;padding:2px 8px;border-radius:12px;margin-left:10px;font-family:monospace;">{{ rem.orden.numero }}</span>{% endif %}
+        </td>
+      </tr>
+
+      <!-- Body -->
+      <tr>
+        <td style="padding:28px 32px;">
+
+          <!-- Client info -->
+          <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;border:1px solid #E8E1D2;border-radius:6px;overflow:hidden;">
+            <tr><td style="background:#F4EFE4;padding:8px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#807A6E;">Cliente</td></tr>
+            <tr>
+              <td style="padding:12px 16px;">
+                <div style="font-weight:600;font-size:15px;color:#1B1816;">{{ rem.cliente.nombre }}</div>
+                <div style="font-size:12px;color:#807A6E;margin-top:2px;">
+                  {% if rem.cliente.nit %}NIT {{ rem.cliente.nit }}{% endif %}
+                  {% if rem.direccion %} · {{ rem.direccion }}{% endif %}
+                  {% if rem.ciudad %} · {{ rem.ciudad }}{% endif %}
+                </div>
+              </td>
+            </tr>
+          </table>
+
+          <!-- Ítems entregados -->
+          <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;border:1px solid #E8E1D2;border-radius:6px;overflow:hidden;">
+            <tr>
+              <td style="background:#F4EFE4;padding:8px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#807A6E;">Ítem</td>
+              <td style="background:#F4EFE4;padding:8px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#807A6E;text-align:right;">Cantidad</td>
+              <td style="background:#F4EFE4;padding:8px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#807A6E;text-align:right;">Vr. Total</td>
+            </tr>
+            {% for item in items %}
+            <tr style="border-top:1px solid #E8E1D2;">
+              <td style="padding:8px 16px;font-size:13px;color:#1B1816;">{{ item.descripcion }}</td>
+              <td style="padding:8px 16px;font-size:13px;color:#4A453E;text-align:right;font-family:monospace;">{{ item.cantidad }}</td>
+              <td style="padding:8px 16px;font-size:13px;color:#4A453E;text-align:right;font-family:monospace;">{{ item.valor_total }}</td>
+            </tr>
+            {% endfor %}
+            <tr style="border-top:1px solid #E8E1D2;">
+              <td style="padding:8px 16px;font-size:13px;color:#4A453E;">Total entregado</td>
+              <td style="padding:8px 16px;font-size:13px;text-align:right;font-family:monospace;">{{ total_cantidad }}</td>
+              <td style="padding:8px 16px;font-size:13px;text-align:right;font-family:monospace;">{{ total_valor }}</td>
+            </tr>
+          </table>
+
+          <!-- Desglose por concepto del troquel -->
+          {% for t in troqueles %}
+          <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;border:1px solid #E8E1D2;border-radius:6px;overflow:hidden;">
+            <tr>
+              <td colspan="3" style="background:#FBE9DA;padding:8px 16px;font-size:12px;font-weight:700;color:#B8541C;">
+                Detalle {{ t.referencia|default:"del troquel" }}
+                <span style="font-family:monospace;font-weight:400;">{{ t.op_numero }}</span>
+                <span style="float:right;font-weight:400;color:#807A6E;">Cantidad: {{ t.cantidad }}</span>
+              </td>
+            </tr>
+            {% if t.consumos %}
+            <tr>
+              <td style="background:#F4EFE4;padding:8px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#807A6E;">Elemento</td>
+              <td style="background:#F4EFE4;padding:8px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#807A6E;text-align:right;">Precio unit.</td>
+              <td style="background:#F4EFE4;padding:8px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#807A6E;text-align:right;">Total</td>
+            </tr>
+            {% for c in t.consumos %}
+            <tr style="border-top:1px solid #E8E1D2;">
+              <td style="padding:8px 16px;font-size:13px;color:#1B1816;">
+                {{ c.concepto }}
+                <div style="font-size:11px;color:#807A6E;">{{ c.detalle }}{% if c.detalle %} · {% endif %}{{ c.cantidad }} {{ c.unidad }}</div>
+              </td>
+              <td style="padding:8px 16px;font-size:13px;color:#4A453E;text-align:right;font-family:monospace;">{{ c.precio }}</td>
+              <td style="padding:8px 16px;font-size:13px;color:#4A453E;text-align:right;font-family:monospace;">{{ c.total }}</td>
+            </tr>
+            {% endfor %}
+            <tr style="border-top:1px solid #E8E1D2;">
+              <td colspan="2" style="padding:8px 16px;font-size:13px;font-weight:700;color:#4A453E;">Subtotal troquel</td>
+              <td style="padding:8px 16px;font-size:13px;font-weight:700;text-align:right;font-family:monospace;color:#B8541C;">{{ t.total }}</td>
+            </tr>
+            {% else %}
+            <tr style="border-top:1px solid #E8E1D2;">
+              <td colspan="3" style="padding:10px 16px;font-size:12px;color:#807A6E;font-style:italic;">Sin formato de cuchillas registrado.</td>
+            </tr>
+            {% endif %}
+          </table>
+          {% endfor %}
+
+          <!-- Total a pagar -->
+          <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;border:1px solid #E8E1D2;border-radius:6px;overflow:hidden;">
+            {% if troqueles %}
+            <tr>
+              <td style="padding:8px 16px;font-size:13px;color:#4A453E;">Total general del desglose</td>
+              <td style="padding:8px 16px;font-size:13px;text-align:right;font-family:monospace;">{{ total_general }}</td>
+            </tr>
+            {% endif %}
+            <tr style="border-top:1px solid #E8E1D2;background:#FBE9DA;">
+              <td style="padding:12px 16px;font-size:15px;font-weight:700;color:#1B1816;">Total a pagar (COP)</td>
+              <td style="padding:12px 16px;font-size:16px;font-weight:700;text-align:right;font-family:monospace;color:#B8541C;">{{ total_valor }}</td>
+            </tr>
+          </table>
+
+          <!-- Observations -->
+          {% if rem.observaciones %}
+          <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;border:1px solid #E8E1D2;border-radius:6px;overflow:hidden;">
+            <tr><td style="background:#F4EFE4;padding:8px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#807A6E;">Observaciones</td></tr>
+            <tr>
+              <td style="padding:12px 16px;font-size:13px;color:#4A453E;white-space:pre-wrap;">{{ rem.observaciones }}</td>
+            </tr>
+          </table>
+          {% endif %}
+
+          <p style="margin:0;font-size:12px;color:#807A6E;">
+            Adjuntamos la remisión {{ rem.numero }} en PDF con el mismo detalle.
+          </p>
+
+        </td>
+      </tr>
+
+      <!-- Footer -->
+      <tr>
+        <td style="background:#F4EFE4;padding:16px 32px;text-align:center;border-top:1px solid #E8E1D2;">
+          <p style="margin:0;font-size:11px;color:#807A6E;">
+            Cra. 1 # 16-102 Cali – Colombia · Cel 3163612828 · contabilidad@troquelesink.com
+          </p>
+        </td>
+      </tr>
+
+    </table>
+  </td></tr>
+</table>
+
+</body>
+</html>

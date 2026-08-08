@@ -3,11 +3,65 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import { createPortal } from 'react-dom'
 import { Icon } from '../components/Icons'
 import { fmtCOP, fmtNum, REMISION_STATUS_DEFS } from '../components/core'
-import { getRemision, updateRemision, liquidarRemision, pdfRemision, getRemisionesImportables, importarRemisiones } from '../api'
+import { getRemision, updateRemision, liquidarRemision, pdfRemision, getRemisionDesglose, getRemisionesImportables, importarRemisiones } from '../api'
 import logo from '../assets/logo.png'
 
+// ─────────── Desglose por concepto del troquel ───────────
+// Los valores llegan ya formateados en COP desde el backend (mismos datos que
+// van al PDF adjunto y al cuerpo del correo).
+function DesgloseTroqueles({ desglose }) {
+  if (!desglose || !desglose.troqueles?.length) return null
+  return (
+    <>
+      {desglose.troqueles.map((t, i) => (
+        <div key={i} style={{ marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, marginBottom: 6 }}>
+            <div>
+              <strong style={{ fontSize: 13 }}>{t.referencia || 'Troquel'}</strong>{' '}
+              <span className="mono" style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 700 }}>{t.op_numero}</span>
+            </div>
+            <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>Cantidad entregada: {t.cantidad}</span>
+          </div>
+          {t.consumos?.length ? (
+            <table className="cot-doc-table">
+              <thead>
+                <tr>
+                  <th>Elemento</th><th>Detalle</th>
+                  <th className="num">Consumo</th><th className="num">Precio unit.</th><th className="num">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {t.consumos.map((c, j) => (
+                  <tr key={j}>
+                    <td>{c.concepto}</td>
+                    <td style={{ color: 'var(--ink-3)' }}>{c.detalle}</td>
+                    <td className="num">{c.cantidad} {c.unidad}</td>
+                    <td className="num">{c.precio}</td>
+                    <td className="num">{c.total}</td>
+                  </tr>
+                ))}
+                <tr className="cot-doc-total"><td colSpan={4}>Subtotal troquel</td><td className="num">{t.total}</td></tr>
+              </tbody>
+            </table>
+          ) : (
+            <div style={{ fontSize: 12, color: 'var(--ink-3)', fontStyle: 'italic', padding: '6px 0' }}>
+              Sin formato de cuchillas registrado.
+            </div>
+          )}
+        </div>
+      ))}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'baseline', gap: 10, paddingTop: 4 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--ink-3)' }}>
+          Total general del desglose
+        </span>
+        <span className="mono" style={{ fontSize: 15, fontWeight: 800, color: 'var(--accent)' }}>{desglose.total_general}</span>
+      </div>
+    </>
+  )
+}
+
 // ─────────── Modal de envío (espeja CotizacionModal) ───────────
-function SendModal({ rem, items, total, onClose, onSend }) {
+function SendModal({ rem, items, total, desglose, onClose, onSend }) {
   const totalCantidad = items.reduce((s, it) => s + (Number(it.cantidad) || 0), 0)
   const [email, setEmail] = useState(rem.cliente_email || '')
   const [extraEmails, setExtraEmails] = useState([])
@@ -64,12 +118,18 @@ function SendModal({ rem, items, total, onClose, onSend }) {
                   <tr key={i}><td>{it.descripcion || '—'}</td><td className="num">{it.cantidad}</td><td className="num">{fmtCOP(it.valor_total)}</td></tr>
                 ))}
                 <tr className="cot-doc-total"><td colSpan={2}>Total entregado</td><td className="num">{fmtNum(totalCantidad)} u</td></tr>
-                <tr className="cot-doc-total"><td colSpan={2}>Total</td><td className="num">{fmtCOP(total)}</td></tr>
+                <tr className="cot-doc-total"><td colSpan={2}>Total a pagar</td><td className="num">{fmtCOP(total)}</td></tr>
               </tbody>
             </table>
           </div>
+          {desglose?.troqueles?.length > 0 && (
+            <div className="cot-doc-section">
+              <div className="cot-doc-section-title">Desglose del troquel</div>
+              <DesgloseTroqueles desglose={desglose} />
+            </div>
+          )}
           <div className="note" style={{ fontSize: 12 }}>
-            <Icon.Info /> Se enviará al cliente y a contaduría (configurado en el sistema).
+            <Icon.Info /> Se enviará al cliente y a contabilidad@troquelesink.com, con el total en COP y este mismo desglose en el correo y en el PDF adjunto.
           </div>
         </div>
 
@@ -196,6 +256,7 @@ export default function RemisionEdit() {
   const navigate = useNavigate()
   const [rem, setRem] = useState(null)
   const [items, setItems] = useState([])
+  const [desglose, setDesglose] = useState(null)
   const [direccion, setDireccion] = useState('')
   const [ciudad, setCiudad] = useState('')
   const [observaciones, setObservaciones] = useState('')
@@ -227,6 +288,8 @@ export default function RemisionEdit() {
       .then(hydrate)
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
+    // El desglose es informativo: si falla no debe tumbar la página
+    getRemisionDesglose(id).then(setDesglose).catch(() => setDesglose(null))
   }, [id])
 
   const payload = () => ({
@@ -271,6 +334,8 @@ export default function RemisionEdit() {
     await updateRemision(id, payload())
     const updated = await importarRemisiones(id, ids)
     hydrate(updated)
+    // Al consolidar entran troqueles de otras OPs: el desglose cambia
+    getRemisionDesglose(id).then(setDesglose).catch(() => setDesglose(null))
     setShowImport(false)
   }
 
@@ -408,7 +473,7 @@ export default function RemisionEdit() {
                   {editable && <td></td>}
                 </tr>
                 <tr>
-                  <td colSpan={2} style={{ padding: '10px 6px', textAlign: 'right', fontWeight: 700 }}>Total</td>
+                  <td colSpan={2} style={{ padding: '10px 6px', textAlign: 'right', fontWeight: 700 }}>Total a pagar</td>
                   <td style={{ padding: '10px 6px', textAlign: 'right', fontWeight: 700, color: 'var(--accent)' }}>{fmtCOP(total)}</td>
                   {editable && <td></td>}
                 </tr>
@@ -416,6 +481,19 @@ export default function RemisionEdit() {
             </table>
           </div>
         </div>
+
+        {/* Desglose del troquel */}
+        {desglose?.troqueles?.length > 0 && (
+          <div className="section open" style={{ marginBottom: 16, padding: 18 }}>
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Desglose del troquel</div>
+            <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 12 }}>
+              Ítem por ítem, tal como sale en el correo y en el PDF adjunto de la liquidación.
+            </div>
+            <div style={{ overflowX: 'auto' }}>
+              <DesgloseTroqueles desglose={desglose} />
+            </div>
+          </div>
+        )}
 
         {/* Observaciones */}
         <div className="section open" style={{ marginBottom: 16, padding: 18 }}>
@@ -447,7 +525,7 @@ export default function RemisionEdit() {
       </div>
 
       {showModal && (
-        <SendModal rem={rem} items={items} total={total} onClose={() => setShowModal(false)} onSend={handleSend} />
+        <SendModal rem={rem} items={items} total={total} desglose={desglose} onClose={() => setShowModal(false)} onSend={handleSend} />
       )}
 
       {showImport && (
