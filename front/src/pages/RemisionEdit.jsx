@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom'
 import { Icon } from '../components/Icons'
 import { fmtCOP, fmtNum, REMISION_STATUS_DEFS } from '../components/core'
 import { TroquelCostos } from '../components/Troquel'
-import { getRemision, updateRemision, liquidarRemision, pdfRemision, getRemisionDesglose, getRemisionesImportables, importarRemisiones, devolverFormatoCuchillas } from '../api'
+import { getRemision, updateRemision, liquidarRemision, pdfRemision, getRemisionDesglose, getRemisionesImportables, importarRemisiones, devolverFormatoCuchillas, deleteRemision } from '../api'
 import logo from '../assets/logo.png'
 
 // ─────────── Desglose por concepto del troquel ───────────
@@ -150,6 +150,59 @@ function DevolverModal({ troquel, varios, busy, error, motivo, onMotivo, onClose
             <button className="btn" onClick={onClose} disabled={busy}>Cancelar</button>
             <button className="btn accent" onClick={onConfirm} disabled={busy}>
               {busy ? 'Devolviendo…' : 'Devolver troquel'}
+            </button>
+          </div>
+          {error && <span style={{ fontSize: 12, color: 'var(--danger)', width: '100%', textAlign: 'right' }}>✗ {error}</span>}
+        </div>
+      </div>
+    </div>,
+    document.body
+  )
+}
+
+// ─────────── Modal: eliminar la remisión ───────────
+// Deshace una liquidación equivocada. El comprobante desaparece y sus OPs
+// vuelven a la cola de remisiones del operador para poder rehacerla.
+function EliminarModal({ rem, liquidada, agrupadas, busy, error, onClose, onConfirm }) {
+  return createPortal(
+    <div className="cot-modal-backdrop" onClick={e => { if (e.target === e.currentTarget && !busy) onClose() }}>
+      <div className="cot-modal" style={{ maxWidth: 460 }}>
+        <div className="cot-modal-header">
+          <div className="brand"><div className="biz">Eliminar remisión</div></div>
+          <button className="btn cot-modal-close" style={{ padding: '4px 8px', fontSize: 13 }} onClick={onClose} disabled={busy}>
+            <Icon.X /> Cerrar
+          </button>
+        </div>
+        <div className="cot-modal-body">
+          <div style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5, marginBottom: 12 }}>
+            Se eliminará la remisión <strong className="mono">{rem.numero}</strong> de{' '}
+            <strong>{rem.cliente_nombre}</strong> con todos sus ítems. <strong>Esta acción no se
+            puede deshacer.</strong> Sus OPs vuelven a la cola de remisiones del operador, que podrá
+            generarla de nuevo.
+          </div>
+          {liquidada && (
+            <div className="note" style={{ fontSize: 12, marginBottom: 12 }}>
+              <Icon.Info /> Esta remisión ya se liquidó y se envió por correo al cliente y a
+              contaduría. Borrarla aquí <strong>no deshace ese correo</strong>.
+            </div>
+          )}
+          {agrupadas && (
+            <div className="note" style={{ fontSize: 12, marginBottom: 12 }}>
+              <Icon.Info /> Agrupa varios troqueles: al eliminarla, cada OP recupera su propia
+              remisión pendiente.
+            </div>
+          )}
+        </div>
+        <div className="cot-modal-actions">
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, width: '100%' }}>
+            <button className="btn" onClick={onClose} disabled={busy}>Cancelar</button>
+            <button
+              className="btn"
+              style={{ background: 'var(--danger)', borderColor: 'var(--danger)', color: '#fff' }}
+              onClick={onConfirm}
+              disabled={busy}
+            >
+              <Icon.Trash /> {busy ? 'Eliminando…' : 'Eliminar definitivamente'}
             </button>
           </div>
           {error && <span style={{ fontSize: 12, color: 'var(--danger)', width: '100%', textAlign: 'right' }}>✗ {error}</span>}
@@ -375,6 +428,9 @@ export default function RemisionEdit() {
   const [motivo, setMotivo] = useState('')
   const [devBusy, setDevBusy] = useState(false)
   const [devError, setDevError] = useState(null)
+  const [borrando, setBorrando] = useState(false)    // modal de eliminación abierto
+  const [delBusy, setDelBusy] = useState(false)
+  const [delError, setDelError] = useState(null)
 
   const editable = rem?.estado === 'pendiente'
   const liquidada = rem?.estado === 'liquidada'
@@ -473,6 +529,19 @@ export default function RemisionEdit() {
       setDevError(e.message || 'No se pudo devolver el troquel')
     } finally {
       setDevBusy(false)
+    }
+  }
+
+  const handleEliminar = async () => {
+    setDelBusy(true)
+    setDelError(null)
+    try {
+      await deleteRemision(id)
+      navigate('/remisiones', { replace: true })
+    } catch (e) {
+      setDelError(e.message || 'No se pudo eliminar la remisión')
+    } finally {
+      setDelBusy(false)
     }
   }
 
@@ -645,6 +714,16 @@ export default function RemisionEdit() {
         {/* Acciones */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', justifyContent: 'flex-end' }}>
           {savedMsg && <span style={{ fontSize: 12, color: savedMsg.startsWith('Error') ? 'var(--danger)' : 'var(--ok)' }}>{savedMsg}</span>}
+          {!consolidada && (
+            <button
+              className="btn"
+              style={{ color: 'var(--danger)', marginRight: 'auto' }}
+              onClick={() => { setDelError(null); setBorrando(true) }}
+              title="Elimina la remisión y devuelve sus OPs a la cola del operador"
+            >
+              <Icon.Trash /> Eliminar remisión
+            </button>
+          )}
           <button className="btn" onClick={() => handlePdf('cliente')} disabled={!!dlPdf} title="PDF que recibe el cliente (sin valores por ítem)">
             <Icon.Print /> {dlPdf === 'cliente' ? 'Generando…' : 'PDF cliente'}
           </button>
@@ -670,6 +749,18 @@ export default function RemisionEdit() {
 
       {showImport && (
         <ImportRemisionModal rem={rem} onClose={() => setShowImport(false)} onImport={handleImport} />
+      )}
+
+      {borrando && (
+        <EliminarModal
+          rem={rem}
+          liquidada={liquidada}
+          agrupadas={(desglose?.troqueles?.length || 0) > 1}
+          busy={delBusy}
+          error={delError}
+          onClose={() => setBorrando(false)}
+          onConfirm={handleEliminar}
+        />
       )}
 
       {devolviendo && (

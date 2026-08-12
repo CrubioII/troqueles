@@ -594,6 +594,8 @@ def _remision_operador_pdf_ctx(rem, admin=False, con_desperdicio=False):
             "referencia": op.referencia,
             "cantidad": _fmt_num(op.cantidad or 0),
             "consumos": consumos,
+            # Nota del Operador sobre este troquel: se imprime bajo su bloque.
+            "observaciones": (formato.observaciones or "") if formato else "",
         }
         if admin:
             troquel_total = _costos_items_total(raw_items)
@@ -1653,9 +1655,14 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
     def consolidar_remision_operador(self, request):
         """POST /api/ordenes/consolidar_remision_operador/ — Operador o Admin.
 
-        Body { "orden_ids": [int, ...] }. Asegura una remisión pendiente para
-        cada OP (mismo cliente), fusiona todas en la primera y devuelve
-        { remision_id, remision_numero }. No exige precios del troquel.
+        Body { "orden_ids": [int, ...], "observaciones": str? }. Asegura una
+        remisión pendiente para cada OP (mismo cliente), fusiona todas en la
+        primera y devuelve { remision_id, remision_numero }. No exige precios
+        del troquel.
+
+        `observaciones` es la nota general que el Operador escribe al generar:
+        se imprime al pie del documento. Vacía no borra la que ya traía la
+        remisión (heredada de la OP).
 
         La remisión queda marcada como generada: sus OPs salen de la cola del
         Operador y pasan al historial.
@@ -1698,9 +1705,14 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
             _consolidar_remisiones(target, fuentes)
         # Se estampa aquí y no al descargar el PDF: `remision_operador_pdf`
         # también sirve para re-descargar desde el historial.
+        campos = ["generada_en", "generada_por", "modificado"]
         target.generada_en = timezone.now()
         target.generada_por = request.user if request.user.is_authenticated else None
-        target.save(update_fields=["generada_en", "generada_por", "modificado"])
+        observaciones = (request.data.get("observaciones") or "").strip()
+        if observaciones:
+            target.observaciones = observaciones
+            campos.append("observaciones")
+        target.save(update_fields=campos)
         return Response({"remision_id": target.id, "remision_numero": target.numero})
 
     @action(detail=False, methods=["post"], url_path="remision_operador_pdf")
@@ -1845,7 +1857,8 @@ class RemisionViewSet(viewsets.ModelViewSet):
 
     Se autogeneran al completar una OP (estado=pendiente). El dueño edita los
     ítems y al liquidar se envía por correo (cliente + contaduría) y pasa al
-    historial (estado=liquidada). No se crean ni borran desde la API (PROTECT).
+    historial (estado=liquidada). No se crean desde la API; sí se pueden borrar
+    (DELETE) para deshacer una liquidación equivocada.
     El Operador envía remisiones por su propia vía:
     OrdenProduccionViewSet.enviar_remision (solo PDF cliente).
     """
@@ -1854,7 +1867,7 @@ class RemisionViewSet(viewsets.ModelViewSet):
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ["numero", "cliente__nombre", "orden__numero"]
     ordering_fields = ["creado", "fecha", "estado"]
-    http_method_names = ["get", "patch", "put", "post", "head", "options"]
+    http_method_names = ["get", "patch", "put", "post", "delete", "head", "options"]
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
@@ -1880,6 +1893,39 @@ class RemisionViewSet(viewsets.ModelViewSet):
         if fecha_before:
             qs = qs.filter(fecha__lte=fecha_before)
         return qs
+
+    def destroy(self, request, *args, **kwargs):
+        """DELETE /api/remisiones/{id}/ — borra la remisión (solo Admin, via initial).
+
+        Deshace una liquidación equivocada: el comprobante desaparece y sus OPs
+        vuelven a la cola de remisiones del Operador para poder rehacerlo. El
+        correo ya enviado, obviamente, no se deshace.
+
+        Si agrupaba otras remisiones, primero se desconsolidan (cada OP recupera
+        la suya, en pendiente). Una remisión consolidada dentro de otra no se
+        borra por su cuenta: sus ítems se cobran en el destino, así que hay que
+        borrar (o devolver) esa otra.
+        """
+        rem = self.get_object()
+        if rem.estado == "consolidada":
+            destino = rem.consolidada_en_remision
+            return Response({
+                "error": (
+                    f"La remisión {rem.numero} está consolidada dentro de "
+                    f"{destino.numero if destino else 'otra remisión'}; "
+                    "elimina esa remisión."
+                ),
+            }, status=409)
+        numero = rem.numero
+        with transaction.atomic():
+            if rem.remisiones_consolidadas.exists():
+                _desconsolidar_remision(rem)
+            if rem.orden_id:
+                OrdenProduccion.objects.filter(pk=rem.orden_id).update(
+                    remision_solicitada_en=None, remision_solicitada_por=None)
+            rem.items.all().delete()
+            rem.delete()
+        return Response({"ok": True, "numero": numero}, status=200)
 
     @action(detail=True, methods=["post"], url_path="pdf")
     def generar_pdf(self, request, pk=None):

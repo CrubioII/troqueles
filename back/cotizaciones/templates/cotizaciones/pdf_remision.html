@@ -177,6 +177,14 @@
   table.consumos thead th.col-cant,
   table.consumos thead th.col-precio,
   table.consumos thead th.col-imp { text-align: right; }
+
+  /* Nota del operador sobre ese troquel */
+  .troquel-nota { padding: 7px 18px 9px; background: #fcfaf8; }
+  .troquel-nota-lbl {
+    font-size: 8px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.1em; color: #b08a6a; margin-bottom: 2px;
+  }
+  .troquel-nota-text { font-size: 10px; color: #555; line-height: 1.5; white-space: pre-wrap; }
   .no-consumo { padding: 8px 18px; font-size: 10px; color: #aaa; font-style: italic; }
 
   tr.subtotal-row td {
@@ -348,6 +356,12 @@
     </table>
     {% else %}
     <div class="no-consumo">Sin formato de cuchillas registrado.</div>
+    {% endif %}
+    {% if t.observaciones %}
+    <div class="troquel-nota">
+      <div class="troquel-nota-lbl">Observaciones del troquel</div>
+      <div class="troquel-nota-text">{{ t.observaciones }}</div>
+    </div>
     {% endif %}
   </div>
   {% endfor %}

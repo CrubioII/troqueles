@@ -288,6 +288,7 @@ const EMPTY_FORMATO = {
   sac_medida: '', sac_cantidad: 0,
   perfo_cm: 0, perfo_medida: '',
   gan: '',
+  observaciones: '',
   cauchos: [{ tipo: 'verde', cm: 0 }],
   desperdicio_cm: 0,
   tiempo_encalado_min: 0, tiempo_encuchillado_min: 0, tiempo_encauchado_min: 0,
@@ -536,6 +537,21 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
         </div>
       </div>
 
+      {/* Nota de este troquel: sale impresa bajo su bloque en la remisión */}
+      <div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
+          Observaciones
+        </div>
+        <textarea
+          className="input"
+          rows={3}
+          style={{ width: '100%', resize: 'vertical' }}
+          placeholder="Notas sobre este troquel (aparecen en la remisión, bajo esta OP)…"
+          value={form.observaciones}
+          onChange={e => set('observaciones', e.target.value)}
+        />
+      </div>
+
       {error && <div style={{ color: 'var(--danger, #c0392b)', fontSize: 12 }}>{error}</div>}
       {okMsg && <div style={{ color: 'var(--accent)', fontSize: 12 }}>{okMsg}</div>}
 
@@ -661,7 +677,7 @@ export function FormatosCuchillasHistory({ formatos, loading, onEdit, showOrden 
     )
   }
 
-  const headers = ['Fecha / Hora', 'Estado', 'Operador', 'Cuchilla', 'Desperdicio', 'Total', 'Grafa', 'Caucho', 'Puntos', 'ch / sac / perfo / gan', 'Tiempos (enc/cuch/cauch)']
+  const headers = ['Fecha / Hora', 'Estado', 'Operador', 'Cuchilla', 'Desperdicio', 'Total', 'Grafa', 'Caucho', 'Puntos', 'ch / sac / perfo / gan', 'Tiempos (enc/cuch/cauch)', 'Observaciones']
   if (showOrden) headers.unshift('OP #', 'Cliente')
   if (onEdit) headers.push('')
 
@@ -742,6 +758,7 @@ export function FormatosCuchillasHistory({ formatos, loading, onEdit, showOrden 
                 <td style={{ padding: '8px 12px', fontSize: 12 }}>{puntos}</td>
                 <td style={{ padding: '8px 12px', fontSize: 12 }}>{chSacGan}</td>
                 <td style={{ padding: '8px 12px', fontSize: 12 }}>{[f.tiempo_encalado_min, f.tiempo_encuchillado_min, f.tiempo_encauchado_min].map(fmtMin).join(' / ')}</td>
+                <td style={{ padding: '8px 12px', fontSize: 12, color: 'var(--ink-2)', maxWidth: 260, whiteSpace: 'pre-wrap' }} title={f.observaciones || ''}>{f.observaciones || '—'}</td>
                 {onEdit && (
                   <td style={{ padding: '8px 12px' }}>
                     {canEdit(f) && <button className="btn sm" onClick={(e) => { e.stopPropagation(); onEdit(f) }}>Editar</button>}

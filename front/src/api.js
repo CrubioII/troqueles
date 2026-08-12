@@ -333,6 +333,11 @@ export const updateRemision = (id, data) =>
     body: JSON.stringify(data),
   }).then(json)
 
+// Borra la remisión (Admin): deshace una liquidación equivocada y devuelve sus
+// OPs a la cola de remisiones del Operador. 409 si está consolidada en otra.
+export const deleteRemision = (id) =>
+  apiFetch(`${BASE}/remisiones/${id}/`, { method: 'DELETE' }).then(jsonConError)
+
 // Desglose por concepto del troquel (mismos datos que van al PDF y al correo,
 // ya formateados en COP)
 export const getRemisionDesglose = (id) =>
@@ -433,12 +438,13 @@ export const devolverRemisionOperador = (remisionId) =>
   }).then(jsonConCodigo)
 
 // Crea/consolida una remisión del Operador a partir de varias OP del mismo cliente.
-// Devuelve { remision_id, remision_numero }.
-export const consolidarRemisionOperador = (ordenIds) =>
+// `observaciones`: nota general que se imprime al pie del documento (vacía no
+// borra la que ya traía la remisión). Devuelve { remision_id, remision_numero }.
+export const consolidarRemisionOperador = (ordenIds, observaciones = '') =>
   apiFetch(`${BASE}/ordenes/consolidar_remision_operador/`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ orden_ids: ordenIds }),
+    body: JSON.stringify({ orden_ids: ordenIds, observaciones }),
   }).then(jsonConCodigo)
 
 // Descarga el PDF de remisión del Operador (consumo en cm + firma del cliente).

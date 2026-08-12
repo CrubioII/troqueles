@@ -484,6 +484,9 @@ class FormatoCuchillas(models.Model):
     # Filas de caucho: [{"tipo": "verde"|"profigumi"|"blucolan", "cm": <number>}, ...]
     cauchos = models.JSONField(default=list, blank=True)
     gan = models.CharField(max_length=100, blank=True, default="")
+    # Nota libre del Operador sobre este troquel. Viaja a la remisión: se imprime
+    # bajo el bloque de su OP en todos los PDF (operador, cliente y admin).
+    observaciones = models.TextField(blank=True, default="")
     # Legacy (solo lectura, formatos anteriores al formulario estructurado)
     dos_puntos = models.BooleanField(default=False)
     tres_puntos = models.BooleanField(default=False)

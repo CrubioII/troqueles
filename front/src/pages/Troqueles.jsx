@@ -64,6 +64,46 @@ function Section({ title, children, style, actions }) {
   )
 }
 
+// ─────────────── Confirmación de remisión (Operador) ───────────────
+// Avisa antes de generar: si hace falta una observación general para toda la
+// remisión, este es el momento de escribirla — sale impresa en el documento.
+function ConfirmarRemisionModal({ cantidad, cliente, observaciones, onObservaciones, busy, error, onClose, onConfirm }) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 9999,
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+    }}>
+      <div style={{ background: 'var(--surface)', borderRadius: 12, maxWidth: 460, width: '100%', padding: 24, boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
+        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>
+          ⚠ Antes de generar la remisión
+        </div>
+        <div style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5, marginBottom: 14 }}>
+          Vas a generar una remisión de <strong>{cliente || 'este cliente'}</strong> con{' '}
+          <strong>{cantidad}</strong> {cantidad === 1 ? 'troquel' : 'troqueles'}. Si necesitas dejar una{' '}
+          <strong>observación general</strong> para toda la remisión, escríbela aquí:{' '}
+          <strong>aparecerá impresa en el documento generado</strong>. Las observaciones de cada
+          formato de cuchillas ya salen aparte, bajo su troquel.
+        </div>
+        <textarea
+          className="input"
+          rows={3}
+          style={{ width: '100%', resize: 'vertical' }}
+          placeholder="Observación general de la remisión (opcional)…"
+          value={observaciones}
+          onChange={e => onObservaciones(e.target.value)}
+        />
+        {error && <div style={{ marginTop: 10, fontSize: 12, color: 'var(--danger, #c0392b)' }}>✗ {error}</div>}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
+          <button className="btn" onClick={onClose} disabled={busy}>Cancelar</button>
+          <button className="btn primary" onClick={onConfirm} disabled={busy}>
+            {busy ? 'Generando…' : 'Generar remisión'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─────────────── Vista Admin ───────────────
 
 function AdminTroqueles() {
@@ -492,6 +532,8 @@ function OperadorTroqueles() {
   const [genBusy, setGenBusy] = useState(false)
   const [genError, setGenError] = useState(null)
   const [genOk, setGenOk] = useState(null)          // número de la última remisión generada
+  const [confirmGen, setConfirmGen] = useState(false) // modal previo a generar
+  const [obsRem, setObsRem] = useState('')            // observación general de la remisión
 
   const loadLista = (silent = false) => {
     if (!silent) setLoadingLista(true)
@@ -595,9 +637,10 @@ function OperadorTroqueles() {
     setGenError(null)
     setGenOk(null)
     try {
-      const { remision_id, remision_numero } = await consolidarRemisionOperador(selRem)
+      const { remision_id, remision_numero } = await consolidarRemisionOperador(selRem, obsRem.trim())
       await descargarPdfRemision(remision_id)
       setSelRem([]); setSelCliente(null)
+      setConfirmGen(false); setObsRem('')
       setGenOk(remision_numero)
       // Las OPs generadas salen de esta lista y quedan en Historial › Remisiones.
       loadRemisionables()
@@ -903,7 +946,11 @@ function OperadorTroqueles() {
           <Section
             title="Remisiones — selecciona troqueles de un cliente"
             actions={
-              <button className="btn sm primary" disabled={genBusy || !selRem.length} onClick={generarRemision}>
+              <button
+                className="btn sm primary"
+                disabled={genBusy || !selRem.length}
+                onClick={() => { setGenError(null); setGenOk(null); setConfirmGen(true) }}
+              >
                 {genBusy ? 'Generando…' : `Generar remisión${selRem.length ? ` (${selRem.length})` : ''}`}
               </button>
             }
@@ -972,6 +1019,19 @@ function OperadorTroqueles() {
               })
             )}
           </Section>
+        )}
+
+        {confirmGen && (
+          <ConfirmarRemisionModal
+            cantidad={selRem.length}
+            cliente={remisionables.find(op => op.cliente_id === selCliente)?.cliente_nombre}
+            observaciones={obsRem}
+            onObservaciones={setObsRem}
+            busy={genBusy}
+            error={genError}
+            onClose={() => { if (!genBusy) { setConfirmGen(false); setGenError(null) } }}
+            onConfirm={generarRemision}
+          />
         )}
       </>
     )
