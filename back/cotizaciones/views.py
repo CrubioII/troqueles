@@ -120,15 +120,16 @@ def _require_admin(request):
 
 
 CAUCHO_LABELS = dict(FormatoCuchillas.CAUCHO_TIPO_CHOICES)
+CUCHILLA_TIPO_LABELS = dict(FormatoCuchillas.CUCHILLA_TIPO_CHOICES)
 
 
 def _build_costos_seed(formato, precios=None):
     """Líneas de costo derivadas de un formato de cuchillas (una por concepto con datos).
 
     Cada línea lleva una `price_key` estable por concepto (para los cauchos,
-    `caucho:{tipo}`; para el resto, su propio `key`). `precios` es el mapa de precios
-    por cliente (price_key → precio); cuando trae un valor > 0 se usa como precio
-    inicial en vez de 0.
+    `caucho:{tipo}`; para la cuchilla, `cuchilla:{tipo}`; para el resto, su propio
+    `key`). `precios` es el mapa de precios por cliente (price_key → precio); cuando
+    trae un valor > 0 se usa como precio inicial en vez de 0.
     """
     precios = precios or {}
     lines = []
@@ -152,11 +153,17 @@ def _build_costos_seed(formato, precios=None):
     cuchilla_cm = float(formato.cuchilla_cm or 0)
     desperdicio_cm = float(formato.desperdicio_cm or 0)
     if cuchilla_cm > 0 or desperdicio_cm > 0:
+        # Doble bisel y Bohler se cobran distinto: cada tipo tiene su price_key.
+        # Los formatos sin tipo (previos al campo) conservan la key histórica.
+        tipo = formato.cuchilla_tipo
         partes = []
+        if tipo:
+            partes.append(CUCHILLA_TIPO_LABELS.get(tipo, tipo))
         if formato.cuchilla_puntos:
             partes.append(f"{formato.cuchilla_puntos} puntos")
         partes.append(f"{cuchilla_cm:g} cm + {desperdicio_cm:g} cm desperdicio")
-        add("cuchilla", "Cuchilla", " · ".join(partes), "cm", cuchilla_cm + desperdicio_cm)
+        add("cuchilla", "Cuchilla", " · ".join(partes), "cm", cuchilla_cm + desperdicio_cm,
+            price_key=f"cuchilla:{tipo}" if tipo else "cuchilla")
     if float(formato.grafa_cm or 0) > 0:
         partes = []
         if formato.grafa_puntos:
@@ -194,6 +201,11 @@ def _sync_troquel_costos(op):
     seed = _build_costos_seed(formato, precios)
     for line in seed:
         old = prev.get(line["key"])
+        # El precio pertenece a la price_key: si el Operador cambió el concepto
+        # (p.ej. la cuchilla pasó de doble bisel a Bohler) el precio anterior ya no
+        # aplica. Los items viejos sin price_key conservan el comportamiento previo.
+        if old and old.get("price_key") and old["price_key"] != line["price_key"]:
+            old = None
         if old:
             # Precio por-OP escrito a mano manda; si es 0, conserva el default del cliente.
             line["precio"] = old.get("precio") or line["precio"]

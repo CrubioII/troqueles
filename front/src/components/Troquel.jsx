@@ -24,6 +24,12 @@ const CAUCHO_TIPOS = [
   { value: 'blucolan', label: 'Blucolan' },
 ]
 const CAUCHO_TIPO_LABELS = Object.fromEntries(CAUCHO_TIPOS.map(t => [t.value, t.label]))
+// Tipo de cuchilla: independiente de los puntos y con precio propio por cliente
+const CUCHILLA_TIPOS = [
+  { value: 'doble_bisel', label: 'Doble bisel' },
+  { value: 'bohler', label: 'Bohler' },
+]
+const CUCHILLA_TIPO_LABELS = Object.fromEntries(CUCHILLA_TIPOS.map(t => [t.value, t.label]))
 const SAC_SIZE_LABELS = Object.fromEntries(SAC_SIZES.map(s => [s.value, s.label]))
 // Medidas fijas por tipo de puntos (mm); solo la altura de grafa 2pt es elegible
 const PUNTOS_SPECS = {
@@ -276,7 +282,7 @@ export function ModeloTroquelGestion({ ordenId, orden, onSaved, onOrdenSaved }) 
 // ────────── Formato de cuchillas (Operador) ──────────
 
 const EMPTY_FORMATO = {
-  cuchilla_cm: 0, cuchilla_puntos: '',
+  cuchilla_cm: 0, cuchilla_tipo: '', cuchilla_puntos: '',
   grafa_cm: 0, grafa_puntos: '', grafa_altura: '',
   ch_cm: 0, ch_medida: '',
   sac_medida: '', sac_cantidad: 0,
@@ -371,6 +377,12 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
 
   // Enviar (Operador): se confirma en el modal y queda pendiente de aprobación.
   const submitSend = () => {
+    // El tipo de cuchilla define el precio: sin él la remisión no se puede cotizar.
+    if ((Number(form.cuchilla_cm) || 0) > 0 && !form.cuchilla_tipo) {
+      setConfirming(false)
+      setError('Seleccione el tipo de cuchilla (doble bisel o Bohler).')
+      return
+    }
     setSaving(true); setError(null); setOkMsg(null)
     const req = draftId
       ? updateFormatoCuchillas(draftId, { ...formatoPayload(form), enviar: true })
@@ -395,7 +407,13 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 28, rowGap: 14 }}>
         <FieldGroup title="Cuchilla">
           <Field label="cm" w={90}><NumField placeholder="0" value={form.cuchilla_cm} onChange={v => set('cuchilla_cm', v)} /></Field>
-          <Field label="Tipo" w={110}>
+          <Field label="Cuchilla" w={130}>
+            <select className="input" value={form.cuchilla_tipo} onChange={e => set('cuchilla_tipo', e.target.value)}>
+              <option value="">—</option>
+              {CUCHILLA_TIPOS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Puntos" w={110}>
             <select className="input" value={form.cuchilla_puntos} onChange={e => set('cuchilla_puntos', e.target.value)}>
               <option value="">—</option>
               <option value="2">2 puntos</option>
@@ -676,6 +694,7 @@ export function FormatosCuchillasHistory({ formatos, loading, onEdit, showOrden 
           {formatos.map((f, idx) => {
             // Nuevo formato: puntos por material — legacy: booleanos compartidos
             const puntosNuevo = [
+              f.cuchilla_tipo && (CUCHILLA_TIPO_LABELS[f.cuchilla_tipo] || f.cuchilla_tipo),
               f.cuchilla_puntos && `C ${f.cuchilla_puntos}pt`,
               f.grafa_puntos && `G ${f.grafa_puntos}pt${f.grafa_altura ? ` (${f.grafa_altura.replace('.', ',')})` : ''}`,
             ].filter(Boolean).join(' · ')

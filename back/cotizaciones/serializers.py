@@ -456,6 +456,15 @@ class FormatoCuchillasSerializer(serializers.ModelSerializer):
 
     def validate(self, data):
         get = lambda k: data.get(k, getattr(self.instance, k, None) if self.instance else None)
+        # El tipo de cuchilla solo se exige al enviar: el Operador puede guardar
+        # avances incompletos como borrador y los formatos previos al campo
+        # (sin tipo) siguen siendo editables por el Admin.
+        request = self.context.get("request")
+        if request and request.data.get("enviar"):
+            if float(get("cuchilla_cm") or 0) > 0 and not get("cuchilla_tipo"):
+                raise serializers.ValidationError(
+                    {"cuchilla_tipo": "Seleccione el tipo de cuchilla (doble bisel o Bohler)."}
+                )
         grafa_puntos = get("grafa_puntos")
         if grafa_puntos == "2" and float(get("grafa_cm") or 0) > 0 and not get("grafa_altura"):
             raise serializers.ValidationError(
@@ -469,7 +478,8 @@ class FormatoCuchillasSerializer(serializers.ModelSerializer):
         model = FormatoCuchillas
         fields = [
             "id", "orden", "orden_numero", "cliente_nombre", "fecha_entrega", "referencia",
-            "cuchilla_cm", "cuchilla_puntos", "grafa_cm", "grafa_puntos", "grafa_altura",
+            "cuchilla_cm", "cuchilla_tipo", "cuchilla_puntos",
+            "grafa_cm", "grafa_puntos", "grafa_altura",
             "ch_cm", "ch_medida", "sac_cm", "sac_medida", "sac_cantidad", "perfo_cm", "perfo_medida",
             "desperdicio_cm", "cauchos", "gan",
             "dos_puntos", "tres_puntos", "perfo", "ch", "sac", "desperdicio",  # legacy, solo lectura

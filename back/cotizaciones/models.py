@@ -454,6 +454,7 @@ class FormatoCuchillas(models.Model):
     ]
     PUNTOS_CHOICES = [("2", "2 puntos"), ("3", "3 puntos")]
     GRAFA_ALTURA_CHOICES = [("23.4", "23,4 mm"), ("23.3", "23,3 mm")]
+    CUCHILLA_TIPO_CHOICES = [("doble_bisel", "Doble bisel"), ("bohler", "Bohler")]
 
     orden = models.ForeignKey(
         OrdenProduccion, on_delete=models.CASCADE, related_name="formatos_cuchillas"
@@ -461,8 +462,12 @@ class FormatoCuchillas(models.Model):
     # Cuchilla/grafa: cm usados + tipo de puntos. Las medidas fijas por tipo
     # (espesor 0,71 mm en 2pt / 1,05 mm en 3pt; altura 23,8 mm salvo grafa 3pt
     # que es 23,0 mm) se muestran en el front; solo la altura de grafa 2pt es
-    # elegible (23,4 o 23,3 mm).
+    # elegible (23,4 o 23,3 mm). El tipo de cuchilla (doble bisel / Bohler) es
+    # independiente del tipo de puntos y se cobra a precio distinto.
     cuchilla_cm = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    cuchilla_tipo = models.CharField(
+        max_length=12, choices=CUCHILLA_TIPO_CHOICES, blank=True, default=""
+    )
     cuchilla_puntos = models.CharField(max_length=1, choices=PUNTOS_CHOICES, blank=True, default="")
     grafa_cm = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     grafa_puntos = models.CharField(max_length=1, choices=PUNTOS_CHOICES, blank=True, default="")
