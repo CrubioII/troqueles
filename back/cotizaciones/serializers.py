@@ -598,7 +598,9 @@ class RemisionGeneradaOperadorSerializer(serializers.ModelSerializer):
 class RemisionItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = RemisionItem
-        fields = ["id", "descripcion", "cantidad", "valor_total", "orden"]
+        # `op` viaja de ida y vuelta: al guardar, RemisionSerializer recrea los
+        # ítems, y sin él se perdería el vínculo con la OP que los originó.
+        fields = ["id", "descripcion", "cantidad", "valor_total", "orden", "op"]
         read_only_fields = ["id"]
 
 

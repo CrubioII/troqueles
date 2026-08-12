@@ -204,7 +204,7 @@ def _sync_troquel_costos(op):
             line["precio"] = prev_caucho_precio.get(line["concepto"]) or line["precio"]
     modelo.costos_items = seed
     modelo.save(update_fields=["costos_items", "modificado"])
-    _write_troquel_costo_proceso(op, _costos_items_total(seed))
+    _aplicar_costo_troquel(op, _costos_items_total(seed))
     return modelo
 
 
@@ -234,15 +234,17 @@ def _troquel_costos_incompletos(op):
     )
 
 
-def _aprobar_formato_cuchillas(formato, user):
-    """Aprueba un formato de cuchillas: lo marca aprobado, completa el proceso
-    troquel de la OP, siembra costos si faltan y dispara la creación de remisión.
-    Lógica compartida por la acción individual y la aprobación en lote."""
+def _registrar_formato_cuchillas(formato):
+    """Da por bueno el formato que el Operador acaba de enviar: completa el
+    proceso troquel de la OP, siembra costos si faltan y dispara la creación de
+    la remisión.
+
+    No hay cola de aprobación: el Admin pone los precios sobre la remisión y,
+    si el formato está mal, lo devuelve al Operador desde ahí.
+    """
     formato.estado = "aprobado"
     formato.devolucion_motivo = ""
-    formato.revisado_por = user
-    formato.revisado_en = timezone.now()
-    formato.save(update_fields=["estado", "devolucion_motivo", "revisado_por", "revisado_en"])
+    formato.save(update_fields=["estado", "devolucion_motivo"])
     if formato.orden_id:
         formato.orden.procesos.filter(proceso_id="troquel").update(
             completado=True, completado_en=timezone.now()
@@ -255,8 +257,95 @@ def _aprobar_formato_cuchillas(formato, user):
         _maybe_crear_remision(formato.orden)
 
 
-def _write_troquel_costo_proceso(op, total):
+def _reabrir_troquel(formato, motivo="", revisor=None):
+    """Devuelve el troquel al Operador: el formato queda devuelto, el proceso
+    vuelve a pendiente y reaparece en su cola.
+
+    El llamador ya se encargó de la remisión (ver `_borrar_remision_de_op`).
+    """
+    formato.estado = "devuelto"
+    formato.devolucion_motivo = (motivo or "").strip()[:300]
+    formato.revisado_por = revisor
+    formato.revisado_en = timezone.now() if revisor else None
+    formato.save(update_fields=["estado", "devolucion_motivo", "revisado_por", "revisado_en"])
+    if formato.orden_id:
+        formato.orden.procesos.filter(proceso_id="troquel").update(
+            completado=False, completado_en=None, visible_operador=True
+        )
+
+
+def _borrar_remision_de_op(op):
+    """Elimina la remisión pendiente de la OP para que su troquel pueda volver a
+    la cola del Operador. Devuelve un mensaje de error si ya no se puede deshacer.
+
+    Si la remisión vive fusionada dentro de otra, solo se le sacan sus ítems (las
+    demás OPs conservan la suya); si es ella la que consolidó a otras, se
+    desconsolida antes de borrarla, para no arrastrarlas al vacío.
+    """
+    rem = Remision.objects.filter(orden=op).first()
+    if rem is None:
+        return None
+    destino = rem.consolidada_en_remision if rem.estado == "consolidada" else rem
+    if destino is not None and destino.estado == "liquidada":
+        return (
+            f"La remisión {destino.numero} ya fue liquidada; "
+            "no se puede devolver este troquel al operador."
+        )
+    if destino is not None and destino.pk != rem.pk and not destino.items.filter(op=op).exists():
+        # Consolidación anterior a la columna `op`: no se sabe qué ítems de la
+        # remisión destino salieron de esta OP y borrar de más cobraría mal.
+        return (
+            f"La remisión {destino.numero} se consolidó antes de esta versión y no se puede "
+            f"identificar qué ítems son de {op.numero}. Devuélvela desde el historial de "
+            "remisiones del operador (así cada OP recupera la suya) y vuelve a intentarlo."
+        )
+    with transaction.atomic():
+        if destino is not None and destino.pk != rem.pk:
+            destino.items.filter(op=op).delete()
+        if rem.remisiones_consolidadas.exists():
+            _desconsolidar_remision(rem)
+        rem.items.all().delete()
+        rem.delete()
+    return None
+
+
+def _aplicar_costo_troquel(op, total):
+    """Escribe el total del troquel en el proceso de la OP y en el ítem de su
+    remisión pendiente: lo que el Admin cotiza es lo que se cobra."""
     op.procesos.filter(proceso_id="troquel").update(costo=total)
+    _sync_remision_item_troquel(op, total)
+
+
+def _remision_visible_de_op(op):
+    """Id de la remisión donde se cobra esta OP: la suya, o la que la consolidó
+    (una remisión consolidada ya no se edita). None si aún no existe."""
+    rem = Remision.objects.filter(orden=op).first()
+    if rem is None:
+        return None
+    if rem.estado == "consolidada":
+        return rem.consolidada_en_remision_id
+    return rem.id
+
+
+def _sync_remision_item_troquel(op, total):
+    """Refleja el total del troquel en el ítem que la OP aporta a su remisión.
+
+    Con la remisión ya creada antes de que existan precios, el ítem nace en 0 (o
+    con un valor viejo); esto lo pone al día cada vez que cambian los costos.
+    Solo toca remisiones pendientes: liquidadas y consolidadas son historia.
+    """
+    rem = Remision.objects.filter(orden=op).first()
+    if rem is None:
+        return
+    destino = rem.consolidada_en_remision if rem.estado == "consolidada" else rem
+    if destino is None or destino.estado != "pendiente":
+        return
+    items = list(destino.items.filter(op=op))
+    if not items and destino.items.count() == 1 and len(_remision_operador_ops(destino)) == 1:
+        # Ítems anteriores a la columna `op`: sin ambigüedad posible, es este.
+        items = list(destino.items.all())
+    if len(items) == 1:
+        RemisionItem.objects.filter(pk=items[0].pk).update(valor_total=total)
 
 
 def _troquel_visible_operador(formato, visible):
@@ -285,6 +374,7 @@ def _seed_remision_item(rem, op):
         cantidad=op.cantidad or 0,
         valor_total=valor,
         orden=0,
+        op=op,
     )
 
 
@@ -385,6 +475,7 @@ def _consolidar_remisiones(target, fuentes, now=None):
                     cantidad=it.cantidad,
                     valor_total=it.valor_total,
                     orden=next_orden,
+                    op_id=it.op_id or f.orden_id,
                 )
                 next_orden += 1
             f.estado = "consolidada"
@@ -483,6 +574,10 @@ def _remision_operador_pdf_ctx(rem, admin=False, con_desperdicio=False):
             for ln in raw_items
         ]
         troquel = {
+            # op_id/formato_id no los usa ninguna plantilla: son para la pantalla
+            # de liquidación, que edita precios y devuelve el formato por OP.
+            "op_id": op.id,
+            "formato_id": formato.id if formato else None,
             "op_numero": op.numero,
             "referencia": op.referencia,
             "cantidad": _fmt_num(op.cantidad or 0),
@@ -1406,7 +1501,7 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
             modelo, _ = TroquelModelo.objects.get_or_create(orden=op)
             modelo.costos_items = items
             modelo.save(update_fields=["costos_items", "modificado"])
-            _write_troquel_costo_proceso(op, _costos_items_total(items))
+            _aplicar_costo_troquel(op, _costos_items_total(items))
         else:
             modelo = getattr(op, "troquel_modelo", None)
             if not modelo or not modelo.costos_items:
@@ -1527,9 +1622,10 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         qs = (
             OrdenProduccion.objects
             .filter(procesos__proceso_id="troquel", procesos__active=True)
-            # Solo OP con un formato de cuchillas cargado (no borrador): sin él no
-            # hay consumo que remisionar.
-            .filter(formatos_cuchillas__estado__in=["pendiente", "aprobado", "devuelto"])
+            # Solo OP con el formato de cuchillas enviado: sin él no hay consumo
+            # que remisionar, y uno devuelto tiene que corregirse y reenviarse
+            # antes de volver a entrar en una remisión.
+            .filter(formatos_cuchillas__estado__in=["pendiente", "aprobado"])
             .filter(
                 Q(remision__isnull=True)
                 | Q(remision__estado="pendiente", remision__generada_en__isnull=True)
@@ -1563,10 +1659,10 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         if len(cliente_ids) > 1:
             return Response({"error": "Todas las OP deben ser del mismo cliente."}, status=400)
 
-        # Cada OP debe tener un formato de cuchillas cargado (no borrador).
+        # Cada OP debe tener el formato de cuchillas enviado (ni borrador ni devuelto).
         sin_formato = [
             op.numero for op in ops
-            if not op.formatos_cuchillas.exclude(estado="borrador").exists()
+            if not op.formatos_cuchillas.filter(estado__in=["pendiente", "aprobado"]).exists()
         ]
         if sin_formato:
             return Response({
@@ -1665,11 +1761,15 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
 
         OPs donde el Operador pidió enviar la remisión y los precios del
         troquel siguen en 0. La alerta desaparece sola al poner precios.
+
+        `remision_id` apunta a la remisión donde se ponen esos precios (la de la
+        OP, o la que la consolidó); es null si todavía no existe.
         """
         qs = (
             OrdenProduccion.objects
             .filter(remision_solicitada_en__isnull=False)
-            .select_related("cliente", "remision_solicitada_por")
+            .select_related("cliente", "remision_solicitada_por",
+                            "remision", "remision__consolidada_en_remision")
             .order_by("remision_solicitada_en")
         )
         modelos = {m.orden_id: m for m in TroquelModelo.objects.filter(orden__in=qs)}
@@ -1681,6 +1781,7 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
                 "referencia": op.referencia,
                 "solicitada_en": op.remision_solicitada_en,
                 "solicitada_por": getattr(op.remision_solicitada_por, "username", ""),
+                "remision_id": _remision_visible_de_op(op),
             }
             for op in qs
             if _costos_items_total(getattr(modelos.get(op.id), "costos_items", None)) <= 0
@@ -1798,10 +1899,18 @@ class RemisionViewSet(viewsets.ModelViewSet):
         Desglose por concepto del/los troquel(es) de la remisión (incluidas las
         consolidadas), con precio unitario y subtotal. Mismos datos que van al
         PDF y al correo, ya formateados en COP.
+
+        Cada troquel trae también `precios_incompletos`: la pantalla de
+        liquidación es donde el Admin pone los precios, así que avisa antes de
+        cobrar un concepto que quedó en cero.
         """
         rem = self.get_object()
         # Pantalla interna del Admin: conserva el desperdicio de la cuchilla.
         det = _remision_operador_pdf_ctx(rem, admin=True, con_desperdicio=True)
+        ops = {op.id: op for op in _remision_operador_ops(rem)}
+        for troquel in det["troqueles"]:
+            op = ops.get(troquel["op_id"])
+            troquel["precios_incompletos"] = bool(op and _troquel_costos_incompletos(op))
         return Response({
             "troqueles": det["troqueles"],
             "total_general": det["total_general"],
@@ -1940,19 +2049,16 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
                 "Solo el administrador puede modificarlo."
             )
         # El Operador guarda avances como borrador y decide cuándo enviar
-        # (enviar=true → pendiente de aprobación). El troquel solo se completa
-        # (y puede generar remisión) cuando el Admin lo aprueba.
+        # (enviar=true). Al enviar, el troquel se da por terminado de una vez:
+        # no hay cola de aprobación, el Admin cotiza sobre la remisión.
         if self.request.user.is_staff:
             formato = serializer.save(operador=self.request.user)
         else:
-            estado = "pendiente" if self.request.data.get("enviar") else "borrador"
-            formato = serializer.save(operador=self.request.user, estado=estado)
-        if formato.estado != "borrador" and formato.orden_id:
-            _sync_troquel_costos(formato.orden)
-        # Solo al enviar a revisión (pendiente) sale de la cola del Operador;
-        # un devuelto guardado como avance sigue visible para corregirlo.
-        if formato.estado == "pendiente" and formato.orden_id:
-            _troquel_visible_operador(formato, False)
+            formato = serializer.save(
+                operador=self.request.user,
+                estado="aprobado" if self.request.data.get("enviar") else "borrador",
+            )
+        self._post_guardado(formato)
 
     def update(self, request, *args, **kwargs):
         self._check_update_permission(request)
@@ -1961,6 +2067,19 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
     def partial_update(self, request, *args, **kwargs):
         self._check_update_permission(request)
         return super().partial_update(request, *args, **kwargs)
+
+    def _post_guardado(self, formato):
+        """Cierra el ciclo tras guardar el formato.
+
+        Un formato que no es borrador ni devuelto está enviado: se da el troquel
+        por terminado (proceso completo → remisión) y se re-siembran los costos
+        conservando los precios que el Admin ya hubiera puesto.
+        """
+        if formato.estado in ("borrador", "devuelto") or not formato.orden_id:
+            return
+        _registrar_formato_cuchillas(formato)
+        _troquel_visible_operador(formato, False)
+        _sync_troquel_costos(formato.orden)
 
     def _check_update_permission(self, request):
         # Operador solo puede editar sus propios formatos no aprobados
@@ -1978,20 +2097,16 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
         if self.request.user.is_staff:
             formato = serializer.save()
         elif self.request.data.get("enviar"):
-            # Envío/reenvío del Operador: vuelve a la cola de aprobación.
+            # Envío/reenvío del Operador: el troquel queda terminado.
             formato = serializer.save(
                 operador=self.request.user,
-                estado="pendiente",
+                estado="aprobado",
                 devolucion_motivo="",
             )
         else:
-            # Guardar avance: conserva el estado actual (borrador/devuelto/pendiente).
+            # Guardar avance: conserva el estado actual (borrador/devuelto).
             formato = serializer.save(operador=self.request.user)
-        if formato.estado != "borrador" and formato.orden_id:
-            _sync_troquel_costos(formato.orden)
-        # Solo al enviar a revisión (pendiente) sale de la cola del Operador.
-        if formato.estado == "pendiente" and formato.orden_id:
-            _troquel_visible_operador(formato, False)
+        self._post_guardado(formato)
 
     def destroy(self, request, *args, **kwargs):
         _require_admin(request)
@@ -2000,91 +2115,52 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="cancelar_envio")
     def cancelar_envio(self, request, pk=None):
         """POST /api/formatos-cuchillas/{id}/cancelar_envio/ — el Operador dueño
-        retira un formato pendiente para volver a editarlo (→ borrador)."""
+        retira el formato que acaba de enviar para volver a editarlo (→ borrador).
+
+        Deshace el cierre del troquel: borra la remisión que se creó al enviarlo
+        y devuelve la OP a su cola. Si el Admin ya la liquidó, 409.
+        """
         formato = self.get_object()
         if not request.user.is_staff and formato.operador_id != request.user.id:
             raise PermissionDenied("Solo el operador que envió el formato puede cancelarlo.")
-        # UPDATE condicional atómico: si el Admin lo revisó un instante antes,
-        # no actualiza ninguna fila y respondemos 409.
-        updated = FormatoCuchillas.objects.filter(pk=formato.pk, estado="pendiente").update(
-            estado="borrador", devolucion_motivo=""
-        )
-        if not updated:
-            return Response({"error": "El formato ya fue revisado por el administrador."}, status=409)
-        formato.refresh_from_db()
-        _troquel_visible_operador(formato, True)  # vuelve a la cola del Operador
+        if formato.estado in ("borrador", "devuelto"):
+            return Response({"error": "Este formato no está enviado."}, status=409)
+        if formato.orden_id:
+            error = _borrar_remision_de_op(formato.orden)
+            if error:
+                return Response({"error": error}, status=409)
+            formato.orden.procesos.filter(proceso_id="troquel").update(
+                completado=False, completado_en=None, visible_operador=True
+            )
+        formato.estado = "borrador"
+        formato.devolucion_motivo = ""
+        formato.save(update_fields=["estado", "devolucion_motivo"])
         return Response(self.get_serializer(formato).data)
-
-    @action(detail=True, methods=["post"], url_path="aprobar")
-    def aprobar(self, request, pk=None):
-        """POST /api/formatos-cuchillas/{id}/aprobar/ — Admin aprueba el formato.
-
-        Completa el proceso troquel de la OP y dispara la creación de remisión
-        si la OP queda al 100%.
-        """
-        _require_admin(request)
-        formato = self.get_object()
-        if formato.estado == "borrador":
-            return Response({"error": "El operador canceló el envío de este formato."}, status=409)
-        _aprobar_formato_cuchillas(formato, request.user)
-        return Response(self.get_serializer(formato).data)
-
-    @action(detail=False, methods=["post"], url_path="aprobar_lote")
-    def aprobar_lote(self, request):
-        """POST /api/formatos-cuchillas/aprobar_lote/ — Body: { ids: [...] }.
-
-        Aprueba en lote los formatos pendientes; salta los que tengan costos
-        incompletos o ya no estén pendientes, informando cuáles.
-        """
-        _require_admin(request)
-        ids = request.data.get("ids", [])
-        if not isinstance(ids, list) or not ids:
-            return Response({"error": "Falta ids."}, status=400)
-        formatos = FormatoCuchillas.objects.select_related(
-            "orden", "orden__cliente"
-        ).filter(pk__in=ids)
-        aprobados, sin_costos, ya_resueltos = [], [], []
-        for formato in formatos:
-            if formato.estado != "pendiente":
-                ya_resueltos.append(formato.id)
-            elif not formato.orden_id or _troquel_costos_incompletos(formato.orden):
-                sin_costos.append({
-                    "id": formato.id,
-                    "orden_numero": formato.orden.numero if formato.orden_id else None,
-                    "cliente_nombre": (
-                        formato.orden.cliente.nombre
-                        if formato.orden_id and formato.orden.cliente_id else None
-                    ),
-                })
-            else:
-                with transaction.atomic():
-                    _aprobar_formato_cuchillas(formato, request.user)
-                aprobados.append(formato.id)
-        return Response({
-            "aprobados": aprobados,
-            "sin_costos": sin_costos,
-            "ya_resueltos": ya_resueltos,
-        })
 
     @action(detail=True, methods=["post"], url_path="devolver")
     def devolver(self, request, pk=None):
         """POST /api/formatos-cuchillas/{id}/devolver/ — Body: { motivo }.
 
-        Devuelve el formato al Operador: el proceso troquel vuelve a pendiente
-        y la OP reaparece en su lista. Si ya existía remisión, no se elimina;
-        una re-aprobación no la duplica (creación idempotente).
+        El Admin devuelve el formato al Operador desde la remisión: se borra la
+        remisión de esa OP, el proceso troquel vuelve a pendiente y la OP
+        reaparece en la cola del Operador para que corrija y reenvíe.
+
+        Responde además `remision_eliminada_id` para que la pantalla que lo pidió
+        sepa si se quedó sin remisión que mostrar.
         """
         _require_admin(request)
         formato = self.get_object()
-        if formato.estado == "borrador":
-            return Response({"error": "El operador canceló el envío de este formato."}, status=409)
-        formato.estado = "devuelto"
-        formato.devolucion_motivo = (request.data.get("motivo") or "").strip()[:300]
-        formato.revisado_por = request.user
-        formato.revisado_en = timezone.now()
-        formato.save(update_fields=["estado", "devolucion_motivo", "revisado_por", "revisado_en"])
+        if formato.estado in ("borrador", "devuelto"):
+            return Response({"error": "Este formato no está enviado."}, status=409)
+        rem_id = None
         if formato.orden_id:
-            formato.orden.procesos.filter(proceso_id="troquel").update(
-                completado=False, completado_en=None, visible_operador=True
-            )
-        return Response(self.get_serializer(formato).data)
+            rem = Remision.objects.filter(orden=formato.orden).first()
+            rem_id = rem.id if rem else None
+            error = _borrar_remision_de_op(formato.orden)
+            if error:
+                return Response({"error": error}, status=409)
+        _reabrir_troquel(formato, request.data.get("motivo"), revisor=request.user)
+        return Response({
+            **self.get_serializer(formato).data,
+            "remision_eliminada_id": rem_id,
+        })

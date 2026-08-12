@@ -505,7 +505,7 @@ export const createFormatoCuchillas = (data) =>
   }).then(json)
 
 // Editar formato existente — Admin, o el Operador guardando avance / reenviando.
-// El body acepta enviar:true para pasar el formato a pendiente de aprobación.
+// El body acepta enviar:true para dar el troquel por terminado.
 export const updateFormatoCuchillas = (id, data) =>
   apiFetch(`${BASE}/formatos-cuchillas/${id}/`, {
     method: 'PATCH',
@@ -513,21 +513,8 @@ export const updateFormatoCuchillas = (id, data) =>
     body: JSON.stringify(data),
   }).then(json)
 
-// Cola de aprobación de troqueles (Admin)
-export const getFormatosPendientes = () =>
-  apiFetch(`${BASE}/formatos-cuchillas/?estado=pendiente`).then(json)
-
-export const aprobarFormatoCuchillas = (id) =>
-  apiFetch(`${BASE}/formatos-cuchillas/${id}/aprobar/`, { method: 'POST' }).then(jsonConError)
-
-// Aprobación en lote (Admin): { aprobados, sin_costos, ya_resueltos }
-export const aprobarFormatosLote = (ids) =>
-  apiFetch(`${BASE}/formatos-cuchillas/aprobar_lote/`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ids }),
-  }).then(jsonConError)
-
+// El Admin devuelve el troquel al Operador desde la remisión: la remisión de esa
+// OP se elimina. Responde { …formato, remision_eliminada_id }.
 export const devolverFormatoCuchillas = (id, motivo = '') =>
   apiFetch(`${BASE}/formatos-cuchillas/${id}/devolver/`, {
     method: 'POST',
@@ -535,7 +522,7 @@ export const devolverFormatoCuchillas = (id, motivo = '') =>
     body: JSON.stringify({ motivo }),
   }).then(jsonConError)
 
-// El Operador cancela un formato enviado (pendiente → borrador) para editarlo
+// El Operador cancela un formato enviado (→ borrador) para editarlo
 export const cancelarEnvioFormato = (id) =>
   apiFetch(`${BASE}/formatos-cuchillas/${id}/cancelar_envio/`, { method: 'POST' }).then(jsonConError)
 

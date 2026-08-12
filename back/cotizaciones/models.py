@@ -588,6 +588,13 @@ class RemisionItem(models.Model):
     cantidad = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     valor_total = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     orden = models.PositiveSmallIntegerField(default=0)
+    # OP de la que salió el ítem (`orden` es el índice de ordenamiento, no la OP).
+    # Sobrevive a la consolidación, y es lo que permite refrescar el valor cobrado
+    # cuando el Admin cambia los precios del troquel desde la remisión.
+    op = models.ForeignKey(
+        OrdenProduccion, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="remision_items",
+    )
 
     class Meta:
         ordering = ["orden", "id"]

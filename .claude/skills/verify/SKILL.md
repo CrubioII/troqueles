@@ -29,7 +29,7 @@ Gotcha: list endpoints are paginated (`{count, next, previous, results}`) — pa
 
 ## UI surface
 
-Playwright (install in the scratchpad, not the project: `npm i playwright && npx playwright install chromium`). For login create a throwaway user with a known password via `manage.py shell` (`u.set_password(...)`), delete it after. Login page: placeholders `nombre de usuario` / `••••••••`. Operator troqueles flow lives at `/produccion/troqueles`; admin review at `/produccion/troqueles/revision`. Form inputs use class `.input` (no label-for associations — target by placeholder, role, or position).
+Playwright (install in the scratchpad, not the project: `npm i playwright && npx playwright install chromium`). For login create a throwaway user with a known password via `manage.py shell` (`u.set_password(...)`), delete it after. Login page: placeholders `nombre de usuario` / `••••••••`. Operator troqueles flow lives at `/produccion/troqueles`; the admin prices the troquel (and can send it back to the operator) on the remisión at `/remisiones/{id}`. Form inputs use class `.input` (no label-for associations — target by placeholder, role, or position).
 
 ## Test data & cleanup
 

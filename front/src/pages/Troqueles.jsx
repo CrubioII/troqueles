@@ -10,7 +10,7 @@ import {
 import {
   getOrdenes, deleteOrden, getFormatosCuchillas, getFormatosCuchillasTodos, getOrdenesPendientes,
   getOrdenProduccion, getTroquelModelo, toggleProcesoVisibleOperador,
-  updateFormatoCuchillas, getFormatosPendientes, cancelarEnvioFormato,
+  updateFormatoCuchillas, cancelarEnvioFormato,
   getRemisionablesOperador, consolidarRemisionOperador, pdfRemisionOperadorConsolidada,
   getRemisionesGeneradasOperador, devolverRemisionOperador,
   getRemisionesSolicitadas, setProcesoPrioridades,
@@ -71,26 +71,19 @@ function AdminTroqueles() {
   const [ordenes, setOrdenes] = useState([])
   const [loading, setLoading] = useState(true)
   const [showNueva, setShowNueva] = useState(false)      // modal Nueva tarea de troquel
-  const [pendientes, setPendientes] = useState([])       // formatos esperando aprobación (contador)
   const [solicitudes, setSolicitudes] = useState([])     // envíos de remisión bloqueados por falta de precios
   const [confirmDelete, setConfirmDelete] = useState(null)
   const [busqueda, setBusqueda] = useState('')           // filtro de la tabla de OPs en troquel
   const [prioridadError, setPrioridadError] = useState(null)
-
-  const loadPendientes = () =>
-    getFormatosPendientes()
-      .then(d => setPendientes(asList(d)))
-      .catch(() => setPendientes([]))
 
   const loadSolicitudes = () =>
     getRemisionesSolicitadas()
       .then(d => setSolicitudes(asList(d)))
       .catch(() => setSolicitudes([]))
 
-  useEffect(() => { loadPendientes(); loadSolicitudes() }, [])
+  useEffect(() => { loadSolicitudes() }, [])
   useSyncPolling({
     ordenes: () => loadOrdenes(),
-    formatos_pendientes: loadPendientes,
     remisiones_solicitadas: loadSolicitudes,
   })
 
@@ -180,12 +173,8 @@ function AdminTroqueles() {
     reordenar(cola)
   }
 
-  // Abre la gestión de la OP solicitada (o la cola de revisión si no está en la lista)
-  const irAPrecios = (s) => {
-    const row = ordenes.find(o => o.id === s.id)
-    if (row) abrirGestion(row)
-    else navigate('/produccion/troqueles/revision')
-  }
+  // Los precios del troquel se ponen sobre la remisión, no en la OP.
+  const irAPrecios = (s) => navigate(`/remisiones/${s.remision_id}`)
 
   return (
     <div onClick={() => setConfirmDelete(null)}>
@@ -201,26 +190,17 @@ function AdminTroqueles() {
                 <strong style={{ fontFamily: 'JetBrains Mono, monospace' }}>{s.numero}</strong>
                 {s.cliente_nombre && <> ({s.cliente_nombre})</>} — faltan los precios del troquel.
               </span>
-              <button className="btn sm primary" onClick={() => irAPrecios(s)}>Poner precios</button>
+              {s.remision_id ? (
+                <button className="btn sm primary" onClick={() => irAPrecios(s)}>Poner precios en la remisión</button>
+              ) : (
+                <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>
+                  Aún sin remisión — se crea al terminar la OP
+                </span>
+              )}
             </div>
           ))}
         </div>
       )}
-
-      <Section
-        title={`Troqueles por aprobar${pendientes.length ? ` (${pendientes.length})` : ''}`}
-        actions={
-          <button className="btn sm primary" onClick={() => navigate('/produccion/troqueles/revision')}>
-            Revisar troqueles
-          </button>
-        }
-      >
-        <div style={{ padding: '14px 16px', fontSize: 13, color: 'var(--ink-2)' }}>
-          {pendientes.length === 0
-            ? 'No hay troqueles esperando aprobación.'
-            : <>Hay <strong>{pendientes.length}</strong> {pendientes.length === 1 ? 'troquel terminado esperando' : 'troqueles terminados esperando'} tu aprobación antes de pasar a remisión.</>}
-        </div>
-      </Section>
 
       <Section title={`Cola del Operador${seleccionados.length ? ` (${seleccionados.length})` : ''}`}>
         <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', fontSize: 12, color: 'var(--ink-3)' }}>
@@ -689,8 +669,11 @@ function OperadorTroqueles() {
       .finally(() => setOpening(false))
   }
 
-  // Cancelar el envío del formato pendiente para volver a editarlo (→ borrador).
-  // Si el Admin ya lo revisó (409), se muestra el motivo y se refresca el estado real.
+  const esMio = (f) => !!user?.username && f?.operador_username === user.username
+
+  // Cancelar el envío del formato para volver a editarlo (→ borrador). Deshace el
+  // cierre del troquel y borra su remisión; si el Admin ya liquidó (409), se
+  // muestra el motivo y se refresca el estado real.
   const cancelarEnvio = (formatoId) => {
     if (!window.confirm('¿Cancelar el envío del formato para volver a editarlo?')) return
     setCancelando(true)
@@ -706,8 +689,7 @@ function OperadorTroqueles() {
   const volver = () => { setOrden(null); setFormatos([]); loadLista() }
 
   if (!orden) {
-    const puedeEditar = (f) =>
-      f.estado !== 'aprobado' && !!user?.username && f.operador_username === user.username
+    const puedeEditar = (f) => f.estado !== 'aprobado' && esMio(f)
     return (
       <>
         <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
@@ -1011,7 +993,7 @@ function OperadorTroqueles() {
           {formatos.length > 0 && formatos[0].estado === 'pendiente' && (
             <div style={{ marginTop: 16, padding: '12px 16px', borderRadius: 8, background: 'var(--warn-soft, #fef6e7)', border: '1px solid var(--warn, #e0a800)', fontSize: 13, color: 'var(--ink-2)' }}>
               <div>
-                ⏳ El formato de cuchillas fue enviado y está <strong>esperando aprobación del administrador</strong>.
+                ⏳ El formato de cuchillas fue enviado y está <strong>esperando revisión del administrador</strong>.
                 Si necesitas corregirlo, cancela el envío para volver a editarlo.
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
@@ -1061,8 +1043,20 @@ function OperadorTroqueles() {
 
           {formatos.length > 0 && formatos[0].estado === 'aprobado' && (
             <div style={{ marginTop: 16, padding: '12px 16px', borderRadius: 8, background: 'var(--warn-soft, #fef6e7)', border: '1px solid var(--warn, #e0a800)', fontSize: 13, color: 'var(--ink-2)' }}>
-              🔒 El formato de cuchillas de esta OP ya fue registrado y aprobado.
-              Si necesitas un cambio, contacta al administrador.
+              <div>
+                ✅ El formato de cuchillas quedó <strong>registrado</strong> y el troquel está terminado.
+                {esMio(formatos[0])
+                  ? ' Si te equivocaste, cancela el envío ahora para volver a editarlo; una vez el administrador liquide la remisión ya no se puede.'
+                  : ' Si necesitas un cambio, contacta al administrador.'}
+              </div>
+              {esMio(formatos[0]) && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
+                  <button className="btn sm" disabled={cancelando} onClick={() => cancelarEnvio(formatos[0].id)}>
+                    {cancelando ? 'Cancelando…' : 'Cancelar envío y corregir'}
+                  </button>
+                  {cancelError && <span style={{ fontSize: 12, color: 'var(--danger, #c0392b)' }}>{cancelError}</span>}
+                </div>
+              )}
             </div>
           )}
 

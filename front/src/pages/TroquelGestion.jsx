@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { Icon } from '../components/Icons'
 import { ProgressBar } from '../components/core'
 import {
-  ModeloTroquelGestion, TroquelCostos,
+  ModeloTroquelGestion,
   FormatosCuchillasHistory, FormatoCuchillasForm, OrdenCambiosHistory,
 } from '../components/Troquel'
 import { getOrden, getFormatosCuchillas, getOrdenCambios } from '../api'
@@ -45,7 +45,6 @@ export default function TroquelGestion() {
   const [notFound, setNotFound] = useState(false)
   const [formatos, setFormatos] = useState([])
   const [loadingFormatos, setLoadingFormatos] = useState(false)
-  const [costRefresh, setCostRefresh] = useState(0)
   const [editFormato, setEditFormato] = useState(null)   // formato en edición (Admin)
   const [cambios, setCambios] = useState([])
   const [loadingCambios, setLoadingCambios] = useState(false)
@@ -148,20 +147,15 @@ export default function TroquelGestion() {
               <ModeloTroquelGestion
                 ordenId={orden.id}
                 orden={orden}
-                onSaved={() => setCostRefresh(k => k + 1)}
                 onOrdenSaved={loadOrden}
               />
-            </Section>
-
-            <Section title="Costos (del formato de cuchillas)">
-              <TroquelCostos ordenId={orden.id} refreshKey={costRefresh} />
             </Section>
 
             <Section title="Auditoría — Formato de cuchillas registrado">
               {editFormato ? (
                 <FormatoCuchillasForm
                   formato={editFormato}
-                  onUpdated={() => { setEditFormato(null); loadFormatos(); setCostRefresh(k => k + 1) }}
+                  onUpdated={() => { setEditFormato(null); loadFormatos() }}
                   onCancel={() => setEditFormato(null)}
                 />
               ) : (

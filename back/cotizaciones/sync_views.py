@@ -34,10 +34,7 @@ class SyncView(APIView):
         rem = Remision.objects.aggregate(n=Count("id"), m=Max("modificado"))
         cli = Cliente.objects.aggregate(n=Count("id"), i=Max("id"), m=Max("creado"))
         reg = RegistroMaquina.objects.aggregate(n=Count("id"), i=Max("id"), m=Max("fecha_hora"))
-        fmt = FormatoCuchillas.objects.aggregate(
-            n=Count("id"), i=Max("id"), m=Max("revisado_en"),
-            p=Count("id", filter=Q(estado="pendiente")),
-        )
+        fmt = FormatoCuchillas.objects.aggregate(n=Count("id"), i=Max("id"), m=Max("revisado_en"))
         troq = TroquelModelo.objects.aggregate(m=Max("modificado"))
         return Response({
             "cotizaciones": _sig(cot["n"], cot["m"]),
@@ -45,7 +42,7 @@ class SyncView(APIView):
             "remisiones": _sig(rem["n"], rem["m"]),
             "clientes": _sig(cli["n"], cli["i"], cli["m"]),
             "registros": _sig(reg["n"], reg["i"], reg["m"]),
-            "formatos_pendientes": _sig(fmt["p"], fmt["n"], fmt["i"], fmt["m"]),
+            "formatos": _sig(fmt["n"], fmt["i"], fmt["m"]),
             # Poner precios al troquel quita la alerta, por eso entra modificado.
             "remisiones_solicitadas": _sig(orden["rs_n"], orden["rs_m"], troq["m"]),
         })

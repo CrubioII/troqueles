@@ -771,7 +771,9 @@ export function OrdenCambiosHistory({ cambios, loading }) {
 
 // ────────── Costos de troquel (Admin) ──────────
 
-export function TroquelCostos({ ordenId, refreshKey, onDirtyChange, clienteId, clienteNombre }) {
+// `onSaved` lo usa la remisión: al guardar precios el backend recalcula el valor
+// cobrado del ítem, así que la pantalla que la muestra tiene que recargarse.
+export function TroquelCostos({ ordenId, refreshKey, onDirtyChange, onSaved, clienteId, clienteNombre }) {
   const [items, setItems] = useState(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -802,7 +804,7 @@ export function TroquelCostos({ ordenId, refreshKey, onDirtyChange, clienteId, c
   const save = () => {
     setSaving(true); setError(null); setOkMsg(false)
     saveTroquelCostos(ordenId, items.map(({ total, ...it }) => it))
-      .then(data => { setItems(data.items || []); setDirty(false); setOkMsg(true) })
+      .then(data => { setItems(data.items || []); setDirty(false); setOkMsg(true); onSaved && onSaved(data) })
       .catch(() => setError('No se pudieron guardar los costos'))
       .finally(() => setSaving(false))
   }
@@ -821,7 +823,7 @@ export function TroquelCostos({ ordenId, refreshKey, onDirtyChange, clienteId, c
     saveTroquelCostos(ordenId, items.map(({ total, ...it }) => it))
       .then(() => saveClientePreciosTroquel(clienteId, precios))
       .then(() => getTroquelCostos(ordenId))
-      .then(data => { setItems(data.items || []); setDirty(false); setOkClienteMsg(true) })
+      .then(data => { setItems(data.items || []); setDirty(false); setOkClienteMsg(true); onSaved && onSaved(data) })
       .catch(() => setError('No se pudieron guardar los precios del cliente'))
       .finally(() => setSavingCliente(false))
   }

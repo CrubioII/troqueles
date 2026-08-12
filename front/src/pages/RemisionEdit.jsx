@@ -3,7 +3,8 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import { createPortal } from 'react-dom'
 import { Icon } from '../components/Icons'
 import { fmtCOP, fmtNum, REMISION_STATUS_DEFS } from '../components/core'
-import { getRemision, updateRemision, liquidarRemision, pdfRemision, getRemisionDesglose, getRemisionesImportables, importarRemisiones } from '../api'
+import { TroquelCostos } from '../components/Troquel'
+import { getRemision, updateRemision, liquidarRemision, pdfRemision, getRemisionDesglose, getRemisionesImportables, importarRemisiones, devolverFormatoCuchillas } from '../api'
 import logo from '../assets/logo.png'
 
 // ─────────── Desglose por concepto del troquel ───────────
@@ -57,6 +58,103 @@ function DesgloseTroqueles({ desglose }) {
         <span className="mono" style={{ fontSize: 15, fontWeight: 800, color: 'var(--accent)' }}>{desglose.total_general}</span>
       </div>
     </>
+  )
+}
+
+// ─────────── Precios del troquel (editables) ───────────
+// Esta es la única pantalla donde se cotiza el troquel: el Operador registra el
+// consumo en su formato de cuchillas y aquí se le pone precio. Al guardar, el
+// backend recalcula el Vr. Total del ítem que esa OP aporta a la remisión.
+function PreciosTroqueles({ desglose, rem, onSaved, onDevolver }) {
+  return (
+    <>
+      {desglose.troqueles.map(t => (
+        <div key={t.op_id} style={{ border: '1px solid var(--line)', borderRadius: 10, overflow: 'hidden', marginBottom: 14 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, padding: '10px 12px', background: 'var(--surface-2)', borderBottom: '1px solid var(--line)' }}>
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <strong style={{ fontSize: 13 }}>{t.referencia || 'Troquel'}</strong>{' '}
+              <span className="mono" style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 700 }}>{t.op_numero}</span>
+              <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>Cantidad entregada: {t.cantidad}</div>
+            </div>
+            {t.formato_id && (
+              <button className="btn" style={{ fontSize: 12, color: 'var(--danger)' }} onClick={() => onDevolver(t)}>
+                <Icon.ArrowLeft /> Devolver al operador
+              </button>
+            )}
+          </div>
+          {t.precios_incompletos && (
+            <div style={{ padding: '8px 12px', fontSize: 12, color: 'var(--warn, #b8860b)', borderBottom: '1px solid var(--line)' }}>
+              ⚠ Hay conceptos con consumo y precio en cero — complétalos antes de liquidar.
+            </div>
+          )}
+          {t.consumos?.length ? (
+            <TroquelCostos
+              ordenId={t.op_id}
+              clienteId={rem.cliente}
+              clienteNombre={rem.cliente_nombre}
+              onSaved={onSaved}
+            />
+          ) : (
+            <div style={{ padding: 16, fontSize: 12, color: 'var(--ink-3)', fontStyle: 'italic' }}>
+              Sin formato de cuchillas registrado.
+            </div>
+          )}
+        </div>
+      ))}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'baseline', gap: 10 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--ink-3)' }}>
+          Total general del desglose
+        </span>
+        <span className="mono" style={{ fontSize: 15, fontWeight: 800, color: 'var(--accent)' }}>{desglose.total_general}</span>
+      </div>
+    </>
+  )
+}
+
+// ─────────── Modal: devolver el troquel al operador ───────────
+function DevolverModal({ troquel, varios, busy, error, motivo, onMotivo, onClose, onConfirm }) {
+  return createPortal(
+    <div className="cot-modal-backdrop" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="cot-modal" style={{ maxWidth: 460 }}>
+        <div className="cot-modal-header">
+          <div className="brand"><div className="biz">Devolver al operador</div></div>
+          <button className="btn cot-modal-close" style={{ padding: '4px 8px', fontSize: 13 }} onClick={onClose}>
+            <Icon.X /> Cerrar
+          </button>
+        </div>
+        <div className="cot-modal-body">
+          <div style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5, marginBottom: 12 }}>
+            El troquel de <strong className="mono">{troquel.op_numero}</strong> vuelve a la cola del operador
+            para que corrija el formato de cuchillas y lo reenvíe. <strong>Esta remisión se elimina</strong>;
+            al reenviarlo se generará una nueva.
+          </div>
+          {varios && (
+            <div className="note" style={{ fontSize: 12, marginBottom: 12 }}>
+              <Icon.Info /> Esta remisión agrupa varios troqueles: al devolver uno, los demás se separan
+              y cada OP recupera su propia remisión pendiente.
+            </div>
+          )}
+          <textarea
+            className="input"
+            style={{ width: '100%', minHeight: 70, resize: 'vertical' }}
+            placeholder="Motivo de la devolución (lo verá el operador)"
+            value={motivo}
+            onChange={e => onMotivo(e.target.value)}
+            maxLength={300}
+          />
+        </div>
+        <div className="cot-modal-actions">
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, width: '100%' }}>
+            <button className="btn" onClick={onClose} disabled={busy}>Cancelar</button>
+            <button className="btn accent" onClick={onConfirm} disabled={busy}>
+              {busy ? 'Devolviendo…' : 'Devolver troquel'}
+            </button>
+          </div>
+          {error && <span style={{ fontSize: 12, color: 'var(--danger)', width: '100%', textAlign: 'right' }}>✗ {error}</span>}
+        </div>
+      </div>
+    </div>,
+    document.body
   )
 }
 
@@ -267,6 +365,10 @@ export default function RemisionEdit() {
   const [showModal, setShowModal] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [toast, setToast] = useState(null)
+  const [devolviendo, setDevolviendo] = useState(null)   // troquel del desglose en devolución
+  const [motivo, setMotivo] = useState('')
+  const [devBusy, setDevBusy] = useState(false)
+  const [devError, setDevError] = useState(null)
 
   const editable = rem?.estado === 'pendiente'
   const liquidada = rem?.estado === 'liquidada'
@@ -276,7 +378,9 @@ export default function RemisionEdit() {
 
   const hydrate = (data) => {
     setRem(data)
-    setItems((data.items || []).map(i => ({ descripcion: i.descripcion, cantidad: i.cantidad, valor_total: i.valor_total })))
+    // `op` viaja de vuelta al guardar: es lo que ata cada ítem a su OP y permite
+    // que poner precios al troquel actualice el valor cobrado.
+    setItems((data.items || []).map(i => ({ descripcion: i.descripcion, cantidad: i.cantidad, valor_total: i.valor_total, op: i.op })))
     setDireccion(data.direccion || '')
     setCiudad(data.ciudad || '')
     setObservaciones(data.observaciones || '')
@@ -292,6 +396,12 @@ export default function RemisionEdit() {
     getRemisionDesglose(id).then(setDesglose).catch(() => setDesglose(null))
   }, [id])
 
+  // Tras guardar precios del troquel el backend reescribe el ítem: recarga ambos.
+  const recargarTrasPrecios = () => Promise.all([
+    getRemision(id).then(hydrate).catch(() => {}),
+    getRemisionDesglose(id).then(setDesglose).catch(() => {}),
+  ])
+
   const payload = () => ({
     direccion, ciudad, observaciones,
     items: items.map((it, idx) => ({
@@ -299,6 +409,7 @@ export default function RemisionEdit() {
       cantidad: Number(it.cantidad) || 0,
       valor_total: Number(it.valor_total) || 0,
       orden: idx,
+      op: it.op ?? null,
     })),
   })
 
@@ -341,6 +452,23 @@ export default function RemisionEdit() {
 
   const updateItem = (i, field, value) => setItems(prev => prev.map((it, idx) => idx === i ? { ...it, [field]: value } : it))
   const removeItem = (i) => setItems(prev => prev.filter((_, idx) => idx !== i))
+
+  // Devolver el troquel borra la remisión de esa OP. Si es la que se está viendo,
+  // ya no hay nada que mostrar; si sobrevive (agrupaba otras OPs), se recarga.
+  const handleDevolver = async () => {
+    setDevBusy(true)
+    setDevError(null)
+    try {
+      const res = await devolverFormatoCuchillas(devolviendo.formato_id, motivo)
+      setDevolviendo(null)
+      if (String(res.remision_eliminada_id) === String(id)) navigate('/remisiones', { replace: true })
+      else await recargarTrasPrecios()
+    } catch (e) {
+      setDevError(e.message || 'No se pudo devolver el troquel')
+    } finally {
+      setDevBusy(false)
+    }
+  }
 
   const [dlPdf, setDlPdf] = useState(null) // 'cliente' | 'admin' mientras descarga
   const handlePdf = async (tipo) => {
@@ -482,15 +610,21 @@ export default function RemisionEdit() {
           </div>
         </div>
 
-        {/* Desglose del troquel */}
+        {/* Precios del troquel — editables mientras la remisión esté pendiente */}
         {desglose?.troqueles?.length > 0 && (
           <div className="section open" style={{ marginBottom: 16, padding: 18 }}>
-            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Desglose del troquel</div>
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>
+              {editable ? 'Precios del troquel' : 'Desglose del troquel'}
+            </div>
             <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 12 }}>
-              Ítem por ítem, tal como sale en el correo y en el PDF adjunto de la liquidación.
+              {editable
+                ? 'El operador registró el consumo; aquí le pones precio. Al guardar, el Vr. Total del ítem se actualiza con el nuevo total. Si el formato de cuchillas está mal, devuelve el troquel al operador.'
+                : 'Ítem por ítem, tal como sale en el correo y en el PDF adjunto de la liquidación.'}
             </div>
             <div style={{ overflowX: 'auto' }}>
-              <DesgloseTroqueles desglose={desglose} />
+              {editable
+                ? <PreciosTroqueles desglose={desglose} rem={rem} onSaved={recargarTrasPrecios} onDevolver={t => { setMotivo(''); setDevError(null); setDevolviendo(t) }} />
+                : <DesgloseTroqueles desglose={desglose} />}
             </div>
           </div>
         )}
@@ -530,6 +664,19 @@ export default function RemisionEdit() {
 
       {showImport && (
         <ImportRemisionModal rem={rem} onClose={() => setShowImport(false)} onImport={handleImport} />
+      )}
+
+      {devolviendo && (
+        <DevolverModal
+          troquel={devolviendo}
+          varios={(desglose?.troqueles?.length || 0) > 1}
+          busy={devBusy}
+          error={devError}
+          motivo={motivo}
+          onMotivo={setMotivo}
+          onClose={() => setDevolviendo(null)}
+          onConfirm={handleDevolver}
+        />
       )}
 
       {/* Notificación sutil al historial */}
