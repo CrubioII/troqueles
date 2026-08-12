@@ -26,7 +26,7 @@ function fmtEntrega(s) {
 function Section({ title, children, style, actions }) {
   return (
     <div className="section" style={{ marginTop: 16, ...style }}>
-      <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)', fontWeight: 700, fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+      <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)', fontWeight: 700, fontSize: 13, display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
         <span>{title}</span>
         {actions}
       </div>
@@ -92,7 +92,7 @@ export default function TroquelGestion() {
         </div>
       </div>
 
-      <div style={{ maxWidth: 1200, margin: '0 auto', padding: '20px 24px', width: '100%' }}>
+      <div style={{ maxWidth: 1200, margin: '0 auto', padding: 'clamp(12px, 4vw, 28px) clamp(12px, 4vw, 24px)', width: '100%' }}>
         {loading ? (
           <div style={{ padding: 40, textAlign: 'center', color: 'var(--ink-3)' }}>Cargando…</div>
         ) : notFound || !orden ? (
@@ -110,7 +110,7 @@ export default function TroquelGestion() {
             <Section
               title={<>Troquel · <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{orden.numero}</span></>}
               actions={
-                <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                   <button className="btn sm" onClick={() => navigate(`/ordenes/${id}`)}>Abrir OP completa</button>
                   <button className="btn sm" onClick={volver}><Icon.ArrowLeft /> Volver</button>
                 </div>

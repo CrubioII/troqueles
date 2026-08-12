@@ -61,7 +61,7 @@ function HistorySection({ title, count, children }) {
             Sin registros.
           </div>
         ) : (
-          <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>{children}</div>
+          <div className="table-scroll">{children}</div>
         )}
       </div>
     </div>

@@ -111,7 +111,8 @@ export function IngresosChart({ data }) {
       <ResponsiveContainer width="100%" height={200}>
         <LineChart data={data} margin={{ left: 8, right: 8 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#E8E1D2" />
-          <XAxis dataKey="periodo" tick={{ fontSize: 11 }} />
+          {/* 12 monthly labels overlap on a phone — thin them out automatically */}
+          <XAxis dataKey="periodo" tick={{ fontSize: 11 }} interval="preserveStartEnd" minTickGap={20} />
           <YAxis tickFormatter={fmtCOP} tick={{ fontSize: 11 }} width={80} />
           <Tooltip formatter={(v) => fmtCOP(v)} />
           <Line type="monotone" dataKey="valor" stroke="#B8541C" strokeWidth={2} dot={{ r: 3 }} />

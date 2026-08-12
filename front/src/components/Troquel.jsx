@@ -617,8 +617,8 @@ export function FormatosCuchillasHistory({ formatos, loading, onEdit, showOrden 
     const chdrs = ['OP #', 'Referencia', 'Cliente', 'Fecha / Hora', 'Estado', 'Operador', 'Cuchilla (cm)']
     if (onEdit) chdrs.push('')
     return (
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <div className="table-scroll">
+        <table style={{ width: '100%', minWidth: 900, borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ borderBottom: '2px solid var(--line)' }}>
               {chdrs.map((h, i) => (
@@ -681,8 +681,8 @@ export function FormatosCuchillasHistory({ formatos, loading, onEdit, showOrden 
     return f.sac || ''
   }
   return (
-    <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+    <div className="table-scroll">
+      <table style={{ width: '100%', minWidth: 1200, borderCollapse: 'collapse' }}>
         <thead>
           <tr style={{ borderBottom: '2px solid var(--line)' }}>
             {headers.map((h, i) => (
@@ -763,8 +763,8 @@ export function OrdenCambiosHistory({ cambios, loading }) {
   if (!cambios || !cambios.length) return <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Sin cambios registrados.</div>
   const headers = ['Fecha / Hora', 'Usuario', 'Campo', 'Antes', 'Después']
   return (
-    <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+    <div className="table-scroll">
+      <table style={{ width: '100%', minWidth: 640, borderCollapse: 'collapse' }}>
         <thead>
           <tr style={{ borderBottom: '2px solid var(--line)' }}>
             {headers.map((h, i) => (
@@ -860,8 +860,8 @@ export function TroquelCostos({ ordenId, refreshKey, onDirtyChange, onSaved, cli
   const total = items.reduce((acc, it) => acc + (Number(it.cantidad) || 0) * (Number(it.precio) || 0), 0)
   return (
     <div>
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <div className="table-scroll">
+        <table style={{ width: '100%', minWidth: 660, borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ borderBottom: '2px solid var(--line)' }}>
               {['Concepto', 'Detalle', 'Cantidad', 'Precio unit.', 'Total'].map((h, i) => (

@@ -186,11 +186,11 @@ function ImportCotizacionModal({ clienteId, onImport, onClose }) {
 
   return (
     <div style={{
-      position: 'fixed', inset: 0, zIndex: 200,
+      position: 'fixed', inset: 0, zIndex: 200, padding: 16,
       background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center',
     }} onClick={onClose}>
       <div style={{
-        background: 'var(--surface)', borderRadius: 10, padding: 20, width: 520, maxHeight: '70vh',
+        background: 'var(--surface)', borderRadius: 10, padding: 20, width: '100%', maxWidth: 520, maxHeight: '70vh',
         overflowY: 'auto', boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
       }} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
@@ -208,7 +208,8 @@ function ImportCotizacionModal({ clienteId, onImport, onClose }) {
             Este cliente no tiene cotizaciones.
           </div>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <div className="table-scroll">
+          <table style={{ width: '100%', minWidth: 460, borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ background: 'var(--surface-2)' }}>
                 {['N°', 'Referencia', 'Cant.', 'Estado', ''].map((h, i) => (
@@ -238,6 +239,7 @@ function ImportCotizacionModal({ clienteId, onImport, onClose }) {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>
@@ -265,11 +267,12 @@ function SendModal({ doc, onSend, onClose }) {
 
   return (
     <div style={{
-      position: 'fixed', inset: 0, zIndex: 200,
+      position: 'fixed', inset: 0, zIndex: 200, padding: 16,
       background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center',
     }} onClick={onClose}>
       <div style={{
-        background: 'var(--surface)', borderRadius: 10, padding: 24, width: 420,
+        background: 'var(--surface)', borderRadius: 10, padding: 24, width: '100%', maxWidth: 420,
+        maxHeight: 'calc(100vh - 32px)', overflowY: 'auto',
         boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
       }} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
@@ -540,7 +543,7 @@ export default function DocumentoClienteEdit() {
       </div>
 
       {/* Content */}
-      <div style={{ maxWidth: 900, margin: '0 auto', padding: '28px 24px' }}>
+      <div style={{ maxWidth: 900, margin: '0 auto', padding: 'clamp(12px, 4vw, 28px) clamp(12px, 4vw, 24px)' }}>
 
         {/* Header */}
         <div style={{ marginBottom: 24 }}>
@@ -786,10 +789,9 @@ export default function DocumentoClienteEdit() {
 
       {/* Toast */}
       {toast && (
-        <div style={{
-          position: 'fixed', bottom: 28, left: '50%', transform: 'translateX(-50%)',
+        <div className="floating-bar" style={{
           background: '#1a4a2e', color: '#fff', padding: '10px 22px',
-          borderRadius: 8, fontSize: 13, fontWeight: 500, zIndex: 9999,
+          borderRadius: 8, fontSize: 13, fontWeight: 500,
           boxShadow: '0 4px 16px rgba(0,0,0,0.25)', display: 'flex', alignItems: 'center', gap: 8,
         }}>
           ✓ {toast}

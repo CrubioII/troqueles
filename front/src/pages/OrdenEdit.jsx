@@ -396,12 +396,11 @@ export default function OrdenEdit() {
 
       {/* Save toast */}
       {toast && (
-        <div style={{
-          position: 'fixed', bottom: 28, left: '50%', transform: 'translateX(-50%)',
+        <div className="floating-bar" style={{
           background: '#1a4a2e', color: '#fff', padding: '10px 22px',
-          borderRadius: 8, fontSize: 13, fontWeight: 500, zIndex: 9999,
+          borderRadius: 8, fontSize: 13, fontWeight: 500,
           boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
-          display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap',
+          display: 'flex', alignItems: 'center', gap: 8, textAlign: 'center',
         }}>
           ✓ {toast}
         </div>

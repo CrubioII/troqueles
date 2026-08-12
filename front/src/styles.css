@@ -24,6 +24,8 @@
   --shadow-md: 0 1px 0 rgba(27,24,22,0.04), 0 8px 24px -10px rgba(27,24,22,0.10);
   --radius: 6px;
   --radius-lg: 10px;
+  --bottom-nav-h: 60px;
+  --shell-topbar-h: 48px;
 }
 
 * { box-sizing: border-box; }
@@ -962,10 +964,44 @@ input.input[type="number"]::-webkit-inner-spin-button {
 .op-proc-item + .op-proc-item { border-top: 1px solid var(--line); }
 .op-proc-name { flex: 1; color: var(--ink-2); }
 
-/* ===== Responsive ===== */
+/* ===== Wide-table horizontal scroll =====
+   .section has overflow:hidden, so a table wider than the viewport is CLIPPED
+   with no scrollbar. Every table wider than ~375px must sit in one of these.
+   The per-table min-width stays inline on the <table>. */
+.table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
+
+/* ===== Floating toast / save bar =====
+   Must clear the fixed mobile bottom nav and the home-indicator inset. */
+.floating-bar {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  z-index: 1000;
+  max-width: calc(100vw - 24px);
+}
+@media screen and (max-width: 768px) {
+  .floating-bar {
+    bottom: calc(var(--bottom-nav-h) + 12px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+/* ===== Responsive =====
+   Three tiers:
+     900px — workspace splits/stacks its two columns
+     768px — the mobile breakpoint (app shell, page chrome, grids)
+     480px — phone portrait, force single column
+   All blocks are `screen and` on purpose: during printing the media width is
+   the page box (~680px), so a plain max-width query would collide with
+   @media print at the bottom of this file. */
 
 /* Tablet: stack workspace columns */
-@media (max-width: 900px) {
+@media screen and (max-width: 900px) {
   .workspace {
     grid-template-columns: 1fr;
     padding: 16px 16px 60px;
@@ -976,7 +1012,7 @@ input.input[type="number"]::-webkit-inner-spin-button {
 }
 
 /* Mobile: compact topbar, 2-col grids */
-@media (max-width: 640px) {
+@media screen and (max-width: 768px) {
   .topbar { padding: 8px 12px; gap: 8px; }
   .brand .biz { display: none; }
   .userchip > div { display: none; } /* hide name/role text, keep avatar */
@@ -1019,21 +1055,54 @@ input.input[type="number"]::-webkit-inner-spin-button {
   /* Workspace padding */
   .workspace { padding: 12px 12px 60px; }
   .section-body { padding: 12px; }
+
+  /* Cotización / remisión modal: reclaim horizontal space */
+  .cot-modal-backdrop { padding: 12px 8px; }
+  .cot-modal-header { padding: 12px 14px; flex-wrap: wrap; gap: 8px; }
+  .cot-modal-body { padding: 16px 12px; }
+  .cot-modal-actions { padding: 12px 14px; }
+  .cot-modal-email-row { flex-wrap: wrap; min-width: 0; }
+}
+
+/* Phone portrait: force single column where two still overflow */
+@media screen and (max-width: 480px) {
+  .grid-3, .grid-4 { grid-template-columns: 1fr; }
+  .grid-6 { grid-template-columns: 1fr 1fr; }
+  .grid-4 .col-span-3,
+  .grid-4 .col-span-4,
+  .grid-3 .col-span-3 { grid-column: span 1; }
+  .cond-pago-options { grid-template-columns: 1fr 1fr; }
+  .sheet-stats { grid-template-columns: 1fr 1fr; }
+  .impresion-top { grid-template-columns: 22px 1fr; }
+
+  /* Process rows: the fixed-width selects/inputs don't fit next to the name,
+     so stack name / fields / cost in a single column beside the checkbox. */
+  .proc-row { grid-template-columns: 22px minmax(0, 1fr); row-gap: 8px; }
+  .proc-row > .proc-name,
+  .proc-row > .proc-fields,
+  .proc-row > .proc-cost { grid-column: 2; }
+  .proc-fields { flex-wrap: wrap; }
+  .proc-cost { text-align: left; }
+  /* .proc-row.impresion-row is display:block and lays itself out — left alone */
 }
 
 /* ===== App shell (Layout.jsx sidebar / mobile nav) ===== */
 .app-mobile-topbar { display: none; }
 .app-bottom-nav { display: none; }
 
-@media (max-width: 768px) {
+@media screen and (max-width: 768px) {
   .app-sidebar { display: none !important; }
   .app-mobile-topbar {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 10px 14px;
+    height: var(--shell-topbar-h);
+    padding: 0 14px;
     background: var(--surface);
     border-bottom: 1px solid var(--line);
     position: sticky; top: 0; z-index: 40;
   }
+  /* The page-level .topbar also sticks to top:0; dock it under the shell bar
+     instead of letting it slide behind. */
+  .topbar { top: var(--shell-topbar-h); }
   .app-bottom-nav {
     display: flex;
     position: fixed; left: 0; right: 0; bottom: 0;
@@ -1043,7 +1112,7 @@ input.input[type="number"]::-webkit-inner-spin-button {
     z-index: 40;
     padding: 4px 4px calc(4px + env(safe-area-inset-bottom, 0px));
   }
-  .app-content { padding-bottom: 60px; }
+  .app-content { padding-bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px)); }
 }
 
 .app-bottom-nav-btn {
@@ -1083,7 +1152,7 @@ input.input[type="number"]::-webkit-inner-spin-button {
   transition: transform 0.22s ease;
   box-shadow: 8px 0 24px rgba(27,24,22,0.12);
 }
-@media (max-width: 768px) {
+@media screen and (max-width: 768px) {
   .app-drawer-backdrop, .app-drawer-panel { display: flex; }
   .app-drawer-backdrop.open { opacity: 1; pointer-events: auto; }
   .app-drawer-panel.open { transform: translateX(0); }
@@ -1126,6 +1195,7 @@ input.input[type="number"]::-webkit-inner-spin-button {
 
 @media print {
   body > *:not(.cot-modal-backdrop) { display: none !important; }
+  .table-scroll { overflow: visible !important; max-width: none !important; }
   .cot-modal-backdrop {
     position: static !important; background: none !important;
     padding: 0 !important; overflow: visible !important;

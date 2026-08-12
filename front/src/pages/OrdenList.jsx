@@ -109,7 +109,7 @@ export default function OrdenList() {
         </div>
       </div>
 
-      <div style={{ maxWidth: 1200, margin: '0 auto', padding: '20px 24px' }}>
+      <div style={{ maxWidth: 1200, margin: '0 auto', padding: 'clamp(12px, 4vw, 28px) clamp(12px, 4vw, 24px)' }}>
         {/* Toolbar */}
         <div style={{ display: 'flex', gap: 10, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
           <div style={{ position: 'relative', flex: 1, minWidth: 220 }}>
@@ -145,7 +145,8 @@ export default function OrdenList() {
               )}
             </div>
           ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <div className="table-scroll">
+            <table style={{ width: '100%', minWidth: 1100, borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ borderBottom: '2px solid var(--line)' }}>
                   {['OP #', 'Fecha', 'Cliente', 'Referencia', 'Cantidad', 'Valor total', 'Abono', 'Saldo', 'Origen', ''].map((h, i) => (
@@ -221,6 +222,7 @@ export default function OrdenList() {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </div>
 

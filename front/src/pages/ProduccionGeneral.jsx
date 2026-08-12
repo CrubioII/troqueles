@@ -170,7 +170,7 @@ export default function ProduccionGeneral() {
         </div>
       </div>
 
-      <div style={{ maxWidth: 1200, margin: '0 auto', padding: '20px 24px', width: '100%' }}>
+      <div style={{ maxWidth: 1200, margin: '0 auto', padding: 'clamp(12px, 4vw, 28px) clamp(12px, 4vw, 24px)', width: '100%' }}>
         <div style={{ display: 'flex', gap: 10, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
           <div style={{ position: 'relative', flex: 1, minWidth: 220 }}>
             <input
@@ -198,7 +198,8 @@ export default function ProduccionGeneral() {
               No hay órdenes de producción
             </div>
           ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <div className="table-scroll">
+            <table style={{ width: '100%', minWidth: 820, borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ borderBottom: '2px solid var(--line)' }}>
                   {['', 'OP #', 'Fecha', 'Cliente', 'Referencia', 'Cantidad', 'Progreso'].map((h, i) => (
@@ -263,6 +264,7 @@ export default function ProduccionGeneral() {
                 })}
               </tbody>
             </table>
+            </div>
           )}
         </div>
 

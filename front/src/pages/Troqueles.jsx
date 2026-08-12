@@ -55,7 +55,7 @@ const byEntrega = (a, b) => {
 function Section({ title, children, style, actions }) {
   return (
     <div className="section" style={{ marginTop: 16, ...style }}>
-      <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)', fontWeight: 700, fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+      <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)', fontWeight: 700, fontSize: 13, display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
         <span>{title}</span>
         {actions}
       </div>
@@ -217,7 +217,8 @@ function AdminTroqueles() {
             Ningún troquel seleccionado — la pantalla del operador está vacía.
           </div>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <div className="table-scroll">
+          <table style={{ width: '100%', minWidth: 760, borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ borderBottom: '2px solid var(--line)' }}>
                 {['#', 'OP #', 'Entrega', 'Cliente', 'Referencia', 'Prioridad', ''].map((h, i) => (
@@ -251,6 +252,7 @@ function AdminTroqueles() {
               })}
             </tbody>
           </table>
+          </div>
         )}
       </Section>
 
@@ -281,7 +283,8 @@ function AdminTroqueles() {
           {ordenesFiltradas.length === 0 ? (
             <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Sin resultados para «{busqueda.trim()}»</div>
           ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <div className="table-scroll">
+          <table style={{ width: '100%', minWidth: 820, borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ borderBottom: '2px solid var(--line)' }}>
                 {['OP #', 'Entrega', 'Cliente', 'Referencia', 'Progreso', 'Operador', ''].map((h, i) => (
@@ -326,6 +329,7 @@ function AdminTroqueles() {
               ))}
             </tbody>
           </table>
+          </div>
           )}
           </>
         )}
@@ -751,7 +755,8 @@ function OperadorTroqueles() {
                 {busquedaHistRem.trim() ? `Sin resultados para «${busquedaHistRem.trim()}»` : 'Todavía no has generado remisiones.'}
               </div>
             ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <div className="table-scroll">
+              <table style={{ width: '100%', minWidth: 820, borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--line)', textAlign: 'left', fontSize: 12, color: 'var(--ink-3)' }}>
                     <th style={{ padding: '8px 12px' }}>Remisión</th>
@@ -795,6 +800,7 @@ function OperadorTroqueles() {
                   })}
                 </tbody>
               </table>
+              </div>
             )}
           </Section>
         )}
@@ -856,7 +862,8 @@ function OperadorTroqueles() {
               {listaFiltrada.length === 0 ? (
                 <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Sin resultados para «{busqueda.trim()}»</div>
               ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <div className="table-scroll">
+              <table style={{ width: '100%', minWidth: 760, borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ borderBottom: '2px solid var(--line)' }}>
                     {['#', 'OP #', 'Entrega', 'Cliente', 'Referencia', 'Cantidad', ''].map((h, i) => (
@@ -885,6 +892,7 @@ function OperadorTroqueles() {
                   })}
                 </tbody>
               </table>
+              </div>
               )}
               </>
             )}
@@ -1085,7 +1093,7 @@ export default function Troqueles() {
         </div>
       </div>
 
-      <div style={{ maxWidth: 1200, margin: '0 auto', padding: '20px 24px', width: '100%' }}>
+      <div style={{ maxWidth: 1200, margin: '0 auto', padding: 'clamp(12px, 4vw, 28px) clamp(12px, 4vw, 24px)', width: '100%' }}>
         {isAdmin ? <AdminTroqueles /> : <OperadorTroqueles />}
       </div>
     </div>

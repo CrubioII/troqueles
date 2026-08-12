@@ -100,7 +100,8 @@ export function RegistroMaquinaHistory({ registros, loading, showOrden = true })
     ? ['Fecha / Hora', 'OP #', 'Cliente', 'Descripción', 'Costo', 'Operador']
     : ['Fecha / Hora', 'Descripción', 'Costo', 'Operador']
   return (
-    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+    <div className="table-scroll">
+    <table style={{ width: '100%', minWidth: showOrden ? 720 : 480, borderCollapse: 'collapse' }}>
       <thead>
         <tr style={{ borderBottom: '2px solid var(--line)' }}>
           {headers.map((h, i) => (
@@ -139,5 +140,6 @@ export function RegistroMaquinaHistory({ registros, loading, showOrden = true })
         ))}
       </tbody>
     </table>
+    </div>
   )
 }

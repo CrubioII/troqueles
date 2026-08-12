@@ -24,7 +24,8 @@ function DesgloseTroqueles({ desglose }) {
             <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>Cantidad entregada: {t.cantidad}</span>
           </div>
           {t.consumos?.length ? (
-            <table className="cot-doc-table">
+            <div className="table-scroll">
+            <table className="cot-doc-table" style={{ minWidth: 560 }}>
               <thead>
                 <tr>
                   <th>Elemento</th><th>Detalle</th>
@@ -44,6 +45,7 @@ function DesgloseTroqueles({ desglose }) {
                 <tr className="cot-doc-total"><td colSpan={4}>Subtotal troquel</td><td className="num">{t.total}</td></tr>
               </tbody>
             </table>
+            </div>
           ) : (
             <div style={{ fontSize: 12, color: 'var(--ink-3)', fontStyle: 'italic', padding: '6px 0' }}>
               Sin formato de cuchillas registrado.
@@ -209,7 +211,8 @@ function SendModal({ rem, items, total, desglose, onClose, onSend }) {
           </div>
           <div className="cot-doc-section">
             <div className="cot-doc-section-title">Ítems</div>
-            <table className="cot-doc-table">
+            <div className="table-scroll">
+            <table className="cot-doc-table" style={{ minWidth: 380 }}>
               <thead><tr><th>Descripción</th><th className="num">Cantidad</th><th className="num">Vr. Total</th></tr></thead>
               <tbody>
                 {items.map((it, i) => (
@@ -219,6 +222,7 @@ function SendModal({ rem, items, total, desglose, onClose, onSend }) {
                 <tr className="cot-doc-total"><td colSpan={2}>Total a pagar</td><td className="num">{fmtCOP(total)}</td></tr>
               </tbody>
             </table>
+            </div>
           </div>
           {desglose?.troqueles?.length > 0 && (
             <div className="cot-doc-section">
@@ -315,7 +319,8 @@ function ImportRemisionModal({ rem, onClose, onImport }) {
               No hay otras remisiones pendientes de este cliente.
             </div>
           ) : (
-            <table className="cot-doc-table">
+            <div className="table-scroll">
+            <table className="cot-doc-table" style={{ minWidth: 480 }}>
               <thead><tr><th style={{ width: 36 }}></th><th>Remisión</th><th>OP</th><th className="num">Cantidad</th><th className="num">Vr. Total</th></tr></thead>
               <tbody>
                 {opciones.map(o => (
@@ -329,6 +334,7 @@ function ImportRemisionModal({ rem, onClose, onImport }) {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </div>
 
@@ -561,7 +567,7 @@ export default function RemisionEdit() {
               </button>
             )}
           </div>
-          <div style={{ overflowX: 'auto' }}>
+          <div className="table-scroll">
             <table style={{ width: '100%', minWidth: 480, borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border)' }}>
@@ -621,7 +627,7 @@ export default function RemisionEdit() {
                 ? 'El operador registró el consumo; aquí le pones precio. Al guardar, el Vr. Total del ítem se actualiza con el nuevo total. Si el formato de cuchillas está mal, devuelve el troquel al operador.'
                 : 'Ítem por ítem, tal como sale en el correo y en el PDF adjunto de la liquidación.'}
             </div>
-            <div style={{ overflowX: 'auto' }}>
+            <div className="table-scroll">
               {editable
                 ? <PreciosTroqueles desglose={desglose} rem={rem} onSaved={recargarTrasPrecios} onDevolver={t => { setMotivo(''); setDevError(null); setDevolviendo(t) }} />
                 : <DesgloseTroqueles desglose={desglose} />}
@@ -681,11 +687,10 @@ export default function RemisionEdit() {
 
       {/* Notificación sutil al historial */}
       {toast && (
-        <div style={{
-          position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
+        <div className="floating-bar" style={{
           background: 'var(--ink)', color: 'var(--bg)', padding: '12px 18px', borderRadius: 10,
-          display: 'flex', alignItems: 'center', gap: 14, boxShadow: '0 6px 24px rgba(0,0,0,0.25)',
-          zIndex: 1000, fontSize: 13, maxWidth: 'calc(100vw - 32px)',
+          display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 14,
+          boxShadow: '0 6px 24px rgba(0,0,0,0.25)', fontSize: 13,
         }}>
           <Icon.Check />
           <span>Remisión enviada al historial — puedes seguir viéndola aquí.</span>

@@ -69,7 +69,7 @@ export default function Guillotina() {
         </div>
       </div>
 
-      <div style={{ maxWidth: 1200, margin: '0 auto', padding: '20px 24px', width: '100%' }}>
+      <div style={{ maxWidth: 1200, margin: '0 auto', padding: 'clamp(12px, 4vw, 28px) clamp(12px, 4vw, 24px)', width: '100%' }}>
 
         <RegistroMaquinaForm maquina="guillotina" onCreated={() => loadRegistros(true)} />
 
