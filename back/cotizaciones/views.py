@@ -1,5 +1,6 @@
 import base64
 import os
+import re
 import threading
 import traceback
 from rest_framework import viewsets, filters
@@ -104,6 +105,7 @@ from .serializers import (
     OrdenOperadorSerializer,
     OrdenCambioSerializer,
     RemisionableOperadorSerializer,
+    RemisionGeneradaOperadorSerializer,
     RemisionSerializer,
     RemisionListSerializer,
 )
@@ -268,12 +270,28 @@ def _troquel_visible_operador(formato, visible):
         formato.orden.procesos.filter(proceso_id="troquel").update(visible_operador=visible)
 
 
+def _seed_remision_item(rem, op):
+    """Ítem inicial de la remisión derivado de la OP (referencia + valor total de
+    venta, o el total de costos de troquel si la OP tiene ese proceso activo).
+    El dueño lo edita/divide al liquidar."""
+    valor = 0
+    if op.procesos.filter(proceso_id="troquel", active=True).exists():
+        valor = _troquel_costos_total(op)
+    if not valor:
+        valor = _orden_valor_total_efectivo(op) or 0
+    return RemisionItem.objects.create(
+        remision=rem,
+        descripcion=op.referencia,
+        cantidad=op.cantidad or 0,
+        valor_total=valor,
+        orden=0,
+    )
+
+
 def _crear_remision(op):
     """Crea la remisión de la OP (estado=pendiente) si no existe; devuelve la existente si ya hay.
 
-    Genera un ítem inicial derivado de la OP (referencia + valor total de venta,
-    o el total de costos de troquel si la OP tiene ese proceso activo);
-    el dueño lo edita/divide al liquidar. No valida progreso ni aprobación.
+    No valida progreso ni aprobación.
     """
     existente = Remision.objects.filter(orden=op).first()
     if existente:
@@ -287,18 +305,7 @@ def _crear_remision(op):
             ciudad=op.cliente.ciudad,
             observaciones=op.observaciones,
         )
-        valor = 0
-        if op.procesos.filter(proceso_id="troquel", active=True).exists():
-            valor = _troquel_costos_total(op)
-        if not valor:
-            valor = _orden_valor_total_efectivo(op) or 0
-        RemisionItem.objects.create(
-            remision=rem,
-            descripcion=op.referencia,
-            cantidad=op.cantidad or 0,
-            valor_total=valor,
-            orden=0,
-        )
+        _seed_remision_item(rem, op)
     return rem
 
 
@@ -388,6 +395,33 @@ def _consolidar_remisiones(target, fuentes, now=None):
     return target
 
 
+def _desconsolidar_remision(rem):
+    """Deshace una remisión generada por el Operador: sus fuentes vuelven a
+    pendiente y el destino se re-siembra solo con su propia OP, de modo que cada
+    OP regresa por separado a la cola de remisionables.
+
+    Se borran todos los ítems del destino en vez de identificar cuáles vinieron
+    de cada fuente: la consolidación no deja rastro del origen y el Admin puede
+    haberlos reescrito. Re-sembrar es lo único que garantiza que no queden
+    copias que se cobrarían dos veces. Los precios no se pierden: viven en
+    TroquelModelo.costos_items, no en los ítems de la remisión.
+    """
+    with transaction.atomic():
+        for f in rem.remisiones_consolidadas.all():
+            f.estado = "pendiente"
+            f.consolidada_en = None
+            f.consolidada_en_remision = None
+            f.save(update_fields=["estado", "consolidada_en", "consolidada_en_remision", "modificado"])
+        rem.items.all().delete()
+        if rem.orden_id:
+            _seed_remision_item(rem, rem.orden)
+        rem.generada_en = None
+        rem.generada_por = None
+        rem.save(update_fields=["generada_en", "generada_por", "modificado"])
+    rem.refresh_from_db()
+    return rem
+
+
 def _remision_operador_ops(rem):
     """OPs incluidas en la remisión: la propia + las de sus remisiones consolidadas."""
     ops = []
@@ -399,12 +433,30 @@ def _remision_operador_ops(rem):
     return ops
 
 
-def _remision_operador_pdf_ctx(rem, admin=False):
+_DESPERDICIO_RE = re.compile(r"\s*·?\s*[\d.,]+\s*cm\s*\+\s*[\d.,]+\s*cm\s+desperdicio")
+
+
+def _sin_desperdicio(detalle):
+    """Quita el fragmento '120 cm + 15 cm desperdicio' del detalle de la cuchilla.
+
+    El total en cm (cuchilla + desperdicio) ya va en la columna de consumo, así
+    que fuera del PDF interno del Admin solo se muestra ese total. Se limpia al
+    renderizar y no en `_build_costos_seed` porque los costos_items ya guardados
+    llevan el texto viejo y el Admin lo sigue necesitando para auditar.
+    """
+    return _DESPERDICIO_RE.sub("", detalle or "").strip(" ·")
+
+
+def _remision_operador_pdf_ctx(rem, admin=False, con_desperdicio=False):
     """Contexto del PDF de remisión: consumo en cm por troquel + cantidad
     entregada. Por defecto (admin=False) nunca lleva precios: los valores
     monetarios son de uso interno y solo se incluyen cuando admin=True, en
     cuyo caso se toman de TroquelModelo.costos_items (precios ya definidos
-    por el Admin) en vez de re-derivarlos del formato con precio en 0."""
+    por el Admin) en vez de re-derivarlos del formato con precio en 0.
+
+    `con_desperdicio` solo lo activan los documentos internos del Admin (PDF
+    admin y desglose de la pantalla de liquidación); en todo lo demás la línea
+    de cuchilla muestra únicamente el total en cm."""
     troqueles = []
     total_general = 0.0
     for op in _remision_operador_ops(rem):
@@ -420,7 +472,7 @@ def _remision_operador_pdf_ctx(rem, admin=False):
         consumos = [
             {
                 "concepto": ln["concepto"],
-                "detalle": ln["detalle"],
+                "detalle": ln["detalle"] if con_desperdicio else _sin_desperdicio(ln["detalle"]),
                 "cantidad": _fmt_num(ln["cantidad"]),
                 "unidad": ln["unidad"],
                 **({
@@ -988,7 +1040,7 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
-        if self.action in ("toggle_proceso_completado", "list", "retrieve", "produccion", "buscar", "produccion_pendientes", "enviar_remision", "remision_pdf", "cancelar_remision", "remisionables_operador", "consolidar_remision_operador", "remision_operador_pdf", "editar_campos"):
+        if self.action in ("toggle_proceso_completado", "list", "retrieve", "produccion", "buscar", "produccion_pendientes", "enviar_remision", "remision_pdf", "cancelar_remision", "remisionables_operador", "consolidar_remision_operador", "remision_operador_pdf", "remisiones_generadas_operador", "devolver_remision_operador", "editar_campos"):
             return
         _require_admin(request)
 
@@ -1468,6 +1520,9 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         OPs de troquel cuya remisión aún está pendiente (o aún no existe) y por
         tanto pueden entrar en una remisión del Operador. Vista sanitizada (sin
         valores). El front agrupa por cliente y filtra en memoria.
+
+        Lo que el Operador ya generó sale de esta cola y vive en
+        `remisiones_generadas_operador`, desde donde puede devolverse.
         """
         qs = (
             OrdenProduccion.objects
@@ -1475,7 +1530,10 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
             # Solo OP con un formato de cuchillas cargado (no borrador): sin él no
             # hay consumo que remisionar.
             .filter(formatos_cuchillas__estado__in=["pendiente", "aprobado", "devuelto"])
-            .filter(Q(remision__isnull=True) | Q(remision__estado="pendiente"))
+            .filter(
+                Q(remision__isnull=True)
+                | Q(remision__estado="pendiente", remision__generada_en__isnull=True)
+            )
             .select_related("cliente", "remision")
             .distinct()
             .order_by("cliente__nombre", F("fecha_entrega").asc(nulls_last=True), "creado")
@@ -1490,6 +1548,9 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         Body { "orden_ids": [int, ...] }. Asegura una remisión pendiente para
         cada OP (mismo cliente), fusiona todas en la primera y devuelve
         { remision_id, remision_numero }. No exige precios del troquel.
+
+        La remisión queda marcada como generada: sus OPs salen de la cola del
+        Operador y pasan al historial.
         """
         ids = request.data.get("orden_ids", [])
         if not isinstance(ids, list) or not ids:
@@ -1527,6 +1588,11 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         fuentes = remisiones[1:]
         if fuentes:
             _consolidar_remisiones(target, fuentes)
+        # Se estampa aquí y no al descargar el PDF: `remision_operador_pdf`
+        # también sirve para re-descargar desde el historial.
+        target.generada_en = timezone.now()
+        target.generada_por = request.user if request.user.is_authenticated else None
+        target.save(update_fields=["generada_en", "generada_por", "modificado"])
         return Response({"remision_id": target.id, "remision_numero": target.numero})
 
     @action(detail=False, methods=["post"], url_path="remision_operador_pdf")
@@ -1552,6 +1618,46 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         response = HttpResponse(pdf_bytes, content_type="application/pdf")
         response["Content-Disposition"] = f'attachment; filename="Remision_{rem.numero}.pdf"'
         return response
+
+    @action(detail=False, methods=["get"], url_path="remisiones_generadas_operador")
+    def remisiones_generadas_operador(self, request):
+        """GET /api/ordenes/remisiones_generadas_operador/ — Operador o Admin.
+
+        Historial de remisiones que el Operador ya generó, para volver a
+        descargar el PDF o devolverlas a la cola. Vista sanitizada (sin
+        valores). Incluye las liquidadas: el historial no se vacía cuando el
+        Admin cobra.
+        """
+        qs = (
+            Remision.objects
+            .filter(generada_en__isnull=False)
+            .select_related("cliente", "orden", "generada_por")
+            .prefetch_related("remisiones_consolidadas__orden")
+            .order_by("-generada_en")
+        )
+        data = RemisionGeneradaOperadorSerializer(qs, many=True, context={"request": request}).data
+        return Response(data)
+
+    @action(detail=False, methods=["post"], url_path="devolver_remision_operador")
+    def devolver_remision_operador(self, request):
+        """POST /api/ordenes/devolver_remision_operador/ — Operador o Admin.
+
+        Body { "remision_id": int }. Deshace una remisión generada: sus OPs
+        vuelven por separado a la cola de remisionables. Bloqueado si el Admin
+        ya la liquidó (o si fue consolidada dentro de otra).
+        """
+        rem_id = request.data.get("remision_id")
+        rem = Remision.objects.filter(pk=rem_id).select_related("orden").first()
+        if rem is None:
+            return Response({"error": "Remisión no encontrada."}, status=404)
+        if rem.generada_en is None:
+            return Response({"error": f"La remisión {rem.numero} no está generada."}, status=409)
+        if rem.estado != "pendiente":
+            return Response({
+                "error": f"La remisión {rem.numero} ya fue liquidada; no se puede devolver.",
+            }, status=409)
+        _desconsolidar_remision(rem)
+        return Response({"ok": True})
 
     @action(detail=False, methods=["get"], url_path="remisiones_solicitadas")
     def remisiones_solicitadas(self, request):
@@ -1671,7 +1777,8 @@ class RemisionViewSet(viewsets.ModelViewSet):
         """
         rem = self.get_object()
         es_admin = (request.data.get("tipo") or request.query_params.get("tipo")) == "admin"
-        ctx = _remision_operador_pdf_ctx(rem, admin=es_admin)
+        # El desglose de la cuchilla con el desperdicio solo va en el documento interno.
+        ctx = _remision_operador_pdf_ctx(rem, admin=es_admin, con_desperdicio=es_admin)
         template = "cotizaciones/pdf_remision_admin.html" if es_admin else "cotizaciones/pdf_remision_operador.html"
         try:
             html_pdf = render_to_string(template, ctx)
@@ -1693,7 +1800,8 @@ class RemisionViewSet(viewsets.ModelViewSet):
         PDF y al correo, ya formateados en COP.
         """
         rem = self.get_object()
-        det = _remision_operador_pdf_ctx(rem, admin=True)
+        # Pantalla interna del Admin: conserva el desperdicio de la cuchilla.
+        det = _remision_operador_pdf_ctx(rem, admin=True, con_desperdicio=True)
         return Response({
             "troqueles": det["troqueles"],
             "total_general": det["total_general"],

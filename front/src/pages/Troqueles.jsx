@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { ProgressBar } from '../components/core'
+import { ProgressBar, REMISION_STATUS_DEFS } from '../components/core'
 import { Icon } from '../components/Icons'
 import {
   FormatosCuchillasHistory, FormatoCuchillasForm, ModeloViewer,
@@ -12,7 +12,7 @@ import {
   getOrdenProduccion, getTroquelModelo, toggleProcesoVisibleOperador,
   updateFormatoCuchillas, getFormatosPendientes, cancelarEnvioFormato,
   getRemisionablesOperador, consolidarRemisionOperador, pdfRemisionOperadorConsolidada,
-  cancelarRemisionOperador,
+  getRemisionesGeneradasOperador, devolverRemisionOperador,
   getRemisionesSolicitadas, setProcesoPrioridades,
   getClientes, editarCamposOrden,
 } from '../api'
@@ -31,6 +31,14 @@ function fmtEntrega(s) {
   if (diff < 0) color = 'var(--danger, #c0392b)'
   else if (diff <= 2) color = 'var(--warn, #e0a800)'
   return { txt: diff < 0 ? `${txt} · vencido` : txt, color }
+}
+
+// Fecha (o fecha+hora ISO) en formato corto local
+function fmtFechaCorta(s) {
+  if (!s) return '—'
+  const d = new Date(s.length <= 10 ? s + 'T00:00:00' : s)
+  if (isNaN(d)) return '—'
+  return d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
 // Búsqueda sin distinguir mayúsculas ni tildes
@@ -480,11 +488,17 @@ function OperadorTroqueles() {
   const [loadingFormatos, setLoadingFormatos] = useState(false)
   const [cancelando, setCancelando] = useState(false)
   const [cancelError, setCancelError] = useState(null)
-  // Historial de formatos (todas las OPs / operadores) y formato en edición
+  // Historial: formatos de cuchillas (todas las OPs / operadores) y remisiones generadas
+  const [histTab, setHistTab] = useState('formatos')  // 'formatos' | 'remisiones'
   const [historial, setHistorial] = useState([])
   const [loadingHistorial, setLoadingHistorial] = useState(false)
   const [editHist, setEditHist] = useState(null)
   const [busquedaHist, setBusquedaHist] = useState('')
+  const [histRem, setHistRem] = useState([])
+  const [loadingHistRem, setLoadingHistRem] = useState(false)
+  const [busquedaHistRem, setBusquedaHistRem] = useState('')
+  const [histRemBusy, setHistRemBusy] = useState(null)   // id de remisión en PDF/devolución
+  const [histRemError, setHistRemError] = useState(null)
   // Tab de remisiones del Operador (consolidar varias OP de un cliente en un PDF)
   const [remisionables, setRemisionables] = useState([])
   const [loadingRem, setLoadingRem] = useState(false)
@@ -493,7 +507,7 @@ function OperadorTroqueles() {
   const [selCliente, setSelCliente] = useState(null) // cliente_id de la selección
   const [genBusy, setGenBusy] = useState(false)
   const [genError, setGenError] = useState(null)
-  const [cancelRemBusy, setCancelRemBusy] = useState(null) // id de OP cuya remisión se está cancelando
+  const [genOk, setGenOk] = useState(null)          // número de la última remisión generada
 
   const loadLista = (silent = false) => {
     if (!silent) setLoadingLista(true)
@@ -513,7 +527,19 @@ function OperadorTroqueles() {
       .finally(() => setLoadingHistorial(false))
   }
 
-  useEffect(() => { if (tab === 'historial') loadHistorial() }, [tab])
+  const loadHistRem = () => {
+    setLoadingHistRem(true)
+    getRemisionesGeneradasOperador()
+      .then(d => setHistRem(asList(d)))
+      .catch(() => setHistRem([]))
+      .finally(() => setLoadingHistRem(false))
+  }
+
+  useEffect(() => {
+    if (tab !== 'historial') return
+    if (histTab === 'formatos') loadHistorial()
+    else loadHistRem()
+  }, [tab, histTab])
 
   const loadRemisionables = () => {
     setLoadingRem(true)
@@ -561,26 +587,35 @@ function OperadorTroqueles() {
     })
   }
 
+  // Descarga el PDF de una remisión ya creada (al generarla y al re-descargarla
+  // desde el historial).
+  const descargarPdfRemision = async (remisionId) => {
+    const r = await pdfRemisionOperadorConsolidada(remisionId)
+    if (!r.ok) {
+      const body = await r.json().catch(() => null)
+      throw new Error(body?.error || `HTTP ${r.status}`)
+    }
+    const nombre = (r.headers.get('Content-Disposition') || '').match(/filename="(.+?)"/)?.[1]
+    const blob = await r.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = nombre || 'Remision.pdf'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   const generarRemision = async () => {
     if (!selRem.length) return
     setGenBusy(true)
     setGenError(null)
+    setGenOk(null)
     try {
-      const { remision_id } = await consolidarRemisionOperador(selRem)
-      const r = await pdfRemisionOperadorConsolidada(remision_id)
-      if (!r.ok) {
-        const body = await r.json().catch(() => null)
-        throw new Error(body?.error || `HTTP ${r.status}`)
-      }
-      const nombre = (r.headers.get('Content-Disposition') || '').match(/filename="(.+?)"/)?.[1]
-      const blob = await r.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = nombre || 'Remision.pdf'
-      a.click()
-      URL.revokeObjectURL(url)
+      const { remision_id, remision_numero } = await consolidarRemisionOperador(selRem)
+      await descargarPdfRemision(remision_id)
       setSelRem([]); setSelCliente(null)
+      setGenOk(remision_numero)
+      // Las OPs generadas salen de esta lista y quedan en Historial › Remisiones.
       loadRemisionables()
     } catch (e) {
       setGenError(e.message || 'No se pudo generar la remisión')
@@ -589,18 +624,30 @@ function OperadorTroqueles() {
     }
   }
 
-  const cancelarRemision = async (op) => {
-    if (!window.confirm(`¿Eliminar la remisión ${op.remision_numero} de ${op.numero}? Se puede volver a generar más adelante.`)) return
-    setCancelRemBusy(op.id)
-    setGenError(null)
+  const rehacerPdfRemision = async (rem) => {
+    setHistRemBusy(rem.id)
+    setHistRemError(null)
     try {
-      await cancelarRemisionOperador(op.id)
-      setSelRem(prev => prev.filter(id => id !== op.id))
+      await descargarPdfRemision(rem.id)
+    } catch (e) {
+      setHistRemError(e?.message || 'No se pudo generar el PDF')
+    } finally {
+      setHistRemBusy(null)
+    }
+  }
+
+  const devolverRemision = async (rem) => {
+    if (!window.confirm(`¿Devolver las OPs de ${rem.numero} a la cola de remisiones? Podrás volver a generarla.`)) return
+    setHistRemBusy(rem.id)
+    setHistRemError(null)
+    try {
+      await devolverRemisionOperador(rem.id)
+      loadHistRem()
       loadRemisionables()
     } catch (e) {
-      setGenError(e?.message || 'No se pudo cancelar la remisión')
+      setHistRemError(e?.message || 'No se pudo devolver la remisión')
     } finally {
-      setCancelRemBusy(null)
+      setHistRemBusy(null)
     }
   }
 
@@ -615,6 +662,15 @@ function OperadorTroqueles() {
     if (!t) return historial
     return historial.filter(f => [f.orden_numero, f.cliente_nombre, f.referencia].some(v => norm(v).includes(t)))
   }, [historial, busquedaHist])
+
+  const histRemFiltrado = useMemo(() => {
+    const t = norm(busquedaHistRem.trim())
+    if (!t) return histRem
+    return histRem.filter(r => [
+      r.numero, r.cliente_nombre,
+      ...(r.ops || []).flatMap(op => [op.numero, op.referencia]),
+    ].some(v => norm(v).includes(t)))
+  }, [histRem, busquedaHistRem])
 
   const loadFormatos = (ordenId) => {
     setLoadingFormatos(true)
@@ -680,6 +736,88 @@ function OperadorTroqueles() {
         )}
 
         {tab === 'historial' && !editHist && (
+          <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+            <button className={`btn sm${histTab === 'formatos' ? ' primary' : ''}`} onClick={() => setHistTab('formatos')}>Formatos</button>
+            <button className={`btn sm${histTab === 'remisiones' ? ' primary' : ''}`} onClick={() => setHistTab('remisiones')}>Remisiones</button>
+          </div>
+        )}
+
+        {tab === 'historial' && !editHist && histTab === 'remisiones' && (
+          <Section title="Remisiones generadas">
+            <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', fontSize: 12, color: 'var(--ink-3)' }}>
+              Cada remisión que generas sale de la cola y queda aquí. Puedes volver a descargar su PDF, o devolverla para rehacerla mientras el administrador no la haya liquidado.
+            </div>
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)' }}>
+              <div style={{ position: 'relative', maxWidth: 420 }}>
+                <input
+                  className="input"
+                  placeholder="Buscar por remisión, cliente, OP, referencia…"
+                  value={busquedaHistRem}
+                  onChange={e => setBusquedaHistRem(e.target.value)}
+                  style={{ paddingLeft: 32 }}
+                />
+                <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-3)' }}>
+                  <Icon.Search />
+                </span>
+              </div>
+              {histRemError && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--danger, #c0392b)' }}>✗ {histRemError}</div>}
+            </div>
+            {loadingHistRem ? (
+              <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Cargando…</div>
+            ) : histRemFiltrado.length === 0 ? (
+              <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>
+                {busquedaHistRem.trim() ? `Sin resultados para «${busquedaHistRem.trim()}»` : 'Todavía no has generado remisiones.'}
+              </div>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--line)', textAlign: 'left', fontSize: 12, color: 'var(--ink-3)' }}>
+                    <th style={{ padding: '8px 12px' }}>Remisión</th>
+                    <th style={{ padding: '8px 12px' }}>Fecha</th>
+                    <th style={{ padding: '8px 12px' }}>Cliente</th>
+                    <th style={{ padding: '8px 12px' }}>Troqueles</th>
+                    <th style={{ padding: '8px 12px' }}>Generada por</th>
+                    <th style={{ padding: '8px 12px' }}>Estado</th>
+                    <th style={{ padding: '8px 12px' }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {histRemFiltrado.map((rem, idx) => {
+                    const def = REMISION_STATUS_DEFS.find(s => s.id === rem.estado)
+                    const busy = histRemBusy === rem.id
+                    return (
+                      <tr key={rem.id} style={{ borderBottom: '1px solid var(--line)', background: idx % 2 ? 'var(--surface-2)' : 'var(--surface)' }}>
+                        <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 13 }}>{rem.numero}</td>
+                        <td style={{ padding: '10px 12px', fontSize: 12, color: 'var(--ink-2)' }}>{fmtFechaCorta(rem.generada_en || rem.fecha)}</td>
+                        <td style={{ padding: '10px 12px', fontWeight: 600 }}>{rem.cliente_nombre || '—'}</td>
+                        <td style={{ padding: '10px 12px', fontSize: 12, color: 'var(--ink-2)' }}>
+                          {(rem.ops || []).map(op => (
+                            <div key={op.numero}>
+                              <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{op.numero}</span>
+                              {op.referencia ? ` · ${op.referencia}` : ''}
+                            </div>
+                          ))}
+                        </td>
+                        <td style={{ padding: '10px 12px', fontSize: 12, color: 'var(--ink-2)' }}>{rem.generada_por_username || '—'}</td>
+                        <td style={{ padding: '10px 12px' }}>
+                          {def && <span className={'badge ' + def.cls}><span className="dot"></span>{def.label}</span>}
+                        </td>
+                        <td style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                          <button className="btn sm" disabled={busy} onClick={() => rehacerPdfRemision(rem)}>PDF</button>
+                          {rem.estado === 'pendiente' && (
+                            <button className="btn sm" style={{ marginLeft: 6 }} disabled={busy} onClick={() => devolverRemision(rem)}>Devolver</button>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            )}
+          </Section>
+        )}
+
+        {tab === 'historial' && !editHist && histTab === 'formatos' && (
           <Section title="Historial de formatos de cuchillas">
             {!loadingHistorial && historial.length > 0 && (
               <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)' }}>
@@ -781,7 +919,7 @@ function OperadorTroqueles() {
             }
           >
             <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', fontSize: 12, color: 'var(--ink-3)' }}>
-              Marca varios troqueles del <strong>mismo cliente</strong> para reunirlos en una sola remisión. El PDF muestra el consumo en cm y la firma del cliente (sin precios, salvo que el administrador los habilite).
+              Marca varios troqueles del <strong>mismo cliente</strong> para reunirlos en una sola remisión. El PDF muestra el consumo en cm y la firma del cliente (sin precios, salvo que el administrador los habilite). Al generarla, esos troqueles salen de esta lista y quedan en <strong>Historial › Remisiones</strong>.
             </div>
             <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)' }}>
               <div style={{ position: 'relative', maxWidth: 420 }}>
@@ -797,6 +935,14 @@ function OperadorTroqueles() {
                 </span>
               </div>
               {genError && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--danger, #c0392b)' }}>✗ {genError}</div>}
+              {genOk && (
+                <div style={{ marginTop: 8, fontSize: 12, color: 'var(--ok, #2e7d32)' }}>
+                  ✓ Remisión <strong>{genOk}</strong> generada ·{' '}
+                  <button className="btn sm" style={{ padding: '2px 8px' }} onClick={() => { setGenOk(null); setTab('historial'); setHistTab('remisiones') }}>
+                    Ver en Historial
+                  </button>
+                </div>
+              )}
             </div>
             {loadingRem ? (
               <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Cargando…</div>
@@ -826,20 +972,6 @@ function OperadorTroqueles() {
                               <td style={{ padding: '10px 12px', width: 90, fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 13 }}>{op.numero}</td>
                               <td style={{ padding: '10px 12px', color: 'var(--ink-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{op.referencia}</td>
                               <td style={{ padding: '10px 12px', width: 70, fontFamily: 'JetBrains Mono, monospace', color: 'var(--ink-2)' }}>{op.cantidad}</td>
-                              <td style={{ padding: '10px 12px', width: 110, fontSize: 12, color: 'var(--ink-3)' }}>{op.remision_numero || 'nueva'}</td>
-                              <td style={{ padding: '10px 12px', width: 40, textAlign: 'center' }}>
-                                {op.remision_numero && (
-                                  <button
-                                    className="btn"
-                                    style={{ padding: '4px 6px', color: 'var(--danger)', borderColor: 'transparent' }}
-                                    title="Eliminar remisión pendiente"
-                                    disabled={cancelRemBusy === op.id}
-                                    onClick={e => { e.stopPropagation(); cancelarRemision(op) }}
-                                  >
-                                    <Icon.Trash />
-                                  </button>
-                                )}
-                              </td>
                             </tr>
                           )
                         })}

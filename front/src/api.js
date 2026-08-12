@@ -415,14 +415,22 @@ export const pdfRemisionOperador = (opId) =>
 export const getRemisionesSolicitadas = () =>
   apiFetch(`${BASE}/ordenes/remisiones_solicitadas/`).then(json)
 
-// OPs de troquel remisionables (remisión pendiente o inexistente), sin dinero.
+// OPs de troquel pendientes de remisionar (aún sin remisión generada), sin dinero.
 // El front agrupa por cliente y filtra en memoria.
 export const getRemisionablesOperador = () =>
   apiFetch(`${BASE}/ordenes/remisionables_operador/`).then(json)
 
-// Elimina la remisión pendiente de una OP para sacarla de la cola del Operador.
-export const cancelarRemisionOperador = (opId) =>
-  apiFetch(`${BASE}/ordenes/${opId}/cancelar_remision/`, { method: 'POST' }).then(jsonConCodigo)
+// Historial de remisiones ya generadas por el Operador, sin dinero.
+export const getRemisionesGeneradasOperador = () =>
+  apiFetch(`${BASE}/ordenes/remisiones_generadas_operador/`).then(json)
+
+// Deshace una remisión generada: sus OPs vuelven a la cola de remisionables.
+export const devolverRemisionOperador = (remisionId) =>
+  apiFetch(`${BASE}/ordenes/devolver_remision_operador/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ remision_id: remisionId }),
+  }).then(jsonConCodigo)
 
 // Crea/consolida una remisión del Operador a partir de varias OP del mismo cliente.
 // Devuelve { remision_id, remision_numero }.

@@ -548,6 +548,14 @@ class Remision(models.Model):
     mostrar_valores = models.BooleanField(default=False)
     enviada_en = models.DateTimeField(null=True, blank=True)
     liquidada_en = models.DateTimeField(null=True, blank=True)
+    # Momento en que el Operador la generó (descargó el PDF de entrega). Saca sus
+    # OPs de la cola de remisionables sin tocar `estado`, que es la máquina del
+    # Admin: para liquidarla tiene que seguir en pendiente.
+    generada_en = models.DateTimeField(null=True, blank=True)
+    generada_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="remisiones_generadas",
+    )
     # Si fue fusionada dentro de otra remisión: estado=consolidada y apunta al destino.
     consolidada_en = models.DateTimeField(null=True, blank=True)
     consolidada_en_remision = models.ForeignKey(

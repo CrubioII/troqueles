@@ -568,6 +568,30 @@ class RemisionableOperadorSerializer(serializers.ModelSerializer):
         return rem.estado if rem else ""
 
 
+class RemisionGeneradaOperadorSerializer(serializers.ModelSerializer):
+    """Remisión ya generada por el Operador (su historial). Sin valores monetarios."""
+
+    cliente_nombre = serializers.CharField(source="cliente.nombre", read_only=True, default="")
+    generada_por_username = serializers.CharField(
+        source="generada_por.username", read_only=True, default="")
+    ops = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Remision
+        fields = ["id", "numero", "fecha", "estado", "generada_en",
+                  "cliente_nombre", "generada_por_username", "ops"]
+
+    def get_ops(self, obj):
+        # La OP propia + las de sus remisiones consolidadas (mismo criterio que
+        # _remision_operador_ops en views.py).
+        ordenes = [obj.orden] if obj.orden_id else []
+        ordenes += [src.orden for src in obj.remisiones_consolidadas.all() if src.orden_id]
+        return [
+            {"numero": op.numero, "referencia": op.referencia, "cantidad": op.cantidad}
+            for op in ordenes
+        ]
+
+
 # ─────────────── Remisiones ───────────────
 
 
