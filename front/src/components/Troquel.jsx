@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react'
 import { createPortal } from 'react-dom'
 import { fmtCOP, fmtNum, NumField, Checkbox, MoneyInput } from './core'
 import {
@@ -17,7 +17,7 @@ const SAC_SIZES = [
   ...Array.from({ length: 10 }, (_, i) => ({ value: String(i + 1), label: `${i + 1} (expulsor)` })),
   ...Array.from({ length: 5 }, (_, i) => ({ value: String(i + 11), label: `${i + 11} (tubo)` })),
 ]
-const PERFO_SIZES = ['1x1', '2x1', '2x2', '3x1', '3x2', '3x3', '4x1', '4x2', '4x3', '4x4', '6x6', '10x10']
+const PERFO_SIZES = ['1x1', '2x1', '2x2', '3x1', '3x2', '3x3', '4x1', '4x2', '4x3', '4x4', '6x6', '10x10', 'GLUE']
 const CAUCHO_TIPOS = [
   { value: 'verde', label: 'Caucho Verde' },
   { value: 'profigumi', label: 'Profigumi' },
@@ -809,7 +809,11 @@ export function OrdenCambiosHistory({ cambios, loading }) {
 
 // `onSaved` lo usa la remisión: al guardar precios el backend recalcula el valor
 // cobrado del ítem, así que la pantalla que la muestra tiene que recargarse.
-export function TroquelCostos({ ordenId, refreshKey, onDirtyChange, onSaved, clienteId, clienteNombre }) {
+// El ref expone `saveIfDirty()` para que un padre (p.ej. RemisionEdit) pueda
+// forzar el guardado de ediciones pendientes antes de generar un PDF o enviar.
+export const TroquelCostos = forwardRef(function TroquelCostos(
+  { ordenId, refreshKey, onDirtyChange, onSaved, clienteId, clienteNombre }, ref
+) {
   const [items, setItems] = useState(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -839,11 +843,15 @@ export function TroquelCostos({ ordenId, refreshKey, onDirtyChange, onSaved, cli
 
   const save = () => {
     setSaving(true); setError(null); setOkMsg(false)
-    saveTroquelCostos(ordenId, items.map(({ total, ...it }) => it))
-      .then(data => { setItems(data.items || []); setDirty(false); setOkMsg(true); onSaved && onSaved(data) })
-      .catch(() => setError('No se pudieron guardar los costos'))
+    return saveTroquelCostos(ordenId, items.map(({ total, ...it }) => it))
+      .then(data => { setItems(data.items || []); setDirty(false); setOkMsg(true); onSaved && onSaved(data); return data })
+      .catch(err => { setError('No se pudieron guardar los costos'); throw err })
       .finally(() => setSaving(false))
   }
+
+  useImperativeHandle(ref, () => ({
+    saveIfDirty: () => (dirty ? save() : Promise.resolve()),
+  }), [dirty, items])
 
   // Guarda los precios unitarios como defaults del cliente y rellena los demás
   // troqueles suyos que estén sin precio. Primero persiste los costos de esta OP
@@ -931,7 +939,7 @@ export function TroquelCostos({ ordenId, refreshKey, onDirtyChange, onSaved, cli
       </div>
     </div>
   )
-}
+})
 
 // ────────── Nueva tarea de troquel (Admin) ──────────
 // Crea una OP directa (sin cotización) con el proceso "troquel" activo y le

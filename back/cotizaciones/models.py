@@ -445,7 +445,7 @@ class FormatoCuchillas(models.Model):
     )
     PERFO_MEDIDA_CHOICES = [
         (v, v)
-        for v in ["1x1", "2x1", "2x2", "3x1", "3x2", "3x3", "4x1", "4x2", "4x3", "4x4", "6x6", "10x10"]
+        for v in ["1x1", "2x1", "2x2", "3x1", "3x2", "3x3", "4x1", "4x2", "4x3", "4x4", "6x6", "10x10", "GLUE"]
     ]
     CAUCHO_TIPO_CHOICES = [
         ("verde", "Caucho Verde"),

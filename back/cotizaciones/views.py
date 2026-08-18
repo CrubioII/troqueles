@@ -175,8 +175,8 @@ def _build_costos_seed(formato, precios=None):
         add("ch", "CH", formato.ch_medida, "cm", formato.ch_cm)
     if float(formato.sac_cm or 0) > 0:  # legacy: sacabocados en cm
         add("sacabocados", "Sacabocados", formato.sac_medida, "cm", formato.sac_cm)
-    elif formato.sac_medida:
-        add("sacabocados", "Sacabocados", formato.get_sac_medida_display(), "und", formato.sac_cantidad or 1)
+    elif formato.sac_medida or float(formato.sac_cantidad or 0) > 0:
+        add("sacabocados", "Sacabocados", formato.get_sac_medida_display(), "und", formato.sac_cantidad)
     if float(formato.perfo_cm or 0) > 0:
         add("perforaciones", "Perforado", formato.perfo_medida, "cm", formato.perfo_cm)
     if (formato.gan or "").strip():
@@ -568,7 +568,10 @@ def _remision_operador_pdf_ctx(rem, admin=False, con_desperdicio=False):
             or op.formatos_cuchillas.order_by("-fecha_hora").first()
         )
         if admin:
-            modelo = TroquelModelo.objects.filter(orden=op).first()
+            # Re-siembra las cantidades desde el formato vigente antes de imprimir
+            # (conservando los precios ya puestos): la caché puede haber quedado
+            # desactualizada respecto a la última corrección del Operador.
+            modelo = _sync_troquel_costos(op) if formato else TroquelModelo.objects.filter(orden=op).first()
             raw_items = list(modelo.costos_items) if modelo and modelo.costos_items else []
         else:
             raw_items = _build_costos_seed(formato) if formato else []

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { createPortal } from 'react-dom'
 import { Icon } from '../components/Icons'
@@ -67,7 +67,7 @@ function DesgloseTroqueles({ desglose }) {
 // Esta es la única pantalla donde se cotiza el troquel: el Operador registra el
 // consumo en su formato de cuchillas y aquí se le pone precio. Al guardar, el
 // backend recalcula el Vr. Total del ítem que esa OP aporta a la remisión.
-function PreciosTroqueles({ desglose, rem, onSaved, onDevolver }) {
+function PreciosTroqueles({ desglose, rem, onSaved, onDevolver, registerRef }) {
   return (
     <>
       {desglose.troqueles.map(t => (
@@ -91,6 +91,7 @@ function PreciosTroqueles({ desglose, rem, onSaved, onDevolver }) {
           )}
           {t.consumos?.length ? (
             <TroquelCostos
+              ref={el => registerRef(t.op_id, el)}
               ordenId={t.op_id}
               clienteId={rem.cliente}
               clienteNombre={rem.cliente_nombre}
@@ -432,6 +433,16 @@ export default function RemisionEdit() {
   const [delBusy, setDelBusy] = useState(false)
   const [delError, setDelError] = useState(null)
 
+  // Refs a los TroquelCostos montados (uno por OP del desglose) para poder
+  // forzar el guardado de ediciones pendientes antes de generar un PDF o enviar.
+  const troquelRefs = useRef({})
+  const registerTroquelRef = (opId, el) => {
+    if (el) troquelRefs.current[opId] = el
+    else delete troquelRefs.current[opId]
+  }
+  const saveAllTroquelCostos = () =>
+    Promise.all(Object.values(troquelRefs.current).map(r => r?.saveIfDirty?.()))
+
   const editable = rem?.estado === 'pendiente'
   const liquidada = rem?.estado === 'liquidada'
   const consolidada = rem?.estado === 'consolidada'
@@ -491,7 +502,8 @@ export default function RemisionEdit() {
   }
 
   const handleSend = async (email, extraEmails) => {
-    // Persistir ediciones antes de liquidar
+    // Persistir ediciones antes de liquidar (incluye costos de troquel sin guardar)
+    await saveAllTroquelCostos()
     await updateRemision(id, payload())
     const res = await liquidarRemision(id, email, extraEmails)
     if (res.remision) hydrate(res.remision)
@@ -550,6 +562,8 @@ export default function RemisionEdit() {
     setDlPdf(tipo)
     try {
       // Persistir ediciones para que el PDF refleje lo que se ve en pantalla
+      // (incluye costos de troquel sin guardar, p.ej. cantidad/precio de Sacabocados)
+      await saveAllTroquelCostos()
       if (editable) await updateRemision(id, payload()).then(hydrate)
       const r = await pdfRemision(id, tipo)
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
@@ -698,7 +712,7 @@ export default function RemisionEdit() {
             </div>
             <div className="table-scroll">
               {editable
-                ? <PreciosTroqueles desglose={desglose} rem={rem} onSaved={recargarTrasPrecios} onDevolver={t => { setMotivo(''); setDevError(null); setDevolviendo(t) }} />
+                ? <PreciosTroqueles desglose={desglose} rem={rem} onSaved={recargarTrasPrecios} onDevolver={t => { setMotivo(''); setDevError(null); setDevolviendo(t) }} registerRef={registerTroquelRef} />
                 : <DesgloseTroqueles desglose={desglose} />}
             </div>
           </div>
