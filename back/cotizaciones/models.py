@@ -387,6 +387,89 @@ class RegistroMaquina(models.Model):
         return f"{self.orden.numero} · {self.maquina} · {self.fecha_hora:%Y-%m-%d %H:%M}"
 
 
+class RegistroProceso(models.Model):
+    """Registro de ejecución de un proceso de la cadena en su estación.
+
+    Log append-only: cada envío del Operador es una fila. Al guardarse marca el
+    OpProceso correspondiente como completado, y la OP pasa sola a la cola de la
+    estación siguiente (ver chain.py).
+
+    `estacion` es la máquina; `proceso_id` es el OpProceso que cierra — en
+    Barnizadora, cuál de los tres UV.
+    """
+
+    ESTACION_CHOICES = [
+        ("impresora", "Impresora"),
+        ("laminadora", "Laminadora"),
+        ("barnizadora", "Barnizadora"),
+        ("troqueladora", "Troqueladora"),
+    ]
+    TAMANO_CHOICES = [
+        ("pliego", "Pliego completo"),
+        ("medio_pliego", "1/2 pliego"),
+        ("cuarto_pliego", "1/4 pliego"),
+        ("octavo_pliego", "1/8 pliego"),
+        ("carta", "Carta"),
+        ("media_carta", "1/2 carta"),
+        ("cuarto_carta", "1/4 carta"),
+        ("otro", "Otro"),
+    ]
+    TIPO_LAMINADO_CHOICES = [
+        ("mate", "Mate"),
+        ("brillante", "Brillante"),
+        ("metalizado", "Metalizado"),
+    ]
+
+    orden = models.ForeignKey(
+        OrdenProduccion, on_delete=models.CASCADE, related_name="registros_proceso"
+    )
+    estacion = models.CharField(max_length=20, choices=ESTACION_CHOICES)
+    proceso_id = models.CharField(max_length=50)
+
+    # Cantidad: misma regla en las cuatro máquinas. `cantidad_esperada` es un
+    # snapshot al registrar, porque el Admin puede editar la OP después.
+    cantidad_realizada = models.PositiveIntegerField(default=0)
+    cantidad_esperada = models.PositiveIntegerField(default=0)
+    faltante = models.BooleanField(default=False)
+
+    # Tamaño del papel (impresora / laminadora / barnizadora)
+    tamano = models.CharField(max_length=20, choices=TAMANO_CHOICES, blank=True, default="")
+    tamano_otro = models.CharField(max_length=120, blank=True, default="")
+
+    # Impresora: qué caras se imprimieron y con cuántas tintas cada una.
+    # Campos planos, no JSON, para que "cuántos trabajos a 4 tintas" sea consultable.
+    tiro_active = models.BooleanField(default=False)
+    tiro_colores_num = models.PositiveSmallIntegerField(default=0)
+    tiro_colores_desc = models.CharField(max_length=200, blank=True, default="")
+    retiro_active = models.BooleanField(default=False)
+    retiro_colores_num = models.PositiveSmallIntegerField(default=0)
+    retiro_colores_desc = models.CharField(max_length=200, blank=True, default="")
+
+    # Laminadora
+    tipo_laminado = models.CharField(
+        max_length=20, choices=TIPO_LAMINADO_CHOICES, blank=True, default=""
+    )
+
+    observaciones = models.TextField(blank=True, default="")
+    operador = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="registros_proceso",
+    )
+    fecha_hora = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        # Sin unique_together a propósito: es un log. Si el Admin des-marca un
+        # proceso ya registrado, el segundo registro es legítimo.
+        ordering = ["-fecha_hora", "-id"]
+        indexes = [
+            models.Index(fields=["estacion", "-fecha_hora"]),
+            models.Index(fields=["orden", "estacion"]),
+        ]
+
+    def __str__(self):
+        return f"{self.orden.numero} · {self.estacion} · {self.fecha_hora:%Y-%m-%d %H:%M}"
+
+
 class TroquelModelo(models.Model):
     """Modelo del troquel asociado a una OP. Cargado por el Admin.
 
@@ -477,6 +560,8 @@ class FormatoCuchillas(models.Model):
     sac_cm = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     sac_medida = models.CharField(max_length=5, choices=SAC_MEDIDA_CHOICES, blank=True, default="")
     sac_cantidad = models.PositiveIntegerField(default=0)
+    # Filas de sacabocados: [{"medida": "1".."15", "cantidad": <int>}, ...]
+    sacabocados = models.JSONField(default=list, blank=True)
     perfo_cm = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     perfo_medida = models.CharField(max_length=10, choices=PERFO_MEDIDA_CHOICES, blank=True, default="")
     # Desperdicio de cuchilla en cm (misma unidad que cuchilla_cm: total = cuchilla + desperdicio)
@@ -609,4 +694,50 @@ class RemisionItem(models.Model):
 
     def __str__(self):
         return f"{self.remision.numero} · {self.descripcion[:40]}"
+
+
+class Notificacion(models.Model):
+    """Aviso para el Admin generado por el flujo de producción.
+
+    destinatario=None ⇒ broadcast a todos los admin: la lee cualquiera y queda
+    leída para todos (taller de uno o dos admin). El FK ya está para poder
+    dirigirlas más adelante sin migración.
+    """
+
+    TIPO_CHOICES = [
+        ("cantidad_faltante", "Cantidad por debajo de lo esperado"),
+    ]
+
+    tipo = models.CharField(max_length=30, choices=TIPO_CHOICES)
+    titulo = models.CharField(max_length=200)
+    mensaje = models.TextField(blank=True, default="")
+    orden = models.ForeignKey(
+        OrdenProduccion, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="notificaciones",
+    )
+    registro = models.ForeignKey(
+        RegistroProceso, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="notificaciones",
+    )
+    destinatario = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="notificaciones",
+    )
+    creada_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="notificaciones_creadas",
+    )
+    leida_en = models.DateTimeField(null=True, blank=True)
+    leida_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="notificaciones_leidas",
+    )
+    creada = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-creada", "-id"]
+        indexes = [models.Index(fields=["leida_en", "-creada"])]
+
+    def __str__(self):
+        return f"{self.tipo} · {self.titulo[:40]}"
 

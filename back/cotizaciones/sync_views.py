@@ -3,8 +3,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import (
-    Cliente, Cotizacion, FormatoCuchillas, OrdenProduccion,
-    RegistroMaquina, Remision, TroquelModelo,
+    Cliente, Cotizacion, FormatoCuchillas, Notificacion, OrdenProduccion,
+    RegistroMaquina, RegistroProceso, Remision, TroquelModelo,
 )
 
 
@@ -36,13 +36,24 @@ class SyncView(APIView):
         reg = RegistroMaquina.objects.aggregate(n=Count("id"), i=Max("id"), m=Max("fecha_hora"))
         fmt = FormatoCuchillas.objects.aggregate(n=Count("id"), i=Max("id"), m=Max("revisado_en"))
         troq = TroquelModelo.objects.aggregate(m=Max("modificado"))
-        return Response({
+        regp = RegistroProceso.objects.aggregate(n=Count("id"), i=Max("id"), m=Max("fecha_hora"))
+        data = {
             "cotizaciones": _sig(cot["n"], cot["m"]),
             "ordenes": _sig(orden["n"], orden["m"]),
             "remisiones": _sig(rem["n"], rem["m"]),
             "clientes": _sig(cli["n"], cli["i"], cli["m"]),
             "registros": _sig(reg["n"], reg["i"], reg["m"]),
             "formatos": _sig(fmt["n"], fmt["i"], fmt["m"]),
+            "registros_proceso": _sig(regp["n"], regp["i"], regp["m"]),
             # Poner precios al troquel quita la alerta, por eso entra modificado.
             "remisiones_solicitadas": _sig(orden["rs_n"], orden["rs_m"], troq["m"]),
-        })
+        }
+        if request.user.is_staff:
+            # Las notificaciones son del Admin: al Operador ni se le insinúa que
+            # hay algo nuevo. `leida_en` se fija explícitamente al marcar leído,
+            # así que la firma sí se mueve.
+            noti = Notificacion.objects.aggregate(
+                n=Count("id"), i=Max("id"), m=Max("leida_en")
+            )
+            data["notificaciones"] = _sig(noti["n"], noti["i"], noti["m"])
+        return Response(data)

@@ -1,8 +1,9 @@
 import unicodedata
 
 from rest_framework import serializers
-from .models import Cliente, Papel, Cotizacion, CotizacionProceso, DocumentoCliente, DocumentoClienteItem, OrdenProduccion, OpProceso, OrdenCambio, RegistroMaquina, TroquelModelo, FormatoCuchillas, Remision, RemisionItem
+from .models import Cliente, Papel, Cotizacion, CotizacionProceso, DocumentoCliente, DocumentoClienteItem, OrdenProduccion, OpProceso, OrdenCambio, RegistroMaquina, TroquelModelo, FormatoCuchillas, Remision, RemisionItem, RegistroProceso, Notificacion
 from .models import ORDEN_CAMPOS_AUDITADOS, orden_valor_legible, registrar_cambios_orden
+from . import chain
 
 
 class ClienteSerializer(serializers.ModelSerializer):
@@ -371,11 +372,22 @@ class OrdenSerializer(serializers.ModelSerializer):
             request = self.context.get("request")
             registrar_cambios_orden(instance, previos, request.user if request else None)
         if procesos_data is not None:
-            old_state = {p.proceso_id: (p.completado, p.completado_en) for p in instance.procesos.all()}
+            # Los procesos se recrean, pero el estado de producción (avance del
+            # Operador, visibilidad y prioridad de cola) no es del Admin: se
+            # conserva o se perdería en cada guardado de la OP.
+            old_state = {
+                p.proceso_id: (p.completado, p.completado_en, p.visible_operador, p.prioridad)
+                for p in instance.procesos.all()
+            }
             instance.procesos.all().delete()
             for p in procesos_data:
-                completado, completado_en = old_state.get(p["proceso_id"], (False, None))
-                OpProceso.objects.create(orden=instance, completado=completado, completado_en=completado_en, **p)
+                completado, completado_en, visible_operador, prioridad = old_state.get(
+                    p["proceso_id"], (False, None, False, None)
+                )
+                OpProceso.objects.create(
+                    orden=instance, completado=completado, completado_en=completado_en,
+                    visible_operador=visible_operador, prioridad=prioridad, **p,
+                )
         return instance
 
 
@@ -454,6 +466,22 @@ class FormatoCuchillasSerializer(serializers.ModelSerializer):
             filas.append({"tipo": tipo, "cm": cm})
         return filas
 
+    def validate_sacabocados(self, value):
+        medidas_validas = dict(FormatoCuchillas.SAC_MEDIDA_CHOICES)
+        if not isinstance(value, list):
+            raise serializers.ValidationError("Debe ser una lista de filas {medida, cantidad}.")
+        filas = []
+        for fila in value:
+            try:
+                medida = fila.get("medida")
+                cantidad = int(fila.get("cantidad") or 0)
+            except (AttributeError, TypeError, ValueError):
+                raise serializers.ValidationError("Cada fila de sacabocados requiere medida válida y cantidad ≥ 0.")
+            if medida not in medidas_validas or cantidad < 0:
+                raise serializers.ValidationError("Cada fila de sacabocados requiere medida válida y cantidad ≥ 0.")
+            filas.append({"medida": medida, "cantidad": cantidad})
+        return filas
+
     def validate(self, data):
         get = lambda k: data.get(k, getattr(self.instance, k, None) if self.instance else None)
         # El tipo de cuchilla solo se exige al enviar: el Operador puede guardar
@@ -480,7 +508,7 @@ class FormatoCuchillasSerializer(serializers.ModelSerializer):
             "id", "orden", "orden_numero", "cliente_nombre", "fecha_entrega", "referencia",
             "cuchilla_cm", "cuchilla_tipo", "cuchilla_puntos",
             "grafa_cm", "grafa_puntos", "grafa_altura",
-            "ch_cm", "ch_medida", "sac_cm", "sac_medida", "sac_cantidad", "perfo_cm", "perfo_medida",
+            "ch_cm", "ch_medida", "sac_cm", "sac_medida", "sac_cantidad", "sacabocados", "perfo_cm", "perfo_medida",
             "desperdicio_cm", "cauchos", "gan", "observaciones",
             "dos_puntos", "tres_puntos", "perfo", "ch", "sac", "desperdicio",  # legacy, solo lectura
             "tiempo_encalado_min", "tiempo_encuchillado_min", "tiempo_encauchado_min",
@@ -490,6 +518,7 @@ class FormatoCuchillasSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id", "operador", "fecha_hora",
             "dos_puntos", "tres_puntos", "perfo", "ch", "sac", "desperdicio",
+            "sac_cm", "sac_medida", "sac_cantidad",  # legacy, reemplazados por `sacabocados`
             "estado", "devolucion_motivo", "revisado_en",
         ]
 
@@ -534,6 +563,127 @@ class OrdenOperadorSerializer(serializers.ModelSerializer):
         if modelo is None:
             return None
         return TroquelModeloOperadorSerializer(modelo, context=self.context).data
+
+
+def _cantidad_esperada(obj):
+    """Lo que la OP espera que salga de cada máquina: cantidad + sobrante.
+
+    Único sitio a tocar si la regla del faltante cambia.
+    """
+    return int(obj.cantidad or 0) + int(obj.sobrante or 0)
+
+
+class RegistroProcesoSerializer(serializers.ModelSerializer):
+    """Registro de una máquina de la cadena. El Operador solo aporta los datos
+    del trabajo: operador, cantidad_esperada y faltante los estampa la vista."""
+
+    orden_numero = serializers.CharField(source="orden.numero", read_only=True, default="")
+    orden_cliente = serializers.CharField(source="orden.cliente.nombre", read_only=True, default="")
+    orden_referencia = serializers.CharField(source="orden.referencia", read_only=True, default="")
+    operador_username = serializers.CharField(source="operador.username", read_only=True, default="")
+    estacion_label = serializers.SerializerMethodField()
+    proceso_label = serializers.SerializerMethodField()
+    tamano_label = serializers.CharField(source="get_tamano_display", read_only=True, default="")
+
+    class Meta:
+        model = RegistroProceso
+        fields = [
+            "id", "orden", "orden_numero", "orden_cliente", "orden_referencia",
+            "estacion", "estacion_label", "proceso_id", "proceso_label",
+            "cantidad_realizada", "cantidad_esperada", "faltante",
+            "tamano", "tamano_label", "tamano_otro",
+            "tiro_active", "tiro_colores_num", "tiro_colores_desc",
+            "retiro_active", "retiro_colores_num", "retiro_colores_desc",
+            "tipo_laminado", "observaciones",
+            "operador", "operador_username", "fecha_hora",
+        ]
+        read_only_fields = ["cantidad_esperada", "faltante", "operador", "fecha_hora"]
+
+    def get_estacion_label(self, obj):
+        est = chain.ESTACION_POR_ID.get(obj.estacion)
+        return est["label"] if est else obj.estacion
+
+    def get_proceso_label(self, obj):
+        return chain.PROCESO_LABELS.get(obj.proceso_id, obj.proceso_id)
+
+
+class NotificacionSerializer(serializers.ModelSerializer):
+    orden_numero = serializers.CharField(source="orden.numero", read_only=True, default="")
+    creada_por_username = serializers.CharField(
+        source="creada_por.username", read_only=True, default=""
+    )
+    leida = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Notificacion
+        fields = [
+            "id", "tipo", "titulo", "mensaje", "orden", "orden_numero", "registro",
+            "creada_por", "creada_por_username", "leida", "leida_en", "creada",
+        ]
+
+    def get_leida(self, obj):
+        return obj.leida_en is not None
+
+
+class OrdenEstacionSerializer(OrdenOperadorSerializer):
+    """OP en la cola de una estación de la cadena.
+
+    Añade a la vista sanitizada del Operador lo que necesita el formulario de
+    máquina: cuánto se espera, qué procesos cierra esta estación y cuánto llegó
+    de la estación anterior. Sigue sin valores monetarios.
+    """
+
+    cantidad_esperada = serializers.SerializerMethodField()
+    estacion_procesos = serializers.SerializerMethodField()
+    bloqueado_por = serializers.SerializerMethodField()
+    registro_previo = serializers.SerializerMethodField()
+
+    class Meta(OrdenOperadorSerializer.Meta):
+        fields = OrdenOperadorSerializer.Meta.fields + [
+            "sobrante", "cantidad_esperada", "estacion_procesos", "bloqueado_por",
+            "registro_previo",
+        ]
+
+    def _estacion(self):
+        return self.context.get("estacion")
+
+    def get_cantidad_esperada(self, obj):
+        return _cantidad_esperada(obj)
+
+    def get_estacion_procesos(self, obj):
+        estacion = self._estacion()
+        if not estacion:
+            return []
+        return [
+            {
+                "proceso_id": p.proceso_id,
+                "label": chain.PROCESO_LABELS.get(p.proceso_id, p.proceso_id),
+                "completado": p.completado,
+            }
+            for p in chain.procesos_de(obj, estacion)
+        ]
+
+    def get_bloqueado_por(self, obj):
+        estacion = self._estacion()
+        return chain.bloqueado_por(obj, estacion) if estacion else None
+
+    def get_registro_previo(self, obj):
+        """Último registro de una estación anterior: cuánto llegó realmente."""
+        estacion = self._estacion()
+        if not estacion:
+            return None
+        anteriores = set(chain.procesos_anteriores(estacion))
+        previos = [r for r in obj.registros_proceso.all() if r.proceso_id in anteriores]
+        if not previos:
+            return None
+        ultimo = max(previos, key=lambda r: (r.fecha_hora, r.id))
+        est = chain.ESTACION_POR_ID.get(ultimo.estacion)
+        return {
+            "estacion": ultimo.estacion,
+            "estacion_label": est["label"] if est else ultimo.estacion,
+            "cantidad_realizada": ultimo.cantidad_realizada,
+            "faltante": ultimo.faltante,
+        }
 
 
 class OrdenCambioSerializer(serializers.ModelSerializer):

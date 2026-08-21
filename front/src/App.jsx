@@ -17,6 +17,7 @@ import Troqueles from './pages/Troqueles'
 import TroquelGestion from './pages/TroquelGestion'
 import Guillotina from './pages/Guillotina'
 import ProduccionGeneral from './pages/ProduccionGeneral'
+import EstacionMaquina from './pages/EstacionMaquina'
 import Login from './pages/Login'
 
 function ProtectedRoute({ children }) {
@@ -51,6 +52,11 @@ function AppRoutes() {
         <Route path="/clientes" element={<AdminRoute><ClienteList /></AdminRoute>} />
         <Route path="/clientes/:id" element={<AdminRoute><ClienteDetail /></AdminRoute>} />
         <Route path="/produccion" element={<ProduccionHub />} />
+        {/* Cadena de producción: una sola pantalla, cuatro estaciones */}
+        <Route path="/produccion/impresora" element={<EstacionMaquina estacion="impresora" />} />
+        <Route path="/produccion/laminadora" element={<EstacionMaquina estacion="laminadora" />} />
+        <Route path="/produccion/barnizadora" element={<EstacionMaquina estacion="barnizadora" />} />
+        <Route path="/produccion/troqueladora" element={<EstacionMaquina estacion="troqueladora" />} />
         <Route path="/produccion/troqueles" element={<Troqueles />} />
         <Route path="/produccion/troqueles/:id" element={<AdminRoute><TroquelGestion /></AdminRoute>} />
         <Route path="/produccion/guillotina" element={<Guillotina />} />

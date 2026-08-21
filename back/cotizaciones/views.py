@@ -10,7 +10,7 @@ from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from django.core.mail import EmailMessage
 from django.db import connection, transaction
-from django.db.models import F, Max, OuterRef, ProtectedError, Q, Subquery
+from django.db.models import Exists, F, Max, OuterRef, ProtectedError, Q, Subquery
 from django.http import HttpResponse
 from django.template.loader import render_to_string
 from django.conf import settings
@@ -86,7 +86,7 @@ def _fmt_num(n):
 from .models import (
     Cliente, Papel, Cotizacion, DocumentoCliente, OrdenProduccion, OpProceso,
     RegistroMaquina, TroquelModelo, FormatoCuchillas,
-    Remision, RemisionItem,
+    Remision, RemisionItem, RegistroProceso, Notificacion,
 )
 from .models import ORDEN_CAMPOS_AUDITADOS, orden_valor_legible, registrar_cambios_orden
 from .serializers import (
@@ -108,10 +108,15 @@ from .serializers import (
     RemisionGeneradaOperadorSerializer,
     RemisionSerializer,
     RemisionListSerializer,
+    RegistroProcesoSerializer,
+    NotificacionSerializer,
+    OrdenEstacionSerializer,
 )
 from .serializers import (
     _orden_progreso, _orden_valor_total_efectivo, _orden_valor_unitario_efectivo,
+    _cantidad_esperada,
 )
+from . import chain
 
 
 def _require_admin(request):
@@ -121,6 +126,7 @@ def _require_admin(request):
 
 CAUCHO_LABELS = dict(FormatoCuchillas.CAUCHO_TIPO_CHOICES)
 CUCHILLA_TIPO_LABELS = dict(FormatoCuchillas.CUCHILLA_TIPO_CHOICES)
+SAC_MEDIDA_LABELS = dict(FormatoCuchillas.SAC_MEDIDA_CHOICES)
 
 
 def _build_costos_seed(formato, precios=None):
@@ -173,7 +179,15 @@ def _build_costos_seed(formato, precios=None):
         add("grafa", "Grafa", " · ".join(partes), "cm", formato.grafa_cm)
     if float(formato.ch_cm or 0) > 0:
         add("ch", "CH", formato.ch_medida, "cm", formato.ch_cm)
-    if float(formato.sac_cm or 0) > 0:  # legacy: sacabocados en cm
+    sacabocados = formato.sacabocados or []
+    if sacabocados:
+        for idx, fila in enumerate(sacabocados):
+            medida = fila.get("medida") or ""
+            cantidad = float(fila.get("cantidad") or 0)
+            if cantidad > 0:
+                add(f"sacabocados-{idx}", "Sacabocados", SAC_MEDIDA_LABELS.get(medida, medida), "und", cantidad,
+                    price_key=f"sacabocados:{medida}" if medida else "sacabocados")
+    elif float(formato.sac_cm or 0) > 0:  # legacy: sacabocados en cm
         add("sacabocados", "Sacabocados", formato.sac_medida, "cm", formato.sac_cm)
     elif formato.sac_medida or float(formato.sac_cantidad or 0) > 0:
         add("sacabocados", "Sacabocados", formato.get_sac_medida_display(), "und", formato.sac_cantidad)
@@ -193,9 +207,14 @@ def _sync_troquel_costos(op):
     modelo, _ = TroquelModelo.objects.get_or_create(orden=op)
     prev = {item.get("key"): item for item in (modelo.costos_items or [])}
     prev_caucho_precio = {}
+    prev_sac_precio = {}
     for item in (modelo.costos_items or []):
         if str(item.get("key", "")).startswith("caucho-") and float(item.get("precio") or 0) > 0:
             prev_caucho_precio.setdefault(item.get("concepto"), item.get("precio"))
+        if str(item.get("key", "")).startswith("sacabocados-") and float(item.get("precio") or 0) > 0:
+            # A diferencia del caucho, el concepto de sacabocados es genérico ("Sacabocados")
+            # para toda medida — hay que distinguir por price_key (que sí lleva la medida).
+            prev_sac_precio.setdefault(item.get("price_key"), item.get("precio"))
     # Precios por defecto del cliente (rellenan las líneas que el Admin no fijó).
     precios = (op.cliente.precios_troquel or {}) if op.cliente_id else {}
     seed = _build_costos_seed(formato, precios)
@@ -214,6 +233,9 @@ def _sync_troquel_costos(op):
         # Precio previo del mismo tipo de caucho; si no hay, conserva el default del cliente.
         if line["key"].startswith("caucho-") and not float(line["precio"] or 0):
             line["precio"] = prev_caucho_precio.get(line["concepto"]) or line["precio"]
+        # Precio previo de la misma medida de sacabocados; si no hay, conserva el default del cliente.
+        if line["key"].startswith("sacabocados-") and not float(line["precio"] or 0):
+            line["precio"] = prev_sac_precio.get(line["concepto"]) or line["precio"]
     modelo.costos_items = seed
     modelo.save(update_fields=["costos_items", "modificado"])
     _aplicar_costo_troquel(op, _costos_items_total(seed))
@@ -1445,7 +1467,50 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         Vista sanitizada: sin valores monetarios (el cliente sí es visible).
         """
         proceso_id = (request.query_params.get("proceso") or "").strip()
+        estacion_id = (request.query_params.get("estacion") or "").strip()
         qs = OrdenProduccion.objects.select_related("cliente").prefetch_related("procesos")
+
+        if estacion_id:
+            # Cola de una estación de la cadena (impresora → … → troqueladora).
+            # A diferencia de `?proceso=`, aquí la visibilidad NO la marca el
+            # Admin: la OP entra sola cuando le llega el turno.
+            if estacion_id not in chain.ESTACION_POR_ID:
+                return Response({"error": "Estación desconocida."}, status=400)
+            est = chain.ESTACION_POR_ID[estacion_id]
+            bloqueantes = OpProceso.objects.filter(
+                orden=OuterRef("pk"), active=True, completado=False,
+                proceso_id__in=chain.procesos_anteriores(estacion_id),
+            )
+            qs = (
+                qs.prefetch_related("registros_proceso")
+                .filter(
+                    procesos__proceso_id__in=est["procesos"],
+                    procesos__active=True,
+                    procesos__completado=False,
+                )
+                .distinct()
+                # Bloqueo duro: mientras quede un proceso activo pendiente de una
+                # estación anterior, la OP no aparece en esta cola.
+                .exclude(Exists(bloqueantes))
+                .annotate(
+                    prioridad_estacion=Subquery(
+                        OpProceso.objects.filter(
+                            orden=OuterRef("pk"), proceso_id__in=est["procesos"]
+                        ).order_by(F("prioridad").asc(nulls_last=True)).values("prioridad")[:1]
+                    )
+                )
+                .order_by(
+                    F("prioridad_estacion").asc(nulls_last=True),
+                    F("fecha_entrega").asc(nulls_last=True),
+                    "creado",
+                )
+            )
+            return Response(
+                OrdenEstacionSerializer(
+                    qs, many=True, context={"request": request, "estacion": estacion_id}
+                ).data
+            )
+
         if proceso_id:
             # Todas estas condiciones van en un solo filter() para que apliquen a
             # la MISMA fila de proceso (no a filas distintas de la misma OP).
@@ -2225,3 +2290,213 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
             **self.get_serializer(formato).data,
             "remision_eliminada_id": rem_id,
         })
+
+
+class RegistroProcesoViewSet(viewsets.ModelViewSet):
+    """Registros de las máquinas de la cadena (impresora → … → troqueladora).
+
+    Listar/crear: cualquier autenticado (Operador). Editar/eliminar: admin.
+    Crear un registro cierra el OpProceso correspondiente y la OP pasa sola a la
+    cola de la estación siguiente.
+    """
+
+    queryset = RegistroProceso.objects.select_related("orden", "orden__cliente", "operador")
+    serializer_class = RegistroProcesoSerializer
+    filter_backends = [filters.OrderingFilter]
+    ordering_fields = ["fecha_hora"]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        orden_id = self.request.query_params.get("orden")
+        if orden_id:
+            qs = qs.filter(orden_id=orden_id)
+        estacion = self.request.query_params.get("estacion")
+        if estacion:
+            qs = qs.filter(estacion=estacion)
+        if self.request.query_params.get("mias"):
+            qs = qs.filter(operador=self.request.user)
+        return qs
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        datos = serializer.validated_data
+        op = datos["orden"]
+        estacion_id = datos["estacion"]
+        proceso_id = datos["proceso_id"]
+
+        est = chain.ESTACION_POR_ID.get(estacion_id)
+        if est is None or proceso_id not in est["procesos"]:
+            return Response(
+                {"error": f"El proceso '{proceso_id}' no pertenece a esta estación."},
+                status=400,
+            )
+
+        proceso = op.procesos.filter(proceso_id=proceso_id, active=True, completado=False).first()
+        if proceso is None:
+            return Response(
+                {
+                    "code": "proceso_no_activo",
+                    "error": "Este proceso no está activo o ya fue registrado en esta OP.",
+                },
+                status=409,
+            )
+
+        # Bloqueo duro: primero impresora, después laminadora, barnizadora y
+        # troquelado. Solo cuentan los procesos que la OP sí tiene activos.
+        falta = chain.bloqueado_por(op, estacion_id)
+        if falta:
+            return Response(
+                {
+                    "code": "fuera_de_orden",
+                    "error": f"Falta completar {falta} antes de registrar en {est['label']}.",
+                },
+                status=409,
+            )
+
+        esperada = _cantidad_esperada(op)
+        realizada = int(datos.get("cantidad_realizada") or 0)
+        faltante = realizada < esperada
+        if faltante and not request.data.get("confirmar_faltante"):
+            # El servidor es la autoridad: sin confirmación explícita no se
+            # registra, para que el aviso al Admin no se pueda saltar.
+            return Response(
+                {
+                    "code": "cantidad_faltante",
+                    "error": "La cantidad registrada es menor a la esperada.",
+                    "cantidad_esperada": esperada,
+                    "cantidad_realizada": realizada,
+                },
+                status=409,
+            )
+
+        with transaction.atomic():
+            registro = serializer.save(
+                operador=request.user, cantidad_esperada=esperada, faltante=faltante,
+            )
+            op.procesos.filter(proceso_id=proceso_id).update(
+                completado=True, completado_en=timezone.now()
+            )
+            if faltante:
+                Notificacion.objects.create(
+                    tipo="cantidad_faltante",
+                    titulo=f"Faltan unidades · {op.cliente.nombre if op.cliente else 'Sin cliente'}",
+                    mensaje=(
+                        f"{est['label']}: se registraron {realizada:,} de {esperada:,} "
+                        f"esperadas en la {op.numero}"
+                        + (f" ({op.referencia})." if op.referencia else ".")
+                    ).replace(",", "."),
+                    orden=op,
+                    registro=registro,
+                    creada_por=request.user,
+                )
+
+        # El prefetch de procesos quedó obsoleto tras el update(): sin refetch,
+        # el progreso se calcularía con el estado anterior.
+        op_fresca = OrdenProduccion.objects.get(pk=op.pk)
+        _maybe_crear_remision(op_fresca)
+
+        siguiente = chain.siguiente_estacion(op_fresca)
+        return Response(
+            {
+                **self.get_serializer(registro).data,
+                "siguiente_estacion": (
+                    {"id": siguiente["id"], "label": siguiente["label"]} if siguiente else None
+                ),
+                "estacion_terminada": not chain.procesos_pendientes_de(op_fresca, estacion_id),
+                "progreso": _orden_progreso(op_fresca),
+            },
+            status=201,
+        )
+
+    @action(detail=True, methods=["post"], url_path="anular")
+    def anular(self, request, pk=None):
+        """POST /api/registros-proceso/{id}/anular/ — deshace un registro.
+
+        Bajo bloqueo duro un error de tecleo dejaría la OP atascada en la
+        estación siguiente, así que el Operador puede deshacer lo suyo mientras
+        ninguna estación posterior haya registrado ya sobre esta OP.
+        """
+        registro = self.get_object()
+        op = registro.orden
+        es_admin = request.user.is_staff
+        if not es_admin and registro.operador_id != request.user.id:
+            return Response({"error": "Solo puedes anular tus propios registros."}, status=403)
+
+        orden_estacion = chain.ESTACION_POR_ID[registro.estacion]["orden"]
+        hay_posterior = any(
+            chain.ESTACION_POR_ID[r.estacion]["orden"] > orden_estacion
+            for r in op.registros_proceso.all()
+            if r.estacion in chain.ESTACION_POR_ID
+        )
+        if hay_posterior and not es_admin:
+            return Response(
+                {"error": "Ya se registró una estación posterior; pide al administrador que lo corrija."},
+                status=409,
+            )
+
+        with transaction.atomic():
+            error = _borrar_remision_de_op(op)
+            if error:
+                return Response({"error": error}, status=409)
+            op.procesos.filter(proceso_id=registro.proceso_id).update(
+                completado=False, completado_en=None
+            )
+            Notificacion.objects.filter(registro=registro).delete()
+            registro.delete()
+        return Response({"ok": True})
+
+    def update(self, request, *args, **kwargs):
+        _require_admin(request)
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        _require_admin(request)
+        return super().partial_update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        _require_admin(request)
+        return super().destroy(request, *args, **kwargs)
+
+
+class NotificacionViewSet(viewsets.ReadOnlyModelViewSet):
+    """Avisos para el Admin (por ahora, faltantes de cantidad en producción).
+
+    Admin-only en todas sus acciones: al Operador no le corresponde ver el
+    tablero de alertas.
+    """
+
+    queryset = Notificacion.objects.select_related("orden", "creada_por")
+    serializer_class = NotificacionSerializer
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        _require_admin(request)
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if self.request.query_params.get("no_leidas"):
+            qs = qs.filter(leida_en__isnull=True)
+        return qs
+
+    @action(detail=True, methods=["post"], url_path="leer")
+    def leer(self, request, pk=None):
+        noti = self.get_object()
+        if noti.leida_en is None:
+            noti.leida_en = timezone.now()
+            noti.leida_por = request.user
+            noti.save(update_fields=["leida_en", "leida_por"])
+        return Response(self.get_serializer(noti).data)
+
+    @action(detail=False, methods=["post"], url_path="marcar_todas_leidas")
+    def marcar_todas_leidas(self, request):
+        n = Notificacion.objects.filter(leida_en__isnull=True).update(
+            leida_en=timezone.now(), leida_por=request.user
+        )
+        return Response({"ok": True, "total": n})
+
+    @action(detail=False, methods=["get"], url_path="resumen")
+    def resumen(self, request):
+        return Response(
+            {"no_leidas": Notificacion.objects.filter(leida_en__isnull=True).count()}
+        )

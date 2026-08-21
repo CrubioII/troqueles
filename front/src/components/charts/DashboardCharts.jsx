@@ -2,7 +2,7 @@ import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Cell,
 } from 'recharts'
-import { fmtCOP } from '../core'
+import { fmtCOP, ESTACIONES_CONFIG, ESTACIONES_ORDEN } from '../core'
 
 // Hex fijos espejando styles.css — Recharts necesita valores resolvibles en SVG, no var(--x)
 const ESTADO_COLORS = {
@@ -98,6 +98,21 @@ export function UtilizacionChart({ data }) {
             <div style={{ fontSize: 20, fontWeight: 700, color: '#1B1816' }}>{counts?.guillotina ?? 0}</div>
             <div style={{ fontSize: 11, color: '#807A6E' }}>Registros guillotina</div>
           </div>
+        </div>
+      </div>
+
+      {/* Cadena de producción, en su orden real */}
+      <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #E8E1D2' }}>
+        <div style={{ fontSize: 11, color: '#807A6E', marginBottom: 6 }}>Cadena de producción — registros por estación</div>
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+          {ESTACIONES_ORDEN.map(id => (
+            <div key={id} style={{ minWidth: 76 }}>
+              <div style={{ fontSize: 18, fontWeight: 700, color: ESTACIONES_CONFIG[id].color }}>
+                {counts?.[id] ?? 0}
+              </div>
+              <div style={{ fontSize: 11, color: '#807A6E' }}>{ESTACIONES_CONFIG[id].label}</div>
+            </div>
+          ))}
         </div>
       </div>
     </ChartCard>

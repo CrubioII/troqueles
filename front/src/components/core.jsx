@@ -22,6 +22,61 @@ export const PLIEGO_SIZES = [
 ]
 export const DISENADORES = ['Oscar', 'Camilo', 'Laura', 'Diana']
 
+// ============ Cadena de producción (estaciones de máquina) ============
+// Los ids espejan RegistroProceso.TAMANO_CHOICES del backend.
+export const TAMANOS_REGISTRO = [
+  { id: 'pliego',        label: 'Pliego completo' },
+  { id: 'medio_pliego',  label: '1/2 pliego' },
+  { id: 'cuarto_pliego', label: '1/4 pliego' },
+  { id: 'octavo_pliego', label: '1/8 pliego' },
+  { id: 'carta',         label: 'Carta' },
+  { id: 'media_carta',   label: '1/2 carta' },
+  { id: 'cuarto_carta',  label: '1/4 carta' },
+  { id: 'otro',          label: 'Otro (especificar)' },
+]
+export const TIPOS_LAMINADO_REGISTRO = [
+  { id: 'mate',       label: 'Mate' },
+  { id: 'brillante',  label: 'Brillante' },
+  { id: 'metalizado', label: 'Metalizado' },
+]
+
+// Solo presentación: el ORDEN de la cadena y el bloqueo los decide el backend
+// (back/cotizaciones/chain.py). Aquí solo vive cómo se pinta cada estación, qué
+// campos muestra su formulario y qué procesos cubre — `procesos` sirve para
+// etiquetar, nunca para calcular turnos.
+export const ESTACIONES_CONFIG = {
+  impresora: {
+    label: 'Impresora', ruta: '/produccion/impresora',
+    desc: 'Primer proceso: registra lo impreso, el tamaño del papel y las tintas de cada cara.',
+    color: '#B8541C', soft: '#FBE9DA', campos: ['tamano', 'colores'],
+    procesos: ['impresion'],
+  },
+  laminadora: {
+    label: 'Laminadora', ruta: '/produccion/laminadora',
+    desc: 'Segundo proceso: registra lo laminado, el tamaño del papel y el tipo de laminado.',
+    color: '#3A5B8C', soft: '#DEE6F3', campos: ['tamano', 'laminado'],
+    procesos: ['laminado'],
+  },
+  barnizadora: {
+    label: 'Barnizadora', ruta: '/produccion/barnizadora',
+    desc: 'Tercer proceso: registra lo barnizado (UV total, parcial o reserva) y el tamaño del papel.',
+    color: '#7B4A9E', soft: '#EDE3F5', campos: ['tamano'], multiproceso: true,
+    procesos: ['uvTotal', 'uvParcial', 'uvReserva'],
+  },
+  troqueladora: {
+    label: 'Troqueladora', ruta: '/produccion/troqueladora',
+    desc: 'Último proceso: registra la cantidad troquelada que sale de la máquina.',
+    color: '#2E7D5B', soft: '#DCEFE3', campos: [],
+    procesos: ['troquelado'],
+  },
+}
+export const ESTACIONES_ORDEN = ['impresora', 'laminadora', 'barnizadora', 'troqueladora']
+
+// proceso_id → label de la estación que normalmente lo registra.
+export const ESTACION_DE_PROCESO = Object.fromEntries(
+  ESTACIONES_ORDEN.flatMap(id => ESTACIONES_CONFIG[id].procesos.map(p => [p, ESTACIONES_CONFIG[id].label]))
+)
+
 // ============ Process definitions ============
 export const PROCESS_GROUPS = [
   {

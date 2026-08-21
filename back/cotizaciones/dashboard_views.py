@@ -7,8 +7,11 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Cotizacion, FormatoCuchillas, OrdenProduccion, RegistroMaquina
+from .models import (
+    Cotizacion, FormatoCuchillas, OrdenProduccion, RegistroMaquina, RegistroProceso,
+)
 from .serializers import _orden_valor_total_efectivo
+from . import chain
 
 
 class DashboardStatsView(APIView):
@@ -48,6 +51,9 @@ class DashboardStatsView(APIView):
             encuchillado=Avg("tiempo_encuchillado_min"),
             encauchado=Avg("tiempo_encauchado_min"),
         )
+        por_estacion = dict(
+            RegistroProceso.objects.values_list("estacion").annotate(n=Count("id"))
+        )
         return {
             "troquel_tiempos_prom_min": {
                 "encalado": round(troquel["encalado"] or 0, 1),
@@ -57,6 +63,11 @@ class DashboardStatsView(APIView):
             "registros_count": {
                 "troquel": RegistroMaquina.objects.filter(maquina="troquel").count(),
                 "guillotina": RegistroMaquina.objects.filter(maquina="guillotina").count(),
+                # Las cuatro estaciones de la cadena, en su orden real.
+                **{
+                    e["id"]: por_estacion.get(e["id"], 0)
+                    for e in chain.ESTACIONES
+                },
             },
         }
 

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, Fragment } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Icon } from '../components/Icons'
-import { fmtNum, ProgressBar, Checkbox } from '../components/core'
+import { fmtNum, ProgressBar, Checkbox, ESTACION_DE_PROCESO } from '../components/core'
 import { getOrdenes, getOrden, toggleProcesoCompletado } from '../api'
 import { useSyncPolling } from '../lib/useSyncPolling'
 
@@ -44,6 +44,9 @@ function Skeleton() {
 
 function ChecklistRow({ ordId, proceso, onToggled }) {
   const [busy, setBusy] = useState(false)
+  // Los procesos con estación propia se registran en su máquina; marcarlos aquí
+  // a mano la salta y no deja registro de lo producido.
+  const estacion = ESTACION_DE_PROCESO[proceso.proceso_id]
 
   const handleToggle = () => {
     if (busy) return
@@ -55,11 +58,19 @@ function ChecklistRow({ ordId, proceso, onToggled }) {
   }
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', flexWrap: 'wrap' }}>
       <Checkbox checked={proceso.completado} onChange={handleToggle} />
       <span style={{ fontSize: 13, color: proceso.completado ? 'var(--ink-3)' : 'var(--ink)', textDecoration: proceso.completado ? 'line-through' : 'none' }}>
         {PROCESO_LABELS[proceso.proceso_id] || proceso.proceso_id}
       </span>
+      {estacion && !proceso.completado && (
+        <span
+          title={`Normalmente lo registra el operador en ${estacion}. Marcarlo aquí salta la máquina: no queda registro de cantidades y desbloquea el proceso siguiente.`}
+          style={{ fontSize: 10, color: 'var(--ink-3)', border: '1px solid var(--line)', borderRadius: 4, padding: '1px 5px' }}
+        >
+          {estacion} · marcar aquí salta la máquina
+        </span>
+      )}
     </div>
   )
 }

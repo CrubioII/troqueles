@@ -1,12 +1,36 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { ModuleCard } from '../components/core'
+import { ModuleCard, ESTACIONES_CONFIG, ESTACIONES_ORDEN } from '../components/core'
 import { Icon } from '../components/Icons'
 import { getDashboardStats } from '../api'
 import { UtilizacionChart } from '../components/charts/DashboardCharts'
 
+// Las cuatro estaciones van primero y en orden de cadena: el hub debe leerse
+// como el recorrido real de una OP por el taller.
+const ESTACION_ICONS = {
+  impresora: <Icon.Printer />,
+  laminadora: <Icon.Layers />,
+  barnizadora: <Icon.Drop />,
+  troqueladora: <Icon.Blade />,
+}
+
+const ESTACION_MODULES = ESTACIONES_ORDEN.map((id, i) => {
+  const cfg = ESTACIONES_CONFIG[id]
+  return {
+    key: id,
+    label: `${i + 1}. ${cfg.label}`,
+    desc: cfg.desc,
+    action: 'Entrar',
+    path: cfg.ruta,
+    color: cfg.color,
+    soft: cfg.soft,
+    icon: ESTACION_ICONS[id],
+  }
+})
+
 const MODULES = [
+  ...ESTACION_MODULES,
   {
     key: 'troqueles',
     label: 'Troqueles',

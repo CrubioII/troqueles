@@ -285,11 +285,11 @@ const EMPTY_FORMATO = {
   cuchilla_cm: 0, cuchilla_tipo: '', cuchilla_puntos: '',
   grafa_cm: 0, grafa_puntos: '', grafa_altura: '',
   ch_cm: 0, ch_medida: '',
-  sac_medida: '', sac_cantidad: 0,
   perfo_cm: 0, perfo_medida: '',
   gan: '',
   observaciones: '',
   cauchos: [{ tipo: 'verde', cm: 0 }],
+  sacabocados: [{ medida: '', cantidad: 0 }],
   desperdicio_cm: 0,
   tiempo_encalado_min: 0, tiempo_encuchillado_min: 0, tiempo_encauchado_min: 0,
 }
@@ -304,6 +304,7 @@ const initFormato = (formato) => {
   const f = { ...EMPTY_FORMATO }
   Object.keys(EMPTY_FORMATO).forEach(k => { if (formato[k] != null) f[k] = formato[k] })
   if (!Array.isArray(f.cauchos) || !f.cauchos.length) f.cauchos = [{ tipo: 'verde', cm: 0 }]
+  if (!Array.isArray(f.sacabocados) || !f.sacabocados.length) f.sacabocados = [{ medida: '', cantidad: 0 }]
   return f
 }
 
@@ -349,6 +350,10 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
     setForm(f => ({ ...f, cauchos: f.cauchos.map((row, i) => (i === idx ? { ...row, [k]: v } : row)) }))
   const addCaucho = () => setForm(f => ({ ...f, cauchos: [...f.cauchos, { tipo: 'verde', cm: 0 }] }))
   const removeCaucho = (idx) => setForm(f => ({ ...f, cauchos: f.cauchos.filter((_, i) => i !== idx) }))
+  const setSac = (idx, k, v) =>
+    setForm(f => ({ ...f, sacabocados: f.sacabocados.map((row, i) => (i === idx ? { ...row, [k]: v } : row)) }))
+  const addSac = () => setForm(f => ({ ...f, sacabocados: [...f.sacabocados, { medida: '', cantidad: 0 }] }))
+  const removeSac = (idx) => setForm(f => ({ ...f, sacabocados: f.sacabocados.filter((_, i) => i !== idx) }))
 
   // Edición (Admin): PATCH directo, sin popup de irreversibilidad.
   const submitEdit = () => {
@@ -476,15 +481,6 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
             </select>
           </Field>
         </FieldGroup>
-        <FieldGroup title="Sacabocados">
-          <Field label="Cantidad" w={90}><NumField step={1} placeholder="0" value={form.sac_cantidad} onChange={v => set('sac_cantidad', v)} /></Field>
-          <Field label="Tipo" w={130}>
-            <select className="input" value={form.sac_medida} onChange={e => set('sac_medida', e.target.value)}>
-              <option value="">—</option>
-              {SAC_SIZES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-            </select>
-          </Field>
-        </FieldGroup>
         <FieldGroup title="Perforado">
           <Field label="cm" w={90}><NumField placeholder="0" value={form.perfo_cm} onChange={v => set('perfo_cm', v)} /></Field>
           <Field label="Tamaño" w={100}>
@@ -523,6 +519,33 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
             </div>
           ))}
           <button className="btn sm" onClick={addCaucho} style={{ alignSelf: 'flex-start', marginTop: 2 }}>+ Agregar caucho</button>
+        </div>
+      </div>
+
+      <div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
+          Sacabocados — tipo(s) usados y cantidad de cada uno
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {form.sacabocados.map((row, idx) => (
+            <div key={idx} style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-end' }}>
+              <Field label={idx === 0 ? 'Tipo' : ''} w={130}>
+                <select className="input" value={row.medida} onChange={e => setSac(idx, 'medida', e.target.value)}>
+                  <option value="">—</option>
+                  {SAC_SIZES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                </select>
+              </Field>
+              <Field label={idx === 0 ? 'Cantidad' : ''} w={90}><NumField step={1} placeholder="0" value={row.cantidad} onChange={v => setSac(idx, 'cantidad', v)} /></Field>
+              <button
+                className="btn sm" onClick={() => removeSac(idx)}
+                disabled={form.sacabocados.length === 1}
+                style={{ marginBottom: 4 }}
+              >
+                Quitar
+              </button>
+            </div>
+          ))}
+          <button className="btn sm" onClick={addSac} style={{ alignSelf: 'flex-start', marginTop: 2 }}>+ Agregar sacabocado</button>
         </div>
       </div>
 
@@ -720,9 +743,12 @@ export function FormatosCuchillasHistory({ formatos, loading, onEdit, showOrden 
             const caucho = (f.cauchos || []).length
               ? f.cauchos.map(r => `${CAUCHO_TIPO_LABELS[r.tipo] || r.tipo}: ${fmtNum(r.cm, 2)}`).join(' · ')
               : '—'
+            const sac = (f.sacabocados || []).length
+              ? f.sacabocados.map(r => `${SAC_SIZE_LABELS[r.medida] || r.medida}: ${r.cantidad}`).join(' · ')
+              : sacCell(f)
             const chSacGan = [
               medidaCell(f.ch_cm, f.ch_medida, f.ch),
-              sacCell(f),
+              sac,
               medidaCell(f.perfo_cm, f.perfo_medida, ''),
               f.gan,
             ].filter(Boolean).join(' / ') || '—'

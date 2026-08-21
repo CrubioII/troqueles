@@ -2,9 +2,15 @@ import { useEffect, useState } from 'react'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { Icon } from './Icons'
+import { CampanaNotificaciones } from './Notificaciones'
 
 const PRODUCCION_SUBLINKS = [
   { label: 'Hub de producción', path: '/produccion', exact: true, icon: <Icon.Progress width="15" height="15" /> },
+  // Cadena de producción, en su orden real
+  { label: 'Impresora', path: '/produccion/impresora', icon: <Icon.Printer width="15" height="15" /> },
+  { label: 'Laminadora', path: '/produccion/laminadora', icon: <Icon.Layers width="15" height="15" /> },
+  { label: 'Barnizadora', path: '/produccion/barnizadora', icon: <Icon.Drop width="15" height="15" /> },
+  { label: 'Troqueladora', path: '/produccion/troqueladora', icon: <Icon.Blade width="15" height="15" /> },
   { label: 'Troqueles', path: '/produccion/troqueles', icon: <Icon.Stamp width="15" height="15" /> },
   { label: 'Guillotina', path: '/produccion/guillotina', icon: <Icon.Blade width="15" height="15" /> },
   { label: 'Producción general', path: '/produccion/general', icon: <Icon.Progress width="15" height="15" /> },
@@ -186,6 +192,11 @@ export default function Layout() {
 
         {/* User + logout */}
         <div style={{ padding: '12px', borderTop: '1px solid var(--line)' }}>
+          {isAdmin && (
+            <div style={{ marginBottom: 8 }}>
+              <CampanaNotificaciones />
+            </div>
+          )}
           <div style={{
             display: 'flex', alignItems: 'center', gap: 8,
             padding: '8px 10px',
@@ -253,6 +264,7 @@ export default function Layout() {
             <div style={{ fontWeight: 700, fontSize: 13 }}>Troqueles INK</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {isAdmin && <CampanaNotificaciones compact />}
             <div style={{
               width: 24, height: 24, borderRadius: '50%',
               background: 'var(--accent)', color: 'white',
