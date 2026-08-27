@@ -10,6 +10,12 @@ SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")
 DEBUG = os.getenv("DEBUG", "True") == "True"
 ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 
+# Azure App Service terminates TLS at the proxy and forwards plain HTTP,
+# setting X-Forwarded-Proto. Without this, request.is_secure() is always
+# False, so DRF builds pagination `next`/`previous` links as http:// —
+# which the frontend's CSP (https: only) then blocks.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
