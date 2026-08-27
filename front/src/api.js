@@ -65,6 +65,21 @@ const ok = (r) => {
   if (!r.ok) throw new Error(`HTTP ${r.status}`)
 }
 
+// Sigue los links `next` de una respuesta paginada de DRF y junta todos los
+// resultados. Usar solo en listas que el front necesita completas en memoria
+// (búsqueda/orden/reordenamiento client-side) — de lo contrario, más allá de
+// PAGE_SIZE (50) los ítems más viejos quedan invisibles en silencio.
+async function fetchAllPages(url) {
+  const all = []
+  while (url) {
+    const data = await apiFetch(url).then(json)
+    if (Array.isArray(data)) return all.concat(data)
+    all.push(...(data.results || []))
+    url = data.next || null
+  }
+  return all
+}
+
 // Como `json`, pero propaga el mensaje de error del servidor ({ error } o { detail })
 const jsonConError = async (r) => {
   if (!r.ok) {
@@ -230,6 +245,11 @@ export const enviarDocumento = (id, email, extraEmails = []) =>
 
 export const getOrdenes = (params = '') =>
   apiFetch(`${BASE}/ordenes/${params}`).then(json)
+
+// Como getOrdenes, pero trae todas las páginas: para listas que se
+// buscan/reordenan completas en memoria (p. ej. la cola de troquel).
+export const getOrdenesTodas = (params = '') =>
+  fetchAllPages(`${BASE}/ordenes/${params}`)
 
 export const getOrden = (id) =>
   apiFetch(`${BASE}/ordenes/${id}/`).then(json)
@@ -532,7 +552,7 @@ export const getFormatosCuchillas = (ordenId) =>
   apiFetch(`${BASE}/formatos-cuchillas/?orden=${ordenId}`).then(json)
 
 export const getFormatosCuchillasTodos = () =>
-  apiFetch(`${BASE}/formatos-cuchillas/`).then(json)
+  fetchAllPages(`${BASE}/formatos-cuchillas/`)
 
 export const createFormatoCuchillas = (data) =>
   apiFetch(`${BASE}/formatos-cuchillas/`, {

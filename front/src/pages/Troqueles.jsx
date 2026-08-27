@@ -8,7 +8,7 @@ import {
   NuevaTareaTroquelModal,
 } from '../components/Troquel'
 import {
-  getOrdenes, deleteOrden, getFormatosCuchillas, getFormatosCuchillasTodos, getOrdenesPendientes,
+  getOrdenesTodas, deleteOrden, getFormatosCuchillas, getFormatosCuchillasTodos, getOrdenesPendientes,
   getOrdenProduccion, getTroquelModelo, toggleProcesoVisibleOperador,
   updateFormatoCuchillas, cancelarEnvioFormato,
   getRemisionablesOperador, consolidarRemisionOperador, pdfRemisionOperadorConsolidada,
@@ -129,7 +129,7 @@ function AdminTroqueles() {
 
   const loadOrdenes = () => {
     setLoading(true)
-    return getOrdenes('?proceso=troquel')
+    return getOrdenesTodas('?proceso=troquel')
       .then(d => {
         const list = asList(d).sort(byEntrega)
         setOrdenes(list)
