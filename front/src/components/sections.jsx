@@ -4,8 +4,8 @@ import { getClientes } from '../api'
 import {
   fmtCOP, fmtNum,
   PLIEGO_SIZES, DISENADORES, PROCESS_GROUPS, CONDICIONES_PAGO,
-  CONDICIONES_PAGO_OP, TIPOS_FACTURACION,
-  SheetDiagram, Checkbox, MoneyInput, StatusPicker, NumField,
+  CONDICIONES_PAGO_OP, TIPOS_FACTURACION, ESTACIONES_CONFIG,
+  SheetDiagram, Checkbox, MoneyInput, StatusPicker, NumField, SaveStatus,
 } from './core'
 import { CHARGE_MODES, applyChargeMode } from '../lib/opQuoteShared'
 
@@ -256,6 +256,9 @@ export function SectionPapel({ d, set, calc, papelCatalog }) {
 
       <div className="papel-block">
         <div className="papel-block-title">Cortes</div>
+        <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginBottom: 8 }}>
+          Si están activos, la OP pasa por Guillotina: corte inicial antes de Impresora y corte final después de Troqueladora.
+        </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {[
             { key: 'corteInicial', label: 'Corte inicial', activeKey: 'corteInicialActive', precioKey: 'corteInicialPrecio' },
@@ -634,7 +637,19 @@ function ProcRow(props) {
   return <ProcRowDefault {...props} />
 }
 
+// Barnizadora hace un solo pase de UV por OP: activar uno de los tres apaga
+// los otros para que no se pueda dejar más de uno marcado desde el formulario.
+const BARNIZADO_EXCLUSIVOS = ESTACIONES_CONFIG.barnizadora.procesos
+
 export function SectionProcesos({ procesos, setProc, autoValues, cantidadProduccion }) {
+  const toggle = (procesoId) => {
+    const willActivate = !procesos[procesoId]?.active
+    if (willActivate && BARNIZADO_EXCLUSIVOS.includes(procesoId)) {
+      BARNIZADO_EXCLUSIVOS.forEach(id => { if (id !== procesoId) setProc(id, { active: false }) })
+    }
+    setProc(procesoId, { active: willActivate })
+  }
+
   return (
     <div>
       {PROCESS_GROUPS.map(g => {
@@ -652,7 +667,7 @@ export function SectionProcesos({ procesos, setProc, autoValues, cantidadProducc
                 p={procesos[pdef.id]}
                 autoVal={autoValues[pdef.id]}
                 cantidadProduccion={cantidadProduccion}
-                onToggle={() => setProc(pdef.id, { active: !procesos[pdef.id]?.active })}
+                onToggle={() => toggle(pdef.id)}
                 onUpdate={(patch) => setProc(pdef.id, patch)}
               />
             ))}
@@ -784,10 +799,11 @@ export function SectionCondicionesOP({ d, set, readOnly = false }) {
 // =========================================================
 // Section 6 — Acciones
 // =========================================================
-export function SectionAcciones({ d, calc, onSave, onDelete, onSaveAndSend, saving, originalEstado }) {
+export function SectionAcciones({ d, calc, onDelete, onSaveAndSend, saveStatus, onRetrySave, sending, originalEstado }) {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const isConvertida = (originalEstado || d.estado) === 'convertida'
   const canDelete = !!d.id && !isConvertida
+  const busy = sending || saveStatus === 'saving'
 
   return (
     <div>
@@ -798,12 +814,10 @@ export function SectionAcciones({ d, calc, onSave, onDelete, onSaveAndSend, savi
         </div>
       )}
       <div className="actions-row">
-        <button className="btn" onClick={onSave} disabled={saving || isConvertida}>
-          <Icon.Save /> {saving ? 'Guardando…' : 'Guardar'}
+        <button className="btn accent" onClick={onSaveAndSend} disabled={busy || isConvertida} style={{ gap: 6 }}>
+          <Icon.Send /> {sending ? 'Enviando…' : 'Enviar al Cliente'}
         </button>
-        <button className="btn accent" onClick={onSaveAndSend} disabled={saving || isConvertida} style={{ gap: 6 }}>
-          <Icon.Send /> {saving ? 'Guardando…' : 'Guardar y Enviar al Cliente'}
-        </button>
+        <SaveStatus status={saveStatus} onRetry={onRetrySave} />
         <div className="spacer" />
         <span className="muted" style={{ fontSize: 11.5 }}>
           Total cotización: <strong className="mono" style={{ color: 'var(--ink)' }}>{fmtCOP(calc.valorTotal)}</strong>
@@ -816,7 +830,7 @@ export function SectionAcciones({ d, calc, onSave, onDelete, onSaveAndSend, savi
               className="btn"
               style={{ color: 'var(--danger, #c0392b)', borderColor: 'var(--danger, #c0392b)' }}
               onClick={() => setConfirmDelete(true)}
-              disabled={saving}
+              disabled={busy}
             >
               <Icon.Trash /> Eliminar cotización
             </button>
@@ -829,11 +843,11 @@ export function SectionAcciones({ d, calc, onSave, onDelete, onSaveAndSend, savi
                 className="btn"
                 style={{ background: 'var(--danger, #c0392b)', color: '#fff', borderColor: 'var(--danger, #c0392b)' }}
                 onClick={onDelete}
-                disabled={saving}
+                disabled={busy}
               >
                 Sí, eliminar
               </button>
-              <button className="btn" onClick={() => setConfirmDelete(false)} disabled={saving}>
+              <button className="btn" onClick={() => setConfirmDelete(false)} disabled={busy}>
                 Cancelar
               </button>
             </>
@@ -842,7 +856,7 @@ export function SectionAcciones({ d, calc, onSave, onDelete, onSaveAndSend, savi
       )}
       <div className="muted" style={{ fontSize: 11, marginTop: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
         <Icon.Info />
-        Puedes seguir guardando como borrador todas las veces que necesites. El cambio de estado y la conversión a OP se hacen desde el listado de cotizaciones.
+        Los cambios se guardan automáticamente. El cambio de estado y la conversión a OP se hacen desde el listado de cotizaciones.
       </div>
     </div>
   )

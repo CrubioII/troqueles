@@ -215,7 +215,6 @@ class OrdenListSerializer(serializers.ModelSerializer):
     valor_total_efectivo = serializers.SerializerMethodField()
     saldo = serializers.SerializerMethodField()
     progreso = serializers.SerializerMethodField()
-    visible_operador_troquel = serializers.SerializerMethodField()
     prioridad_troquel = serializers.SerializerMethodField()
 
     class Meta:
@@ -224,12 +223,8 @@ class OrdenListSerializer(serializers.ModelSerializer):
             "id", "numero", "fecha", "fecha_entrega", "cliente_nombre", "referencia",
             "cantidad", "valor_total_efectivo", "abono", "saldo",
             "cotizacion", "cotizacion_numero", "creado", "modificado",
-            "progreso", "visible_operador_troquel", "prioridad_troquel",
+            "progreso", "prioridad_troquel",
         ]
-
-    def get_visible_operador_troquel(self, obj):
-        p = _proceso_troquel(obj)
-        return bool(p.visible_operador) if p else False
 
     def get_prioridad_troquel(self, obj):
         p = _proceso_troquel(obj)
@@ -246,6 +241,14 @@ class OrdenListSerializer(serializers.ModelSerializer):
 
     def get_progreso(self, obj):
         return _orden_progreso(obj)
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get("request")
+        if request and not request.user.is_staff:
+            for f in ("valor_total_efectivo", "abono", "saldo"):
+                data.pop(f, None)
+        return data
 
 
 def _orden_progreso(obj):
@@ -346,6 +349,21 @@ class OrdenSerializer(serializers.ModelSerializer):
 
     def get_progreso(self, obj):
         return _orden_progreso(obj)
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get("request")
+        if request and not request.user.is_staff:
+            for f in (
+                "precio_pliego", "costo_papel_override",
+                "corte_inicial_precio", "corte_final_precio",
+                "valor_unitario_override", "valor_total_override",
+                "total_costos_override", "subtotal_override",
+                "margen", "abono",
+                "valor_unitario_efectivo", "valor_total_efectivo", "saldo",
+            ):
+                data.pop(f, None)
+        return data
 
     def create(self, validated_data):
         procesos_data = validated_data.pop("procesos", [])
@@ -539,7 +557,7 @@ class OrdenOperadorSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = OrdenProduccion
-        fields = ["id", "numero", "fecha_entrega", "cliente", "cliente_nombre", "referencia", "cantidad", "procesos", "troquel_modelo", "remision_enviada", "prioridad_troquel", "desde_cotizacion"]
+        fields = ["id", "numero", "fecha_entrega", "creado", "cliente", "cliente_nombre", "referencia", "cantidad", "procesos", "troquel_modelo", "remision_enviada", "prioridad_troquel", "desde_cotizacion"]
 
     def get_desde_cotizacion(self, obj):
         return obj.cotizacion_id is not None
@@ -566,11 +584,12 @@ class OrdenOperadorSerializer(serializers.ModelSerializer):
 
 
 def _cantidad_esperada(obj):
-    """Lo que la OP espera que salga de cada máquina: cantidad + sobrante.
+    """Lo que la OP espera que salga de cada máquina: solo lo requerido.
 
-    Único sitio a tocar si la regla del faltante cambia.
+    El sobrante no es esperado — es el margen de tolerancia que absorbe
+    faltantes pequeños antes de avisar (ver RegistroProcesoViewSet.create).
     """
-    return int(obj.cantidad or 0) + int(obj.sobrante or 0)
+    return int(obj.cantidad or 0)
 
 
 class RegistroProcesoSerializer(serializers.ModelSerializer):
@@ -780,7 +799,7 @@ class RemisionSerializer(serializers.ModelSerializer):
             "id", "numero", "fecha",
             "orden", "orden_numero",
             "cliente", "cliente_nombre", "cliente_email", "cliente_telefono", "cliente_nit",
-            "direccion", "ciudad", "observaciones", "mostrar_valores",
+            "direccion", "ciudad", "observaciones", "mostrar_valores", "tiene_troquel",
             "estado", "enviada_en", "liquidada_en",
             "consolidada_en", "consolidada_en_remision", "consolidada_en_numero",
             "creado", "modificado",
@@ -811,4 +830,4 @@ class RemisionListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Remision
         fields = ["id", "numero", "fecha", "cliente_nombre", "orden_numero",
-                  "estado", "mostrar_valores", "creado", "modificado"]
+                  "estado", "mostrar_valores", "tiene_troquel", "creado", "modificado"]

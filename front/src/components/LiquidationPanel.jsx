@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Icon } from './Icons'
-import { fmtCOP, fmtNum } from './core'
+import { fmtCOP, fmtNum, SaveStatus } from './core'
 import { pdfInterno } from '../api'
 import { computeCalcConTarifas, buildOpcionesPdf } from '../lib/opQuoteShared'
 
@@ -28,11 +28,12 @@ function LiqInput({ value, onChange, isOverridden, onReset, big }) {
 }
 
 export default function LiquidationPanel({
-  d, set, calc, onSave, onSaveAndSend, saving, originalEstado,
+  d, set, calc, onSaveAndSend, saveStatus, onRetrySave, sending, originalEstado,
   mode = 'cot', locked = false, onPdfAdmin, onPdfProduccion, procesos = null,
 }) {
   const isOp = mode === 'op'
   const isConvertida = !isOp && (originalEstado || d.estado) === 'convertida'
+  const saving = sending || saveStatus === 'saving'
   const [dlPdf, setDlPdf] = useState(false)
   const [collapsed, setCollapsed] = useState(() => typeof window !== 'undefined' && window.innerWidth < 900)
 
@@ -313,12 +314,12 @@ export default function LiquidationPanel({
             onClick={onSaveAndSend}
             disabled={saving || isConvertida}
           >
-            <Icon.Send /> {saving ? 'Guardando…' : 'Guardar y Enviar al Cliente'}
+            <Icon.Send /> {sending ? 'Enviando…' : 'Enviar al Cliente'}
           </button>
         )}
-        <button className={'btn' + (isOp ? ' accent' : '')} style={{ width: '100%', justifyContent: 'center', marginTop: 6 }} onClick={onSave} disabled={saving || isConvertida}>
-          <Icon.Save /> {saving ? 'Guardando…' : 'Guardar'}
-        </button>
+        <div style={{ display: 'flex', justifyContent: 'center', marginTop: 6 }}>
+          <SaveStatus status={saveStatus} onRetry={onRetrySave} />
+        </div>
         <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
           {isOp ? (
             <>

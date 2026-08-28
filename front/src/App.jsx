@@ -59,6 +59,8 @@ function AppRoutes() {
         <Route path="/produccion/troqueladora" element={<EstacionMaquina estacion="troqueladora" />} />
         <Route path="/produccion/troqueles" element={<Troqueles />} />
         <Route path="/produccion/troqueles/:id" element={<AdminRoute><TroquelGestion /></AdminRoute>} />
+        {/* Guillotina: página centralizada — cadena (corte inicial + corte final de
+            las OPs) y registro libre (cortes sueltos sin OP), en un solo lugar. */}
         <Route path="/produccion/guillotina" element={<Guillotina />} />
         <Route path="/produccion/general" element={<ProduccionGeneral />} />
       </Route>

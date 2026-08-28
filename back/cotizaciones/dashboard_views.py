@@ -63,10 +63,13 @@ class DashboardStatsView(APIView):
             "registros_count": {
                 "troquel": RegistroMaquina.objects.filter(maquina="troquel").count(),
                 "guillotina": RegistroMaquina.objects.filter(maquina="guillotina").count(),
-                # Las cuatro estaciones de la cadena, en su orden real.
+                # Las cuatro estaciones de la cadena, en su orden real. Guillotina
+                # queda fuera: la clave "guillotina" ya la ocupa el conteo libre
+                # de arriba, y este bloque solo alimenta el gráfico de las 4.
                 **{
                     e["id"]: por_estacion.get(e["id"], 0)
                     for e in chain.ESTACIONES
+                    if e["id"] in ("impresora", "laminadora", "barnizadora", "troqueladora")
                 },
             },
         }

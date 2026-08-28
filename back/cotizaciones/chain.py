@@ -1,14 +1,23 @@
 """Cadena secuencial de estaciones de producción.
 
-Fuente única de verdad del orden: Impresora → Laminadora → Barnizadora →
-Troqueladora. Una OP solo pasa por los procesos activos en ella, pero el orden
-relativo entre los que sí aplican es siempre este.
+Fuente única de verdad del orden: (Guillotina · corte inicial) → Impresora →
+Laminadora → Barnizadora → Troqueladora → (Guillotina · corte final). Una OP
+solo pasa por los procesos activos en ella, pero el orden relativo entre los
+que sí aplican es siempre este.
+
+Guillotina aparece dos veces porque es la misma máquina en dos momentos: si
+la OP tiene `corte_inicial_active` corta el pliego antes de entrar a la
+cadena, y si tiene `corte_final_active` corta el producto terminado después
+de Troqueladora. Son dos estaciones lógicas (`guillotina` / `guillotina_final`)
+con órdenes 0 y 5 para que el bloqueo funcione en ambos extremos; comparten
+label y pantalla en el front.
 
 `troquel` (fabricación del molde) NO pertenece a la cadena: tiene su propio
 flujo de formato de cuchillas con visibilidad manual del Admin.
 """
 
 ESTACIONES = [
+    {"id": "guillotina", "orden": 0, "label": "Guillotina", "procesos": ["corteInicial"]},
     {"id": "impresora", "orden": 1, "label": "Impresora", "procesos": ["impresion"]},
     {"id": "laminadora", "orden": 2, "label": "Laminadora", "procesos": ["laminado"]},
     {
@@ -18,6 +27,7 @@ ESTACIONES = [
         "procesos": ["uvTotal", "uvParcial", "uvReserva"],
     },
     {"id": "troqueladora", "orden": 4, "label": "Troqueladora", "procesos": ["troquelado"]},
+    {"id": "guillotina_final", "orden": 5, "label": "Guillotina", "procesos": ["corteFinal"]},
 ]
 
 # Gancho para exigir procesos de fuera de la cadena antes de una estación.
@@ -32,12 +42,14 @@ CHAIN_PROCESOS = set(PROCESO_A_ESTACION)
 # Etiqueta legible por proceso_id, para nombrar el proceso concreto (no la
 # estación) en notificaciones e historiales.
 PROCESO_LABELS = {
+    "corteInicial": "Corte inicial",
     "impresion": "Impresión",
     "laminado": "Laminado",
     "uvTotal": "UV total",
     "uvParcial": "UV parcial",
     "uvReserva": "UV reserva",
     "troquelado": "Troquelado",
+    "corteFinal": "Corte final",
 }
 
 

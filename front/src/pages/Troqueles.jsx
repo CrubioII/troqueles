@@ -1,15 +1,16 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { ProgressBar, REMISION_STATUS_DEFS } from '../components/core'
+import { ProgressBar, REMISION_STATUS_DEFS, SaveStatus } from '../components/core'
 import { Icon } from '../components/Icons'
+import { useAutosave } from '../hooks/useAutosave'
 import {
   FormatosCuchillasHistory, FormatoCuchillasForm, ModeloViewer,
   NuevaTareaTroquelModal,
 } from '../components/Troquel'
 import {
   getOrdenesTodas, deleteOrden, getFormatosCuchillas, getFormatosCuchillasTodos, getOrdenesPendientes,
-  getOrdenProduccion, getTroquelModelo, toggleProcesoVisibleOperador,
+  getOrdenProduccion, getTroquelModelo,
   updateFormatoCuchillas, cancelarEnvioFormato,
   getRemisionablesOperador, consolidarRemisionOperador, pdfRemisionOperadorConsolidada,
   getRemisionesGeneradasOperador, devolverRemisionOperador,
@@ -20,17 +21,18 @@ import { useSyncPolling } from '../lib/useSyncPolling'
 
 const asList = (data) => (Array.isArray(data) ? data : (data?.results || []))
 
-// Fecha de entrega formateada + color según urgencia (vencido / próximo)
-function fmtEntrega(s) {
+// Fecha de subida al sistema formateada + color según antigüedad sin registrar
+// el formato de cuchillas: neutro (0-1 días), ámbar (1-2 días), rojo (3+ días).
+function fmtSubida(s) {
   if (!s) return { txt: 'Sin fecha', color: 'var(--ink-3)' }
-  const d = new Date(s + 'T00:00:00')
-  const today = new Date(); today.setHours(0, 0, 0, 0)
-  const diff = Math.round((d - today) / 86400000)
+  const d = new Date(s)
+  const today = new Date()
+  const diff = Math.floor((today - d) / 86400000)
   const txt = d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })
   let color = 'var(--ink-2)'
-  if (diff < 0) color = 'var(--danger, #c0392b)'
-  else if (diff <= 2) color = 'var(--warn, #e0a800)'
-  return { txt: diff < 0 ? `${txt} · vencido` : txt, color }
+  if (diff >= 3) color = 'var(--danger, #c0392b)'
+  else if (diff >= 1) color = 'var(--warn, #e0a800)'
+  return { txt, color }
 }
 
 // Fecha (o fecha+hora ISO) en formato corto local
@@ -44,12 +46,12 @@ function fmtFechaCorta(s) {
 // Búsqueda sin distinguir mayúsculas ni tildes
 const norm = (s) => (s || '').toString().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
 
-// Orden por fecha de entrega ascendente; las OPs sin fecha quedan al final
-const byEntrega = (a, b) => {
-  if (!a.fecha_entrega && !b.fecha_entrega) return 0
-  if (!a.fecha_entrega) return 1
-  if (!b.fecha_entrega) return -1
-  return a.fecha_entrega < b.fecha_entrega ? -1 : (a.fecha_entrega > b.fecha_entrega ? 1 : 0)
+// Orden FIFO por fecha de subida al sistema ascendente (la más antigua primero)
+const byCreado = (a, b) => {
+  if (!a.creado && !b.creado) return 0
+  if (!a.creado) return 1
+  if (!b.creado) return -1
+  return a.creado < b.creado ? -1 : (a.creado > b.creado ? 1 : 0)
 }
 
 function Section({ title, children, style, actions }) {
@@ -113,7 +115,7 @@ function AdminTroqueles() {
   const [showNueva, setShowNueva] = useState(false)      // modal Nueva tarea de troquel
   const [solicitudes, setSolicitudes] = useState([])     // envíos de remisión bloqueados por falta de precios
   const [confirmDelete, setConfirmDelete] = useState(null)
-  const [busqueda, setBusqueda] = useState('')           // filtro de la tabla de OPs en troquel
+  const [busqueda, setBusqueda] = useState('')           // filtro de la cola del operador
   const [prioridadError, setPrioridadError] = useState(null)
 
   const loadSolicitudes = () =>
@@ -131,7 +133,7 @@ function AdminTroqueles() {
     setLoading(true)
     return getOrdenesTodas('?proceso=troquel')
       .then(d => {
-        const list = asList(d).sort(byEntrega)
+        const list = asList(d).sort(byCreado)
         setOrdenes(list)
         return list
       })
@@ -141,12 +143,6 @@ function AdminTroqueles() {
 
   useEffect(() => { loadOrdenes() }, [])
 
-  const ordenesFiltradas = useMemo(() => {
-    const t = norm(busqueda.trim())
-    if (!t) return ordenes
-    return ordenes.filter(o => [o.numero, o.cliente_nombre, o.referencia].some(v => norm(v).includes(t)))
-  }, [ordenes, busqueda])
-
   const abrirGestion = (ord) => navigate(`/produccion/troqueles/${ord.id}`)
 
   const handleDelete = (e, ord) => {
@@ -155,41 +151,28 @@ function AdminTroqueles() {
       setOrdenes(prev => prev.filter(o => o.id !== ord.id))
       setConfirmDelete(null)
       deleteOrden(ord.id).catch(() => {
-        setOrdenes(prev => [ord, ...prev].sort(byEntrega))
+        setOrdenes(prev => [ord, ...prev].sort(byCreado))
       })
     } else {
       setConfirmDelete(ord.id)
     }
   }
 
-  // Marca/desmarca si la OP aparece en la pantalla del Operador (optimista + rollback).
-  // El backend asigna la prioridad al final de la cola al marcar, y la libera al desmarcar.
-  const toggleVisible = (e, ord) => {
-    e.stopPropagation()
-    const next = !ord.visible_operador_troquel
-    const antes = ord.prioridad_troquel
-    const prioridadOptimista = next ? (Math.max(0, ...seleccionados.map(o => o.prioridad_troquel || 0)) + 1) : null
-    setOrdenes(prev => prev.map(o => o.id === ord.id
-      ? { ...o, visible_operador_troquel: next, prioridad_troquel: prioridadOptimista } : o))
-    toggleProcesoVisibleOperador(ord.id, 'troquel', next)
-      .then(p => setOrdenes(prev => prev.map(o => o.id === ord.id ? { ...o, prioridad_troquel: p.prioridad } : o)))
-      .catch(() => {
-        setOrdenes(prev => prev.map(o => o.id === ord.id
-          ? { ...o, visible_operador_troquel: !next, prioridad_troquel: antes } : o))
-      })
-  }
-
-  // Cola del Operador: las OPs marcadas como visibles, en el orden que verá el operador.
-  // Sin prioridad asignada van al final, por fecha de entrega.
-  const seleccionados = useMemo(() => (
-    ordenes
-      .filter(o => o.visible_operador_troquel)
-      .sort((a, b) => {
-        const pa = a.prioridad_troquel ?? Infinity
-        const pb = b.prioridad_troquel ?? Infinity
-        return pa !== pb ? pa - pb : byEntrega(a, b)
-      })
+  // Cola del Operador: toda OP con troquel activo entra automáticamente al subir
+  // la tarea. Orden FIFO por fecha de subida; la prioridad manual manda si está.
+  const ordenesEnCola = useMemo(() => (
+    [...ordenes].sort((a, b) => {
+      const pa = a.prioridad_troquel ?? Infinity
+      const pb = b.prioridad_troquel ?? Infinity
+      return pa !== pb ? pa - pb : byCreado(a, b)
+    })
   ), [ordenes])
+
+  const ordenesFiltradas = useMemo(() => {
+    const t = norm(busqueda.trim())
+    if (!t) return ordenesEnCola
+    return ordenesEnCola.filter(o => [o.numero, o.cliente_nombre, o.referencia].some(v => norm(v).includes(t)))
+  }, [ordenesEnCola, busqueda])
 
   // Reordena la cola y persiste la numeración 1..N (optimista + rollback)
   const reordenar = (nuevaCola) => {
@@ -205,11 +188,10 @@ function AdminTroqueles() {
     })
   }
 
-  const mover = (idx, dir) => {
-    const destino = idx + dir
-    if (destino < 0 || destino >= seleccionados.length) return
-    const cola = [...seleccionados]
-    ;[cola[idx], cola[destino]] = [cola[destino], cola[idx]]
+  // Manda una OP directo al primer puesto de la cola.
+  const priorizar = (e, ord) => {
+    e.stopPropagation()
+    const cola = [ord, ...ordenesEnCola.filter(o => o.id !== ord.id)]
     reordenar(cola)
   }
 
@@ -242,67 +224,22 @@ function AdminTroqueles() {
         </div>
       )}
 
-      <Section title={`Cola del Operador${seleccionados.length ? ` (${seleccionados.length})` : ''}`}>
+      <Section
+        title={`Cola del Operador${ordenesEnCola.length ? ` (${ordenesEnCola.length})` : ''}`}
+        actions={<button className="btn sm primary" onClick={() => setShowNueva(true)}>+ Nueva tarea de troquel</button>}
+      >
         <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', fontSize: 12, color: 'var(--ink-3)' }}>
-          Estos son los troqueles que el operador ve en su pantalla, en este orden.
-          Marca o desmarca OPs en la tabla de abajo y usa las flechas para dar prioridad.
+          Toda tarea de troquel que se crea entra automáticamente aquí, en orden de subida (FIFO).
+          Usa «Priorizar» para mandar una al primer puesto.
         </div>
         {prioridadError && (
           <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', fontSize: 12, color: 'var(--danger, #c0392b)' }}>
             ✗ {prioridadError}
           </div>
         )}
-        {seleccionados.length === 0 ? (
-          <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>
-            Ningún troquel seleccionado — la pantalla del operador está vacía.
-          </div>
-        ) : (
-          <div className="table-scroll">
-          <table style={{ width: '100%', minWidth: 760, borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ borderBottom: '2px solid var(--line)' }}>
-                {['#', 'OP #', 'Entrega', 'Cliente', 'Referencia', 'Prioridad', ''].map((h, i) => (
-                  <th key={i} style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--ink-3)', background: 'var(--surface-2)' }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {seleccionados.map((ord, idx) => {
-                const ent = fmtEntrega(ord.fecha_entrega)
-                return (
-                  <tr key={ord.id}
-                    style={{ borderBottom: '1px solid var(--line)', background: idx % 2 ? 'var(--surface-2)' : 'var(--surface)', cursor: 'pointer' }}
-                    onClick={() => abrirGestion(ord)}>
-                    <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 13, color: 'var(--ink-3)', width: 40 }}>{idx + 1}</td>
-                    <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 12 }}>{ord.numero}</td>
-                    <td style={{ padding: '10px 12px', fontSize: 12, fontWeight: 600, color: ent.color }}>{ent.txt}</td>
-                    <td style={{ padding: '10px 12px', fontWeight: 600 }}>{ord.cliente_nombre}</td>
-                    <td style={{ padding: '10px 12px', color: 'var(--ink-2)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ord.referencia}</td>
-                    <td style={{ padding: '10px 12px' }} onClick={e => e.stopPropagation()}>
-                      <div style={{ display: 'flex', gap: 4 }}>
-                        <button className="btn sm" title="Subir prioridad" disabled={idx === 0} onClick={() => mover(idx, -1)}>↑</button>
-                        <button className="btn sm" title="Bajar prioridad" disabled={idx === seleccionados.length - 1} onClick={() => mover(idx, 1)}>↓</button>
-                      </div>
-                    </td>
-                    <td style={{ padding: '10px 12px' }} onClick={e => e.stopPropagation()}>
-                      <button className="btn sm" onClick={e => toggleVisible(e, ord)}>Quitar</button>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-          </div>
-        )}
-      </Section>
-
-      <Section
-        title="OPs en Troquel"
-        actions={<button className="btn sm primary" onClick={() => setShowNueva(true)}>+ Nueva tarea de troquel</button>}
-      >
         {loading ? (
           <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Cargando…</div>
-        ) : ordenes.length === 0 ? (
+        ) : ordenesEnCola.length === 0 ? (
           <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>No hay OPs con troquel activo</div>
         ) : (
           <>
@@ -324,49 +261,49 @@ function AdminTroqueles() {
             <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Sin resultados para «{busqueda.trim()}»</div>
           ) : (
           <div className="table-scroll">
-          <table style={{ width: '100%', minWidth: 820, borderCollapse: 'collapse' }}>
+          <table style={{ width: '100%', minWidth: 860, borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ borderBottom: '2px solid var(--line)' }}>
-                {['OP #', 'Entrega', 'Cliente', 'Referencia', 'Progreso', 'Operador', ''].map((h, i) => (
+                {['#', 'OP #', 'Subida', 'Cliente', 'Referencia', 'Progreso', '', ''].map((h, i) => (
                   <th key={i} style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--ink-3)', background: 'var(--surface-2)' }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {ordenesFiltradas.map((ord, idx) => (
-                <tr key={ord.id}
-                  style={{ borderBottom: '1px solid var(--line)', background: idx % 2 ? 'var(--surface-2)' : 'var(--surface)', cursor: 'pointer' }}
-                  onClick={() => abrirGestion(ord)}>
-                  <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 12 }}>{ord.numero}</td>
-                  <td style={{ padding: '10px 12px', fontSize: 12, fontWeight: 600, color: fmtEntrega(ord.fecha_entrega).color }}>{fmtEntrega(ord.fecha_entrega).txt}</td>
-                  <td style={{ padding: '10px 12px', fontWeight: 600 }}>{ord.cliente_nombre}</td>
-                  <td style={{ padding: '10px 12px', color: 'var(--ink-2)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ord.referencia}</td>
-                  <td style={{ padding: '10px 12px' }}>
-                    {ord.progreso ? (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <ProgressBar pct={ord.progreso.porcentaje} />
-                        <span style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'JetBrains Mono, monospace' }}>{ord.progreso.completados}/{ord.progreso.total}</span>
-                      </div>
-                    ) : '—'}
-                  </td>
-                  <td style={{ padding: '10px 12px' }} onClick={e => e.stopPropagation()}>
-                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600, color: ord.visible_operador_troquel ? 'var(--ink-1)' : 'var(--ink-3)' }}>
-                      <input type="checkbox" checked={!!ord.visible_operador_troquel} onChange={e => toggleVisible(e, ord)} />
-                      {ord.visible_operador_troquel
-                        ? `Visible${ord.prioridad_troquel ? ` · #${ord.prioridad_troquel}` : ''}`
-                        : 'Oculto'}
-                    </label>
-                  </td>
-                  <td style={{ padding: '10px 12px' }} onClick={e => e.stopPropagation()}>
-                    <button
-                      className={'btn sm' + (confirmDelete === ord.id ? ' danger' : '')}
-                      onClick={e => handleDelete(e, ord)}
-                    >
-                      {confirmDelete === ord.id ? '¿Eliminar?' : 'Eliminar'}
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {ordenesFiltradas.map((ord, idx) => {
+                const sub = fmtSubida(ord.creado)
+                const esPrimero = ordenesEnCola[0]?.id === ord.id
+                return (
+                  <tr key={ord.id}
+                    style={{ borderBottom: '1px solid var(--line)', background: idx % 2 ? 'var(--surface-2)' : 'var(--surface)', cursor: 'pointer' }}
+                    onClick={() => abrirGestion(ord)}>
+                    <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 13, color: 'var(--ink-3)', width: 40 }}>{idx + 1}</td>
+                    <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 12 }}>{ord.numero}</td>
+                    <td style={{ padding: '10px 12px', fontSize: 12, fontWeight: 600, color: sub.color }}>{sub.txt}</td>
+                    <td style={{ padding: '10px 12px', fontWeight: 600 }}>{ord.cliente_nombre}</td>
+                    <td style={{ padding: '10px 12px', color: 'var(--ink-2)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ord.referencia}</td>
+                    <td style={{ padding: '10px 12px' }}>
+                      {ord.progreso ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <ProgressBar pct={ord.progreso.porcentaje} />
+                          <span style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'JetBrains Mono, monospace' }}>{ord.progreso.completados}/{ord.progreso.total}</span>
+                        </div>
+                      ) : '—'}
+                    </td>
+                    <td style={{ padding: '10px 12px' }} onClick={e => e.stopPropagation()}>
+                      <button className="btn sm" title="Mandar al primer puesto" disabled={esPrimero} onClick={e => priorizar(e, ord)}>Priorizar</button>
+                    </td>
+                    <td style={{ padding: '10px 12px' }} onClick={e => e.stopPropagation()}>
+                      <button
+                        className={'btn sm' + (confirmDelete === ord.id ? ' danger' : '')}
+                        onClick={e => handleDelete(e, ord)}
+                      >
+                        {confirmDelete === ord.id ? '¿Eliminar?' : 'Eliminar'}
+                      </button>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
           </div>
@@ -396,32 +333,21 @@ function AdminTroqueles() {
 function OperadorOpDatos({ orden, onSaved }) {
   const locked = !!orden.desde_cotizacion
   const [referencia, setReferencia] = useState(orden.referencia || '')
-  const [fechaEntrega, setFechaEntrega] = useState(orden.fecha_entrega || '')
   const [clienteId, setClienteId] = useState(orden.cliente || null)
   const [clienteNombre, setClienteNombre] = useState(orden.cliente_nombre || '')
   const [suggestions, setSuggestions] = useState([])
   const [showSugg, setShowSugg] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState(null)
-  const [ok, setOk] = useState(false)
 
   useEffect(() => {
     setReferencia(orden.referencia || '')
-    setFechaEntrega(orden.fecha_entrega || '')
     setClienteId(orden.cliente || null)
     setClienteNombre(orden.cliente_nombre || '')
-    setSuggestions([]); setShowSugg(false); setError(null); setOk(false)
+    setSuggestions([]); setShowSugg(false)
   }, [orden.id])
-
-  const dirty =
-    referencia !== (orden.referencia || '') ||
-    fechaEntrega !== (orden.fecha_entrega || '') ||
-    clienteId !== (orden.cliente || null)
 
   const buscarClientes = (q) => {
     setClienteNombre(q)
     setClienteId(null)   // sin sugerencia elegida no hay cliente válido
-    setOk(false)
     if (!q || q.trim().length < 2) { setSuggestions([]); setShowSugg(false); return }
     getClientes(q)
       .then(d => { const l = asList(d); setSuggestions(l); setShowSugg(l.length > 0) })
@@ -430,19 +356,16 @@ function OperadorOpDatos({ orden, onSaved }) {
 
   const elegirCliente = (c) => { setClienteId(c.id); setClienteNombre(c.nombre); setShowSugg(false) }
 
-  const guardar = () => {
-    setError(null); setOk(false)
-    const payload = { referencia: referencia.trim(), fecha_entrega: fechaEntrega || null }
-    if (!locked) {
-      if (!clienteId) { setError('Selecciona un cliente de la lista.'); return }
-      payload.cliente = clienteId
-    }
-    setSaving(true)
-    editarCamposOrden(orden.id, payload)
-      .then(full => { setOk(true); onSaved && onSaved(full) })
-      .catch(e => setError(e?.message || 'No se pudieron guardar los cambios'))
-      .finally(() => setSaving(false))
-  }
+  const { status: saveStatus, retry: retrySave } = useAutosave(
+    { referencia, clienteId },
+    (v) => {
+      const payload = { referencia: v.referencia.trim() }
+      if (!locked) payload.cliente = v.clienteId
+      return editarCamposOrden(orden.id, payload).then(full => { onSaved && onSaved(full) })
+    },
+    { isValid: (v) => locked || !!v.clienteId }
+  )
+  const needsClienteSelection = !locked && !clienteId && clienteNombre.trim().length > 0
 
   const lbl = { fontSize: 11, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }
   return (
@@ -482,18 +405,16 @@ function OperadorOpDatos({ orden, onSaved }) {
         </div>
         <div style={{ flex: '1 1 220px', minWidth: 200 }}>
           <div style={lbl}>Referencia</div>
-          <input className="input" style={{ width: '100%' }} value={referencia} onChange={e => { setReferencia(e.target.value); setOk(false) }} />
+          <input className="input" style={{ width: '100%' }} value={referencia} onChange={e => setReferencia(e.target.value)} />
         </div>
         <div style={{ flex: '0 0 auto' }}>
-          <div style={lbl}>Fecha de entrega</div>
-          <input className="input" type="date" value={fechaEntrega || ''} onChange={e => { setFechaEntrega(e.target.value); setOk(false) }} />
+          <div style={lbl}>Fecha de subida</div>
+          <div style={{ padding: '9px 0', fontSize: 13, color: 'var(--ink-2)' }}>{fmtFechaCorta(orden.creado)}</div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <button className="btn sm primary" disabled={!dirty || saving} onClick={guardar}>
-            {saving ? 'Guardando…' : 'Guardar cambios'}
-          </button>
-          {ok && <span style={{ fontSize: 12, color: 'var(--ok, #2e8b57)' }}>✓ Guardado</span>}
-          {error && <span style={{ fontSize: 12, color: 'var(--danger, #c0392b)' }}>{error}</span>}
+          {needsClienteSelection
+            ? <span style={{ fontSize: 12, color: 'var(--danger, #c0392b)' }}>Selecciona un cliente de la lista</span>
+            : <SaveStatus status={saveStatus} onRetry={retrySave} style={{ fontSize: 12 }} />}
         </div>
       </div>
     </div>
@@ -512,6 +433,10 @@ function OperadorTroqueles() {
   const [loadingFormatos, setLoadingFormatos] = useState(false)
   const [cancelando, setCancelando] = useState(false)
   const [cancelError, setCancelError] = useState(null)
+  // Desbloqueo inline desde el historial: formato en curso + error, para poder
+  // editar un formato aprobado sin salir de la tabla del historial.
+  const [histUnlockBusy, setHistUnlockBusy] = useState(null)
+  const [histUnlockError, setHistUnlockError] = useState(null)
   // Historial: formatos de cuchillas (todas las OPs / operadores) y remisiones generadas
   const [histTab, setHistTab] = useState('formatos')  // 'formatos' | 'remisiones'
   const [historial, setHistorial] = useState([])
@@ -733,10 +658,23 @@ function OperadorTroqueles() {
       })
   }
 
+  // Desbloquear un formato aprobado directamente desde el historial: cancela su
+  // envío (saca la remisión, vuelve a borrador) y abre el editor de una vez con
+  // el formato ya actualizado que devuelve el servidor.
+  const desbloquearYEditar = (f) => {
+    setHistUnlockBusy(f.id)
+    setHistUnlockError(null)
+    cancelarEnvioFormato(f.id)
+      .then(updated => { setEditHist(updated); loadHistorial() })
+      .catch(e => setHistUnlockError(e?.message || 'No se pudo desbloquear el formato'))
+      .finally(() => setHistUnlockBusy(null))
+  }
+
   const volver = () => { setOrden(null); setFormatos([]); loadLista() }
 
   if (!orden) {
     const puedeEditar = (f) => f.estado !== 'aprobado' && esMio(f)
+    const puedeDesbloquear = (f) => f.estado === 'aprobado' && esMio(f)
     return (
       <>
         <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
@@ -866,6 +804,9 @@ function OperadorTroqueles() {
                 </div>
               </div>
             )}
+            {histUnlockError && (
+              <div style={{ margin: '0 16px 12px', fontSize: 12, color: 'var(--danger, #c0392b)' }}>{histUnlockError}</div>
+            )}
             {!loadingHistorial && historial.length > 0 && historialFiltrado.length === 0 ? (
               <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Sin resultados para «{busquedaHist.trim()}»</div>
             ) : (
@@ -875,6 +816,9 @@ function OperadorTroqueles() {
                 compact
                 onEdit={setEditHist}
                 canEdit={puedeEditar}
+                onUnlock={desbloquearYEditar}
+                canUnlock={puedeDesbloquear}
+                unlockBusyId={histUnlockBusy}
               />
             )}
           </Section>
@@ -909,21 +853,21 @@ function OperadorTroqueles() {
               <table style={{ width: '100%', minWidth: 760, borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ borderBottom: '2px solid var(--line)' }}>
-                    {['#', 'OP #', 'Entrega', 'Cliente', 'Referencia', 'Cantidad', ''].map((h, i) => (
+                    {['#', 'OP #', 'Subida', 'Cliente', 'Referencia', 'Cantidad', ''].map((h, i) => (
                       <th key={i} style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--ink-3)', background: 'var(--surface-2)' }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {listaFiltrada.map((op, idx) => {
-                    const ent = fmtEntrega(op.fecha_entrega)
+                    const sub = fmtSubida(op.creado)
                     return (
                       <tr key={op.id}
                         style={{ borderBottom: '1px solid var(--line)', background: idx % 2 ? 'var(--surface-2)' : 'var(--surface)', cursor: 'pointer' }}
                         onClick={() => !opening && abrir(op)}>
                         <td style={{ padding: '12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 13, color: 'var(--ink-3)', width: 40 }}>{idx + 1}</td>
                         <td style={{ padding: '12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 13 }}>{op.numero}</td>
-                        <td style={{ padding: '12px', fontSize: 12, fontWeight: 600, color: ent.color }}>{ent.txt}</td>
+                        <td style={{ padding: '12px', fontSize: 12, fontWeight: 600, color: sub.color }}>{sub.txt}</td>
                         <td style={{ padding: '12px', fontWeight: 600 }}>{op.cliente_nombre || '—'}</td>
                         <td style={{ padding: '12px', color: 'var(--ink-2)' }}>{op.referencia}</td>
                         <td style={{ padding: '12px', fontFamily: 'JetBrains Mono, monospace', color: 'var(--ink-2)' }}>{op.cantidad}</td>

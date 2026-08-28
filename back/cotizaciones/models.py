@@ -399,10 +399,12 @@ class RegistroProceso(models.Model):
     """
 
     ESTACION_CHOICES = [
+        ("guillotina", "Guillotina · Corte inicial"),
         ("impresora", "Impresora"),
         ("laminadora", "Laminadora"),
         ("barnizadora", "Barnizadora"),
         ("troqueladora", "Troqueladora"),
+        ("guillotina_final", "Guillotina · Corte final"),
     ]
     TAMANO_CHOICES = [
         ("pliego", "Pliego completo"),
@@ -636,6 +638,10 @@ class Remision(models.Model):
     ciudad = models.CharField(max_length=120, blank=True, default="")
     observaciones = models.TextField(blank=True, default="")
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default="pendiente")
+    # True si la OP tenía un proceso `troquel` (fabricación de molde) activo al
+    # generarse esta remisión — permite al Admin distinguir en el listado una
+    # remisión de producción completa de una que además incluye troquel.
+    tiene_troquel = models.BooleanField(default=False)
     # Interruptor del Admin: si es True, la remisión del Operador muestra los
     # valores monetarios; por defecto la remisión del Operador va sin precios.
     mostrar_valores = models.BooleanField(default=False)

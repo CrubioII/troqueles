@@ -1,10 +1,11 @@
-import { useState, useMemo, useEffect, useRef } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Icon } from '../components/Icons'
 import { fmtCOP, fmtNum, CONDICIONES_PAGO_OP, TIPOS_FACTURACION, Section } from '../components/core'
 import { SectionGenerales, SectionPapel, SectionProcesos, SectionCondicionesOP } from '../components/sections'
 import LiquidationPanel from '../components/LiquidationPanel'
 import { ModeloTroquelGestion } from '../components/Troquel'
+import { useAutosave } from '../hooks/useAutosave'
 import {
   getOrden, getPapeles, createOrden, updateOrden,
   getNextNumeroOrden, createCliente, updateCliente,
@@ -79,10 +80,7 @@ export default function OrdenEdit() {
   const [papelCatalog, setPapelCatalog] = useState([])
   const [open, setOpen] = useState({ s1: true, s2: true, s3: true, s5: true })
   const [loading, setLoading] = useState(!isNew)
-  const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState(null)
-  const [toast, setToast] = useState(null)
-  const toastRef = useRef(null)
 
   const locked = !!d.cotizacionId
 
@@ -127,7 +125,6 @@ export default function OrdenEdit() {
 
   // ============ Save ============
   const save = async () => {
-    setSaving(true)
     setSaveError(null)
     try {
       let result
@@ -177,16 +174,21 @@ export default function OrdenEdit() {
         id: result.id,
         numero: result.numero || prev.numero,
       }))
-      clearTimeout(toastRef.current)
-      setToast('Orden de producción guardada')
-      toastRef.current = setTimeout(() => setToast(null), 3000)
       return result.id
     } catch (e) {
       setSaveError(e.message)
-    } finally {
-      setSaving(false)
+      throw e
     }
   }
+
+  const { status: saveStatus, retry: retrySave } = useAutosave(
+    useMemo(() => {
+      const { id, numero, ...dComparable } = d
+      return { d: dComparable, procesos }
+    }, [d, procesos]),
+    () => save(),
+    { delay: 1500, isValid: () => locked || (!!d.cliente.trim() && !!d.referencia.trim()) }
+  )
 
   // ============ PDFs ============
   const papelReferencia = (() => {
@@ -383,28 +385,15 @@ export default function OrdenEdit() {
           <div className="column-side">
             <LiquidationPanel
               d={d} set={set} calc={calc}
-              saving={saving}
+              saveStatus={saveStatus} onRetrySave={retrySave}
               mode="op"
               locked={locked}
-              onSave={() => save()}
               onPdfAdmin={handlePdfAdmin}
               onPdfProduccion={handlePdfProduccion}
             />
           </div>
         )}
       </div>
-
-      {/* Save toast */}
-      {toast && (
-        <div className="floating-bar" style={{
-          background: '#1a4a2e', color: '#fff', padding: '10px 22px',
-          borderRadius: 8, fontSize: 13, fontWeight: 500,
-          boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
-          display: 'flex', alignItems: 'center', gap: 8, textAlign: 'center',
-        }}>
-          ✓ {toast}
-        </div>
-      )}
     </div>
   )
 }

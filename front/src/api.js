@@ -323,13 +323,6 @@ export const toggleProcesoCompletado = (opId, procesoId, completado) =>
     body: JSON.stringify({ completado }),
   }).then(json)
 
-export const toggleProcesoVisibleOperador = (opId, procesoId, visible) =>
-  apiFetch(`${BASE}/ordenes/${opId}/procesos/${procesoId}/visible_operador/`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ visible_operador: visible }),
-  }).then(json)
-
 // Reordena la cola del Operador: la posición en orden_ids es la prioridad (1 = primero)
 export const setProcesoPrioridades = (procesoId, ordenIds) =>
   apiFetch(`${BASE}/ordenes/procesos/${procesoId}/prioridades/`, {

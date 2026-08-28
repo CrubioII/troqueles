@@ -71,6 +71,10 @@ export function RegistroProcesoForm({ estacion, orden, onCreated }) {
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
   const esperada = Number(orden.cantidad_esperada || 0)
+  const requerida = Number(orden.cantidad || 0)
+  // El sobrante es margen de error que la empresa asume: solo por debajo de
+  // (requerida - margen) se pide confirmación y se avisa al Admin.
+  const margen = Number(orden.sobrante || 0)
 
   const enviar = async (confirmarFaltante) => {
     setSaving(true)
@@ -89,7 +93,7 @@ export function RegistroProcesoForm({ estacion, orden, onCreated }) {
     } catch (e) {
       if (e.code === 'cantidad_faltante') {
         // Red de seguridad: el servidor detectó el faltante que el front no vio.
-        setConfirmando({ esperada: e.cantidad_esperada ?? esperada, realizada: form.cantidad_realizada })
+        setConfirmando({ esperada: e.cantidad_requerida ?? requerida, realizada: form.cantidad_realizada })
       } else {
         setError(e.message)
       }
@@ -103,8 +107,8 @@ export function RegistroProcesoForm({ estacion, orden, onCreated }) {
     if (!procesoId) { setError('Selecciona qué proceso estás registrando.'); return }
     const realizada = Number(form.cantidad_realizada || 0)
     if (!realizada) { setError('Indica la cantidad realizada.'); return }
-    if (esperada && realizada < esperada) {
-      setConfirmando({ esperada, realizada })
+    if (requerida && realizada < (requerida - margen)) {
+      setConfirmando({ esperada: requerida, realizada })
       return
     }
     enviar(false)
@@ -112,18 +116,23 @@ export function RegistroProcesoForm({ estacion, orden, onCreated }) {
 
   return (
     <form className="section" onSubmit={handleSubmit} style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {/* Qué proceso se cierra — solo cuando la estación cubre varios (Barnizadora) */}
-      {cfg.multiproceso && pendientes.length > 1 && (
+      {/* Qué proceso se cierra — la estación cubre varios (Barnizadora): con uno
+          solo pendiente se muestra fijo, con varios se elige entre ellos. */}
+      {cfg.multiproceso && pendientes.length > 0 && (
         <FieldGroup title="¿Qué se barnizó?">
-          {pendientes.map(p => (
-            <ChipToggle
-              key={p.proceso_id}
-              active={procesoId === p.proceso_id}
-              onClick={() => setProcesoId(p.proceso_id)}
-            >
-              {p.label}
-            </ChipToggle>
-          ))}
+          {pendientes.length > 1 ? (
+            pendientes.map(p => (
+              <ChipToggle
+                key={p.proceso_id}
+                active={procesoId === p.proceso_id}
+                onClick={() => setProcesoId(p.proceso_id)}
+              >
+                {p.label}
+              </ChipToggle>
+            ))
+          ) : (
+            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink-1)' }}>{pendientes[0].label}</span>
+          )}
         </FieldGroup>
       )}
 
@@ -138,7 +147,7 @@ export function RegistroProcesoForm({ estacion, orden, onCreated }) {
         </Field>
         <span style={{ fontSize: 12, color: 'var(--ink-3)', alignSelf: 'flex-end', paddingBottom: 8 }}>
           Esperadas: <strong style={{ color: 'var(--ink-2)' }}>{fmtNum(esperada)}</strong>
-          {Number(orden.sobrante) > 0 && ` (${fmtNum(orden.cantidad)} + ${fmtNum(orden.sobrante)} de sobrante)`}
+          {margen > 0 && ` (margen de error: ${fmtNum(margen)})`}
         </span>
       </FieldGroup>
 
@@ -248,7 +257,7 @@ export function RegistroProcesoForm({ estacion, orden, onCreated }) {
             </div>
             <div style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5, marginBottom: 18 }}>
               Registraste <strong>{fmtNum(confirmando.realizada)}</strong> de{' '}
-              <strong>{fmtNum(confirmando.esperada)}</strong> unidades esperadas.
+              <strong>{fmtNum(confirmando.esperada)}</strong> unidades requeridas.
               ¿La cantidad es correcta? Si continúas, se le notificará al administrador
               que faltan unidades en <strong>{cfg.label}</strong>.
             </div>

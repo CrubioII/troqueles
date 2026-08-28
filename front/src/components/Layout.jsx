@@ -7,12 +7,12 @@ import { CampanaNotificaciones } from './Notificaciones'
 const PRODUCCION_SUBLINKS = [
   { label: 'Hub de producción', path: '/produccion', exact: true, icon: <Icon.Progress width="15" height="15" /> },
   // Cadena de producción, en su orden real
+  { label: 'Guillotina', path: '/produccion/guillotina', icon: <Icon.Blade width="15" height="15" /> },
   { label: 'Impresora', path: '/produccion/impresora', icon: <Icon.Printer width="15" height="15" /> },
   { label: 'Laminadora', path: '/produccion/laminadora', icon: <Icon.Layers width="15" height="15" /> },
   { label: 'Barnizadora', path: '/produccion/barnizadora', icon: <Icon.Drop width="15" height="15" /> },
   { label: 'Troqueladora', path: '/produccion/troqueladora', icon: <Icon.Blade width="15" height="15" /> },
   { label: 'Troqueles', path: '/produccion/troqueles', icon: <Icon.Stamp width="15" height="15" /> },
-  { label: 'Guillotina', path: '/produccion/guillotina', icon: <Icon.Blade width="15" height="15" /> },
   { label: 'Producción general', path: '/produccion/general', icon: <Icon.Progress width="15" height="15" /> },
   { label: 'Órdenes (CRUD)', path: '/ordenes', adminOnly: true, icon: <Icon.Duplicate width="15" height="15" /> },
 ]

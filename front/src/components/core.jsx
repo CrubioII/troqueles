@@ -13,6 +13,19 @@ export const fmtNum = (n, d = 0) => {
   return Number(n).toLocaleString('es-CO', { minimumFractionDigits: d, maximumFractionDigits: d })
 }
 
+// ============ Autosave status indicator ============
+export function SaveStatus({ status, onRetry, style }) {
+  const base = { fontSize: 11.5, display: 'inline-flex', alignItems: 'center', gap: 5, ...style }
+  if (status === 'saving') return <span className="muted" style={base}><Icon.Spinner /> Guardando…</span>
+  if (status === 'saved') return <span style={{ ...base, color: '#1a7a3e' }}><Icon.Check /> Guardado</span>
+  if (status === 'error') return (
+    <span style={{ ...base, color: '#c0392b', cursor: 'pointer' }} onClick={onRetry}>
+      Error al guardar — reintentar
+    </span>
+  )
+  return null
+}
+
 // ============ Static catalogs (UI logic, not DB data) ============
 export const PLIEGO_SIZES = [
   { id: '70x100', w: 70, h: 100, label: '70 × 100 cm  (Estándar)' },
@@ -45,6 +58,12 @@ export const TIPOS_LAMINADO_REGISTRO = [
 // campos muestra su formulario y qué procesos cubre — `procesos` sirve para
 // etiquetar, nunca para calcular turnos.
 export const ESTACIONES_CONFIG = {
+  guillotina: {
+    label: 'Guillotina · Corte inicial', ruta: '/produccion/guillotina/inicial',
+    desc: 'Corte previo a la cadena: la OP pasa por acá antes de Impresora. Solo registra cuántas unidades salieron cortadas.',
+    color: '#6B5B95', soft: '#EAE6F2', campos: [],
+    procesos: ['corteInicial'],
+  },
   impresora: {
     label: 'Impresora', ruta: '/produccion/impresora',
     desc: 'Primer proceso: registra lo impreso, el tamaño del papel y las tintas de cada cara.',
@@ -69,12 +88,32 @@ export const ESTACIONES_CONFIG = {
     color: '#2E7D5B', soft: '#DCEFE3', campos: [],
     procesos: ['troquelado'],
   },
+  guillotina_final: {
+    label: 'Guillotina · Corte final', ruta: '/produccion/guillotina/final',
+    desc: 'Corte de cierre: la OP pasa por acá después de Troqueladora. Solo registra cuántas unidades terminadas salieron.',
+    color: '#6B5B95', soft: '#EAE6F2', campos: [],
+    procesos: ['corteFinal'],
+  },
+  // Config de presentación para la página centralizada de Guillotina (pestaña
+  // "Cadena"), que combina guillotina + guillotina_final en una sola cola.
+  guillotina_central: {
+    label: 'Guillotina', ruta: '/produccion/guillotina',
+    desc: 'Corte inicial, cadena y corte final en un solo lugar.',
+    color: '#6B5B95', soft: '#EAE6F2', campos: [],
+    procesos: [],
+  },
 }
+// Las cuatro estaciones "de máquina" propiamente dichas, en orden de cadena —
+// usado solo para presentación (tarjetas del hub, gráfico de utilización).
+// Guillotina queda fuera a propósito: vive en sus propias tarjetas porque no
+// es un paso intermedio del recorrido, sino la entrada y la salida de la OP.
 export const ESTACIONES_ORDEN = ['impresora', 'laminadora', 'barnizadora', 'troqueladora']
 
-// proceso_id → label de la estación que normalmente lo registra.
+// proceso_id → label de la estación que normalmente lo registra. Se arma de
+// TODO ESTACIONES_CONFIG (no solo ESTACIONES_ORDEN) para que Guillotina
+// también aparezca acá.
 export const ESTACION_DE_PROCESO = Object.fromEntries(
-  ESTACIONES_ORDEN.flatMap(id => ESTACIONES_CONFIG[id].procesos.map(p => [p, ESTACIONES_CONFIG[id].label]))
+  Object.keys(ESTACIONES_CONFIG).flatMap(id => ESTACIONES_CONFIG[id].procesos.map(p => [p, ESTACIONES_CONFIG[id].label]))
 )
 
 // ============ Process definitions ============

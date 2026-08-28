@@ -44,11 +44,11 @@ const MODULES = [
   {
     key: 'guillotina',
     label: 'Guillotina',
-    desc: 'Registra lo cortado en guillotina: descripción y costo cobrado. La fecha y hora se registran automáticamente.',
+    desc: 'Corte inicial, cadena y corte final de las OPs, más el registro libre de cortes sueltos — todo en un solo lugar.',
     action: 'Entrar',
     path: '/produccion/guillotina',
-    color: '#3A5B8C',
-    soft: '#DEE6F3',
+    color: '#6B5B95',
+    soft: '#EAE6F2',
     icon: <Icon.Blade />,
   },
   {

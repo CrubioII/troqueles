@@ -42,16 +42,28 @@ const TH = {
   background: 'var(--surface-2)',
 }
 
+// Solo se usa cuando se combinan varias estaciones (Guillotina: corte inicial
+// + corte final en una sola cola) para distinguir de un vistazo cada fila.
+const TIPO_CORTE_LABEL = { guillotina: 'Corte inicial', guillotina_final: 'Corte final' }
+
 /**
  * Puesto de trabajo de una máquina de la cadena.
  *
  * Las cuatro estaciones comparten esta pantalla; `estacion` decide la cola que
  * se pide, cómo se pinta y qué campos muestra el formulario. El orden de la
  * cadena y el bloqueo son del backend: aquí solo se pinta la cola que llega.
+ *
+ * `estaciones` (array) permite combinar varias colas en una sola pantalla —
+ * hoy solo lo usa Guillotina para juntar corte inicial y corte final.
+ * `embedded` omite el `.app`/topbar propios para poder anidarse dentro de
+ * otra página (también Guillotina, como pestaña "Cadena").
  */
-export default function EstacionMaquina({ estacion }) {
+export default function EstacionMaquina({ estacion, estaciones, embedded = false }) {
   const navigate = useNavigate()
-  const cfg = ESTACIONES_CONFIG[estacion]
+  const ids = estaciones || [estacion]
+  const idsKey = ids.join(',')
+  const combinado = ids.length > 1
+  const cfg = combinado ? ESTACIONES_CONFIG.guillotina_central : ESTACIONES_CONFIG[estacion]
 
   const [tab, setTab] = useState('pendientes')
   const [lista, setLista] = useState([])
@@ -65,16 +77,16 @@ export default function EstacionMaquina({ estacion }) {
 
   const loadLista = (silent = false) => {
     if (!silent) setLoadingLista(true)
-    getOrdenesEstacion(estacion)
-      .then(d => setLista(asList(d)))
+    Promise.all(ids.map(id => getOrdenesEstacion(id).then(d => asList(d).map(op => ({ ...op, _estacionId: id })))))
+      .then(arrs => setLista(arrs.flat()))
       .catch(() => setLista([]))
       .finally(() => setLoadingLista(false))
   }
 
   const loadHistorial = () => {
     setLoadingHist(true)
-    getRegistrosProceso(`?estacion=${estacion}`)
-      .then(d => setHistorial(asList(d)))
+    Promise.all(ids.map(id => getRegistrosProceso(`?estacion=${id}`).then(asList)))
+      .then(arrs => setHistorial(arrs.flat().sort((a, b) => new Date(b.fecha_hora) - new Date(a.fecha_hora))))
       .catch(() => setHistorial([]))
       .finally(() => setLoadingHist(false))
   }
@@ -83,9 +95,9 @@ export default function EstacionMaquina({ estacion }) {
   useEffect(() => {
     setTab('pendientes'); setOrden(null); setBusqueda(''); setAviso(null)
     loadLista()
-  }, [estacion])
+  }, [idsKey])
 
-  useEffect(() => { if (tab === 'historial') loadHistorial() }, [tab, estacion])
+  useEffect(() => { if (tab === 'historial') loadHistorial() }, [tab, idsKey])
 
   // Tiempo real: solo mientras se mira la cola, para no pisar lo que se escribe.
   useSyncPolling(
@@ -121,20 +133,8 @@ export default function EstacionMaquina({ estacion }) {
 
   const abrir = (op) => { setOrden(op); setAviso(null) }
 
-  return (
-    <div className="app">
-      <div className="topbar">
-        <div className="brand">
-          <div className="mod">{cfg.label}</div>
-        </div>
-        <div className="topbar-right">
-          <button className="btn" onClick={() => (orden ? setOrden(null) : navigate('/produccion'))}>
-            <Icon.ArrowLeft /> {orden ? 'Volver a la cola' : 'Volver'}
-          </button>
-        </div>
-      </div>
-
-      <div style={{ maxWidth: 1200, margin: '0 auto', padding: 'clamp(12px, 4vw, 28px) clamp(12px, 4vw, 24px)', width: '100%' }}>
+  const body = (
+      <div style={{ maxWidth: 1200, margin: '0 auto', padding: embedded ? '4px 0 0' : 'clamp(12px, 4vw, 28px) clamp(12px, 4vw, 24px)', width: '100%' }}>
 
         {aviso && (
           <div style={{
@@ -150,12 +150,19 @@ export default function EstacionMaquina({ estacion }) {
         )}
 
         {orden ? (
-          <DetalleOP
-            estacion={estacion}
-            orden={orden}
-            onCreated={handleCreated}
-            onCambio={() => loadLista(true)}
-          />
+          <>
+            {embedded && (
+              <button className="btn" style={{ marginBottom: 4 }} onClick={() => setOrden(null)}>
+                <Icon.ArrowLeft /> Volver a la cola
+              </button>
+            )}
+            <DetalleOP
+              estacion={combinado ? orden._estacionId : estacion}
+              orden={orden}
+              onCreated={handleCreated}
+              onCambio={() => loadLista(true)}
+            />
+          </>
         ) : (
           <>
             <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
@@ -197,7 +204,7 @@ export default function EstacionMaquina({ estacion }) {
                     <table style={{ width: '100%', minWidth: 720, borderCollapse: 'collapse' }}>
                       <thead>
                         <tr style={{ borderBottom: '2px solid var(--line)' }}>
-                          {['#', 'OP #', 'Entrega', 'Cliente', 'Referencia', 'Esperadas', ''].map((h, i) => (
+                          {['#', ...(combinado ? ['Tipo'] : []), 'OP #', 'Entrega', 'Cliente', 'Referencia', ...(cfg.multiproceso ? ['Trabajo'] : []), 'Esperadas', ''].map((h, i) => (
                             <th key={i} style={TH}>{h}</th>
                           ))}
                         </tr>
@@ -209,18 +216,34 @@ export default function EstacionMaquina({ estacion }) {
                             <tr key={op.id} style={{
                               borderBottom: '1px solid var(--line)',
                               background: idx % 2 === 0 ? 'var(--surface)' : 'var(--surface-2)',
-                            }}>
+                              cursor: 'pointer',
+                            }} onClick={() => abrir(op)}>
                               <td style={{ padding: '10px 12px', color: 'var(--ink-3)', fontSize: 12 }}>{idx + 1}</td>
+                              {combinado && (
+                                <td style={{ padding: '10px 12px' }}>
+                                  <span style={{
+                                    fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999,
+                                    background: 'var(--surface-2)', color: 'var(--ink-2)', whiteSpace: 'nowrap',
+                                  }}>
+                                    {TIPO_CORTE_LABEL[op._estacionId]}
+                                  </span>
+                                </td>
+                              )}
                               <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 12 }}>
                                 {op.numero}
                               </td>
                               <td style={{ padding: '10px 12px', fontSize: 12, color: ent.color }}>{ent.txt}</td>
                               <td style={{ padding: '10px 12px', fontWeight: 600 }}>{op.cliente_nombre}</td>
                               <td style={{ padding: '10px 12px', color: 'var(--ink-2)', fontSize: 13 }}>{op.referencia}</td>
+                              {cfg.multiproceso && (
+                                <td style={{ padding: '10px 12px', color: 'var(--ink-2)', fontSize: 13 }}>
+                                  {(op.estacion_procesos || []).filter(p => !p.completado).map(p => p.label).join(' + ') || '—'}
+                                </td>
+                              )}
                               <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}>
                                 {fmtNum(op.cantidad_esperada)}
                               </td>
-                              <td style={{ padding: '10px 12px', textAlign: 'right' }}>
+                              <td style={{ padding: '10px 12px', textAlign: 'right' }} onClick={e => e.stopPropagation()}>
                                 <button className="btn accent" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => abrir(op)}>
                                   Abrir
                                 </button>
@@ -256,6 +279,23 @@ export default function EstacionMaquina({ estacion }) {
           </>
         )}
       </div>
+  )
+
+  if (embedded) return body
+
+  return (
+    <div className="app">
+      <div className="topbar">
+        <div className="brand">
+          <div className="mod">{cfg.label}</div>
+        </div>
+        <div className="topbar-right">
+          <button className="btn" onClick={() => (orden ? setOrden(null) : navigate('/produccion'))}>
+            <Icon.ArrowLeft /> {orden ? 'Volver a la cola' : 'Volver'}
+          </button>
+        </div>
+      </div>
+      {body}
     </div>
   )
 }
@@ -288,6 +328,7 @@ function DetalleOP({ estacion, orden, onCreated, onCambio }) {
             ['Cliente', orden.cliente_nombre],
             ['Referencia', orden.referencia || '—'],
             ['Entrega', ent.txt],
+            ...(cfg.multiproceso ? [['Trabajo', (orden.estacion_procesos || []).filter(p => !p.completado).map(p => p.label).join(' + ') || '—']] : []),
             ['Cantidad esperada', `${fmtNum(orden.cantidad_esperada)} unidades`],
           ].map(([label, valor]) => (
             <div key={label} style={{ minWidth: 140 }}>
@@ -309,13 +350,25 @@ function DetalleOP({ estacion, orden, onCreated, onCambio }) {
         )}
       </Section>
 
-      <Section title="Registrar producción">
-        <RegistroProcesoForm
-          estacion={estacion}
-          orden={orden}
-          onCreated={(data) => { load(); onCreated(data) }}
-        />
-      </Section>
+      {estacion === 'troqueladora' && !orden.troquel_modelo ? (
+        <Section title="Registrar producción">
+          <div style={{
+            margin: 16, padding: '10px 14px', borderRadius: 8, fontSize: 13,
+            background: 'var(--warn-soft, #fef6e7)', color: 'var(--ink-2)',
+          }}>
+            ⚠ Esta OP todavía no tiene el troquel registrado. Pide al Admin que cargue
+            el molde antes de poder troquelar.
+          </div>
+        </Section>
+      ) : (
+        <Section title="Registrar producción">
+          <RegistroProcesoForm
+            estacion={estacion}
+            orden={orden}
+            onCreated={(data) => { load(); onCreated(data) }}
+          />
+        </Section>
+      )}
 
       <Section title="Lo ya registrado en esta OP">
         <RegistroProcesoHistory

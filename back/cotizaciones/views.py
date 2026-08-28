@@ -428,6 +428,7 @@ def _crear_remision(op):
             direccion=op.cliente.direccion,
             ciudad=op.cliente.ciudad,
             observaciones=op.observaciones,
+            tiene_troquel=op.procesos.filter(proceso_id="troquel", active=True).exists(),
         )
         _seed_remision_item(rem, op)
     return rem
@@ -474,6 +475,7 @@ def _remision_pdf_ctx(rem, admin=False):
     det = _remision_operador_pdf_ctx(rem, admin=True)
     ctx["troqueles"] = det["troqueles"]
     ctx["total_general"] = det["total_general"]
+    ctx["procesos"] = det["procesos"]
     if admin:
         modelo = TroquelModelo.objects.filter(orden=rem.orden).first() if rem.orden_id else None
         costos = list(modelo.costos_items) if modelo else []
@@ -572,6 +574,38 @@ def _sin_desperdicio(detalle):
     return _DESPERDICIO_RE.sub("", detalle or "").strip(" ·")
 
 
+def _remision_procesos_ctx(op):
+    """Bloque de resultados reales por estación de esta OP: solo la cantidad
+    que salió de cada máquina, sin cantidad_esperada ni sobrante — es
+    exclusivo para la remisión de producción completa (no toca costos ni el
+    desglose de troquel, que sigue viniendo de FormatoCuchillas)."""
+    proceso_ids = list(
+        op.procesos.filter(proceso_id__in=chain.CHAIN_PROCESOS, active=True)
+        .values_list("proceso_id", flat=True)
+    )
+    items = []
+    for proceso_id in proceso_ids:
+        registro = op.registros_proceso.filter(proceso_id=proceso_id).order_by("-fecha_hora").first()
+        if not registro:
+            continue
+        estacion = chain.PROCESO_A_ESTACION.get(proceso_id)
+        items.append({
+            "proceso_label": chain.PROCESO_LABELS.get(proceso_id, proceso_id),
+            "estacion_label": estacion["label"] if estacion else "",
+            "cantidad_realizada": _fmt_num(registro.cantidad_realizada),
+            "operador_username": registro.operador.username if registro.operador_id else "",
+            "fecha_hora": registro.fecha_hora,
+        })
+    if not items:
+        return None
+    return {
+        "op_id": op.id,
+        "op_numero": op.numero,
+        "referencia": op.referencia,
+        "items": items,
+    }
+
+
 def _remision_operador_pdf_ctx(rem, admin=False, con_desperdicio=False):
     """Contexto del PDF de remisión: consumo en cm por troquel + cantidad
     entregada. Por defecto (admin=False) nunca lleva precios: los valores
@@ -628,9 +662,12 @@ def _remision_operador_pdf_ctx(rem, admin=False, con_desperdicio=False):
             total_general += troquel_total
         troqueles.append(troquel)
 
+    procesos = [p for p in (_remision_procesos_ctx(op) for op in _remision_operador_ops(rem)) if p]
+
     ctx = {
         "rem": rem,
         "troqueles": troqueles,
+        "procesos": procesos,
         "logo_uri": _logo_data_uri(),
     }
     if admin:
@@ -1174,7 +1211,10 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
-        if self.action in ("toggle_proceso_completado", "list", "retrieve", "produccion", "buscar", "produccion_pendientes", "enviar_remision", "remision_pdf", "cancelar_remision", "remisionables_operador", "consolidar_remision_operador", "remision_operador_pdf", "remisiones_generadas_operador", "devolver_remision_operador", "editar_campos"):
+        # list/retrieve: lectura para el Operador (Producción General le muestra
+        # progreso de solo lectura); los campos monetarios se ocultan en el
+        # serializer para quien no sea staff. Escritura sigue admin-only.
+        if self.action in ("list", "retrieve", "produccion", "buscar", "produccion_pendientes", "enviar_remision", "remision_pdf", "cancelar_remision", "remisionables_operador", "consolidar_remision_operador", "remision_operador_pdf", "remisiones_generadas_operador", "devolver_remision_operador", "editar_campos"):
             return
         _require_admin(request)
 
@@ -1295,7 +1335,21 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["patch"], url_path=r"procesos/(?P<proceso_id>[^/.]+)/completado")
     def toggle_proceso_completado(self, request, pk=None, proceso_id=None):
-        """PATCH /api/ordenes/{id}/procesos/{proceso_id}/completado/ — Body: { completado: bool }."""
+        """PATCH /api/ordenes/{id}/procesos/{proceso_id}/completado/ — Body: { completado: bool }.
+
+        Solo para ítems de servicio sin máquina ni formato propios (diseño,
+        muestra, envío, etc.): los procesos de la cadena y troquel solo se
+        completan con un registro real (RegistroProceso / FormatoCuchillas
+        aprobado), nunca con este toggle manual.
+        """
+        if proceso_id in chain.CHAIN_PROCESOS or proceso_id == "troquel":
+            return Response(
+                {
+                    "code": "requiere_registro_real",
+                    "error": "Este proceso solo se completa con un registro real en su estación.",
+                },
+                status=409,
+            )
         op = self.get_object()
         try:
             proceso = op.procesos.get(proceso_id=proceso_id)
@@ -1306,40 +1360,8 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         proceso.completado_en = timezone.now() if completado else None
         proceso.save(update_fields=["completado", "completado_en"])
         if completado:
-            if proceso_id == "troquel":
-                # Completar troquel manualmente equivale a aprobar los formatos en cola.
-                # Los borradores no se aprueban: el operador retiró ese envío a propósito.
-                op.formatos_cuchillas.filter(estado="pendiente").update(
-                    estado="aprobado", revisado_por=request.user, revisado_en=timezone.now()
-                )
             # OP fresca: el prefetch de procesos quedó desactualizado tras el save.
             _maybe_crear_remision(OrdenProduccion.objects.get(pk=op.pk))
-        return Response(OpProcesoSerializer(proceso).data)
-
-    @action(detail=True, methods=["patch"], url_path=r"procesos/(?P<proceso_id>[^/.]+)/visible_operador")
-    def toggle_proceso_visible_operador(self, request, pk=None, proceso_id=None):
-        """PATCH /api/ordenes/{id}/procesos/{proceso_id}/visible_operador/ — Body: { visible_operador: bool }.
-
-        El Admin decide qué OPs de este proceso aparecen en la pantalla del Operador.
-        """
-        op = self.get_object()
-        try:
-            proceso = op.procesos.get(proceso_id=proceso_id)
-        except OpProceso.DoesNotExist:
-            return Response({"error": "Proceso no encontrado en esta OP."}, status=404)
-        visible = bool(request.data.get("visible_operador"))
-        proceso.visible_operador = visible
-        # La prioridad acompaña a la selección: al marcar entra al final de la cola,
-        # al desmarcar se libera para no dejar huecos numéricos al reordenar.
-        if visible:
-            if proceso.prioridad is None:
-                ultima = OpProceso.objects.filter(
-                    proceso_id=proceso_id, visible_operador=True
-                ).aggregate(m=Max("prioridad"))["m"]
-                proceso.prioridad = (ultima or 0) + 1
-        else:
-            proceso.prioridad = None
-        proceso.save(update_fields=["visible_operador", "prioridad"])
         return Response(OpProcesoSerializer(proceso).data)
 
     @action(detail=False, methods=["post"], url_path=r"procesos/(?P<proceso_id>[^/.]+)/prioridades")
@@ -1519,9 +1541,6 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
                 "procesos__active": True,
                 "procesos__completado": False,
             }
-            if proceso_id == "troquel":
-                # Solo las OPs que el Admin marcó como visibles llegan al Operador.
-                proc_cond["procesos__visible_operador"] = True
             qs = qs.filter(**proc_cond).distinct()
             if proceso_id == "troquel":
                 # OPs con formato esperando aprobación del Admin no están
@@ -2040,6 +2059,7 @@ class RemisionViewSet(viewsets.ModelViewSet):
         return Response({
             "troqueles": det["troqueles"],
             "total_general": det["total_general"],
+            "procesos": det["procesos"],
         })
 
     @action(detail=True, methods=["post"], url_path="liquidar")
@@ -2208,16 +2228,17 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
         _sync_troquel_costos(formato.orden)
 
     def _check_update_permission(self, request):
-        # Operador solo puede editar sus propios formatos no aprobados
-        # (pendiente, devuelto o borrador). El estado solo cambia a pendiente
-        # cuando el body trae enviar=true; si no, se conserva.
+        # Cualquier operador puede editar el formato de otro operador (no solo
+        # el que lo registró): perform_update reasigna `operador` al último que
+        # guardó, que es la trazabilidad de quién lo dejó así. Solo se
+        # restringe por estado: no aprobados (pendiente, devuelto o borrador).
+        # El estado solo cambia a pendiente cuando el body trae enviar=true;
+        # si no, se conserva.
         if request.user.is_staff:
             return
         formato = self.get_object()
         if formato.estado not in ("pendiente", "devuelto", "borrador"):
             raise PermissionDenied("Solo administradores pueden realizar esta acción.")
-        if formato.operador_id != request.user.id:
-            raise PermissionDenied("Solo el operador que registró el formato puede editarlo.")
 
     def perform_update(self, serializer):
         if self.request.user.is_staff:
@@ -2240,15 +2261,14 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="cancelar_envio")
     def cancelar_envio(self, request, pk=None):
-        """POST /api/formatos-cuchillas/{id}/cancelar_envio/ — el Operador dueño
-        retira el formato que acaba de enviar para volver a editarlo (→ borrador).
+        """POST /api/formatos-cuchillas/{id}/cancelar_envio/ — cualquier Operador
+        retira un formato enviado (por cualquier operador) para volver a editarlo
+        (→ borrador).
 
         Deshace el cierre del troquel: borra la remisión que se creó al enviarlo
         y devuelve la OP a su cola. Si el Admin ya la liquidó, 409.
         """
         formato = self.get_object()
-        if not request.user.is_staff and formato.operador_id != request.user.id:
-            raise PermissionDenied("Solo el operador que envió el formato puede cancelarlo.")
         if formato.estado in ("borrador", "devuelto"):
             return Response({"error": "Este formato no está enviado."}, status=409)
         if formato.orden_id:
@@ -2354,17 +2374,32 @@ class RegistroProcesoViewSet(viewsets.ModelViewSet):
                 status=409,
             )
 
+        if estacion_id == "troqueladora" and getattr(op, "troquel_modelo", None) is None:
+            return Response(
+                {
+                    "code": "troquel_no_registrado",
+                    "error": "Esta OP no tiene el troquel registrado. Pide al Admin que lo cargue antes de continuar.",
+                },
+                status=409,
+            )
+
         esperada = _cantidad_esperada(op)
+        requerida = int(op.cantidad or 0)
+        margen = int(op.sobrante or 0)
         realizada = int(datos.get("cantidad_realizada") or 0)
-        faltante = realizada < esperada
+        # El sobrante es el margen de error que la empresa ya está asumiendo:
+        # un faltante dentro de ese margen no bloquea el registro ni avisa al
+        # Admin, solo lo que quede por debajo de (requerida - margen).
+        faltante = realizada < (requerida - margen)
         if faltante and not request.data.get("confirmar_faltante"):
             # El servidor es la autoridad: sin confirmación explícita no se
             # registra, para que el aviso al Admin no se pueda saltar.
             return Response(
                 {
                     "code": "cantidad_faltante",
-                    "error": "La cantidad registrada es menor a la esperada.",
+                    "error": "La cantidad registrada es menor a la requerida.",
                     "cantidad_esperada": esperada,
+                    "cantidad_requerida": requerida,
                     "cantidad_realizada": realizada,
                 },
                 status=409,
@@ -2382,8 +2417,8 @@ class RegistroProcesoViewSet(viewsets.ModelViewSet):
                     tipo="cantidad_faltante",
                     titulo=f"Faltan unidades · {op.cliente.nombre if op.cliente else 'Sin cliente'}",
                     mensaje=(
-                        f"{est['label']}: se registraron {realizada:,} de {esperada:,} "
-                        f"esperadas en la {op.numero}"
+                        f"{est['label']}: se registraron {realizada:,} de {requerida:,} "
+                        f"requeridas en la {op.numero}"
                         + (f" ({op.referencia})." if op.referencia else ".")
                     ).replace(",", "."),
                     orden=op,

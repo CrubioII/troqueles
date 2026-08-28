@@ -184,6 +184,13 @@ export function stateToDoc(d, procesos, kind = 'cot') {
       return rest
     })(),
   }))
+  // Corte inicial/final no viven en PROCESS_GROUPS (tienen su propio campo de
+  // precio en "Papel"), pero sí necesitan una fila de proceso para que la
+  // cadena de Guillotina los pueda bloquear/completar. costo:0 a propósito —
+  // ya se suman aparte vía corte_inicial_precio/corte_final_precio, sumar
+  // también acá duplicaría el costo.
+  procesosArr.push({ proceso_id: 'corteInicial', active: !!d.corteInicialActive, costo: 0, costo_override: null, extras: {} })
+  procesosArr.push({ proceso_id: 'corteFinal', active: !!d.corteFinalActive, costo: 0, costo_override: null, extras: {} })
 
   const base = {
     fecha: d.fecha,
