@@ -15,7 +15,7 @@ import { useAuth } from '../context/AuthContext'
 import { buildDefaultProcesos, buildBlankState, docToState, stateToDoc, seedProcesosFromApi, computeCalc } from '../lib/opQuoteShared'
 
 // Resumen estático para OP creada desde cotización (datos bloqueados)
-function OrdenResumenLocked({ d, calc, papelCatalog }) {
+function OrdenResumenLocked({ d, calc, papelCatalog, showMoney = true }) {
   const papelObj = papelCatalog.find(p => String(p.id) === d.papelId)
   const papelLabel = papelObj ? `${papelObj.nombre} ${papelObj.gramaje}g · ${papelObj.material}` : 'Manual'
   const rows = [
@@ -29,8 +29,8 @@ function OrdenResumenLocked({ d, calc, papelCatalog }) {
     ['Pliego', `${d.pliegoW} × ${d.pliegoH} cm (${d.pliegoTipo})`],
     ['Unidades / pliego', fmtNum(calc.unidadesPorPliego)],
     ['Pliegos necesarios', fmtNum(calc.pliegosNecesarios)],
-    ['Corte inicial', d.corteInicialActive ? `Sí · ${fmtCOP(d.corteInicialPrecio)}` : 'No'],
-    ['Corte final', d.corteFinalActive ? `Sí · ${fmtCOP(d.corteFinalPrecio)}` : 'No'],
+    ['Corte inicial', d.corteInicialActive ? (showMoney ? `Sí · ${fmtCOP(d.corteInicialPrecio)}` : 'Sí') : 'No'],
+    ['Corte final', d.corteFinalActive ? (showMoney ? `Sí · ${fmtCOP(d.corteFinalPrecio)}` : 'Sí') : 'No'],
   ]
   return (
     <div>
@@ -52,7 +52,7 @@ function OrdenResumenLocked({ d, calc, papelCatalog }) {
           {calc.procRows.map(p => (
             <tr key={p.id}>
               <td style={{ padding: '5px 0', fontSize: 13 }}>{p.nombre}</td>
-              <td className="mono" style={{ textAlign: 'right', fontSize: 13 }}>{fmtCOP(p.costo)}</td>
+              {showMoney && <td className="mono" style={{ textAlign: 'right', fontSize: 13 }}>{fmtCOP(p.costo)}</td>}
             </tr>
           ))}
         </tbody>
@@ -187,7 +187,11 @@ export default function OrdenEdit() {
       return { d: dComparable, procesos }
     }, [d, procesos]),
     () => save(),
-    { delay: 1500, isValid: () => locked || (!!d.cliente.trim() && !!d.referencia.trim()) }
+    {
+      delay: 1500,
+      isValid: () => (isAdmin || !locked)
+        && (locked || (!!d.cliente.trim() && !!d.referencia.trim())),
+    }
   )
 
   // ============ PDFs ============
@@ -271,7 +275,10 @@ export default function OrdenEdit() {
           <Icon.Lock />
           <span>
             Generada desde la cotización <strong>{d.cotizacionNumero}</strong> — datos generales, procesos y
-            condiciones bloqueados. Solo la liquidación (abono) es editable.
+            condiciones bloqueados.{' '}
+            {isAdmin
+              ? 'Solo la liquidación (abono) es editable.'
+              : 'Esta OP la administra el administrador; acá es solo de consulta.'}
           </span>
         </div>
       )}
@@ -282,15 +289,24 @@ export default function OrdenEdit() {
           {locked ? (
             <>
               <Section num="1" title="Resumen de la orden" desc="Datos pactados en la cotización" open={true} locked={true}>
-                <OrdenResumenLocked d={d} calc={calc} papelCatalog={papelCatalog} />
+                <OrdenResumenLocked d={d} calc={calc} papelCatalog={papelCatalog} showMoney={isAdmin} />
               </Section>
               <Section num="2" title="Condiciones" desc="Pactadas en la cotización" open={true} locked={true}>
                 <SectionCondicionesOP d={d} set={set} readOnly={true} />
               </Section>
               <Section num="3" title="Programación" desc="Fecha de entrega para ordenar la producción" open={true}>
                 <div className="field" style={{ maxWidth: 220, padding: '4px 0' }}>
-                  <label className="field-label">Fecha de entrega <span className="editable-flag" title="Editable por admin"><Icon.Pencil /></span></label>
-                  <input className="input admin-editable mono" type="date" value={d.fechaEntrega || ''} onChange={e => set({ fechaEntrega: e.target.value })} />
+                  <label className="field-label">
+                    Fecha de entrega{' '}
+                    {isAdmin
+                      ? <span className="editable-flag" title="Editable por admin"><Icon.Pencil /></span>
+                      : <Icon.Lock />}
+                  </label>
+                  <input
+                    className={'input mono' + (isAdmin ? ' admin-editable' : ' readonly')}
+                    type="date" value={d.fechaEntrega || ''} readOnly={!isAdmin}
+                    onChange={e => set({ fechaEntrega: e.target.value })}
+                  />
                 </div>
               </Section>
             </>
@@ -314,10 +330,10 @@ export default function OrdenEdit() {
                 open={open.s2} onToggle={() => toggle('s2')}
                 summary={!open.s2 && <>
                   <span>Pliegos:</span> <span className="v mono">{calc.pliegosNecesarios}</span>
-                  <span>· Costo papel:</span> <span className="v mono">{fmtCOP(calc.costoPapel)}</span>
+                  {isAdmin && <><span>· Costo papel:</span> <span className="v mono">{fmtCOP(calc.costoPapel)}</span></>}
                 </>}
               >
-                <SectionPapel d={d} set={set} calc={calc} papelCatalog={papelCatalog} />
+                <SectionPapel d={d} set={set} calc={calc} papelCatalog={papelCatalog} showMoney={isAdmin} />
               </Section>
 
               <Section
@@ -326,10 +342,10 @@ export default function OrdenEdit() {
                 open={open.s3} onToggle={() => toggle('s3')}
                 summary={!open.s3 && <>
                   <span>Procesos activos:</span> <span className="v">{calc.procRows.length}</span>
-                  <span>· Costo procesos:</span> <span className="v mono">{fmtCOP(calc.totalProcesos)}</span>
+                  {isAdmin && <><span>· Costo procesos:</span> <span className="v mono">{fmtCOP(calc.totalProcesos)}</span></>}
                 </>}
               >
-                <SectionProcesos procesos={procesos} setProc={setProc} autoValues={calc.autoValues} cantidadProduccion={calc.cantidadProduccion} />
+                <SectionProcesos procesos={procesos} setProc={setProc} autoValues={calc.autoValues} cantidadProduccion={calc.cantidadProduccion} showMoney={isAdmin} />
               </Section>
 
               <Section
@@ -348,17 +364,19 @@ export default function OrdenEdit() {
                 </div>
               </Section>
 
-              <Section
-                num="5" title="Condiciones"
-                desc="Tipo de cliente, facturación y pago"
-                open={open.s5} onToggle={() => toggle('s5')}
-                summary={!open.s5 && <>
-                  <span>Pago:</span> <span className="v">{CONDICIONES_PAGO_OP.find(c => c.id === d.condicionPago)?.lbl || d.condicionCustom}</span>
-                  <span>· Facturación:</span> <span className="v">{TIPOS_FACTURACION.find(t => t.id === d.tipoFacturacion)?.lbl}</span>
-                </>}
-              >
-                <SectionCondicionesOP d={d} set={set} />
-              </Section>
+              {isAdmin && (
+                <Section
+                  num="5" title="Condiciones"
+                  desc="Tipo de cliente, facturación y pago"
+                  open={open.s5} onToggle={() => toggle('s5')}
+                  summary={!open.s5 && <>
+                    <span>Pago:</span> <span className="v">{CONDICIONES_PAGO_OP.find(c => c.id === d.condicionPago)?.lbl || d.condicionCustom}</span>
+                    <span>· Facturación:</span> <span className="v">{TIPOS_FACTURACION.find(t => t.id === d.tipoFacturacion)?.lbl}</span>
+                  </>}
+                >
+                  <SectionCondicionesOP d={d} set={set} />
+                </Section>
+              )}
             </>
           )}
 

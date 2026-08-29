@@ -891,18 +891,20 @@ class CotizacionViewSet(viewsets.ModelViewSet):
             return CotizacionListSerializer
         return CotizacionSerializer
 
-    # Crear y editar cotizaciones está abierto al Operador: el serializer se
-    # encarga de que no vea ni escriba un solo valor monetario (ver
-    # COT_CAMPOS_DINERO). Enviar al cliente, cambiar de estado y convertir a OP
-    # siguen siendo del Admin.
+    def create(self, request, *args, **kwargs):
+        _require_admin(request)
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        _require_admin(request)
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        _require_admin(request)
+        return super().partial_update(request, *args, **kwargs)
+
     def destroy(self, request, *args, **kwargs):
-        cot = self.get_object()
-        # El Operador solo puede descartar borradores suyos que aún no se
-        # cotizaron; una vez enviada o aprobada, la maneja el Admin.
-        if not request.user.is_staff and cot.estado != "borrador":
-            raise PermissionDenied(
-                "Solo se pueden eliminar cotizaciones en borrador."
-            )
+        _require_admin(request)
         return super().destroy(request, *args, **kwargs)
 
     @action(detail=True, methods=["post"], url_path="duplicar")
@@ -1201,9 +1203,35 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         # list/retrieve: lectura para el Operador (Producción General le muestra
         # progreso de solo lectura); los campos monetarios se ocultan en el
         # serializer para quien no sea staff. Escritura sigue admin-only.
-        if self.action in ("list", "retrieve", "produccion", "buscar", "produccion_pendientes", "enviar_remision", "remision_pdf", "cancelar_remision", "remisionables_operador", "consolidar_remision_operador", "remision_operador_pdf", "remisiones_generadas_operador", "devolver_remision_operador", "editar_campos", "set_proceso_prioridades", "set_estacion_prioridades"):
+        # create/update: el Operador levanta sus propias OPs directas (una OP
+        # nueva o una tarea de troquel). El serializer le quita la plata al
+        # leer y la ignora al escribir; `_solo_op_directa` le cierra las OPs
+        # que nacieron de una cotización, que son del Admin.
+        if self.action in ("list", "retrieve", "produccion", "buscar", "produccion_pendientes", "enviar_remision", "remision_pdf", "cancelar_remision", "remisionables_operador", "consolidar_remision_operador", "remision_operador_pdf", "remisiones_generadas_operador", "devolver_remision_operador", "editar_campos", "set_proceso_prioridades", "set_estacion_prioridades", "create", "update", "partial_update"):
             return
         _require_admin(request)
+
+    def _solo_op_directa(self, request):
+        """Le cierra al Operador las OPs derivadas de una cotización.
+
+        En esas, lo único editable es la liquidación (OP_LOCKED_WHITELIST), que
+        es justo lo que él no puede tocar: mejor un 403 claro que un PATCH que
+        no cambia nada.
+        """
+        if request.user.is_staff:
+            return
+        if self.get_object().cotizacion_id is not None:
+            raise PermissionDenied(
+                "Esta OP viene de una cotización: solo el administrador puede editarla."
+            )
+
+    def update(self, request, *args, **kwargs):
+        self._solo_op_directa(request)
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        self._solo_op_directa(request)
+        return super().partial_update(request, *args, **kwargs)
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -2154,7 +2182,13 @@ class RemisionViewSet(viewsets.ModelViewSet):
 
 
 class TroquelModeloViewSet(viewsets.ModelViewSet):
-    """Modelo del troquel asociado a una OP. CRUD solo Admin (subida de archivo)."""
+    """Modelo del troquel asociado a una OP.
+
+    Admin-only salvo `create`: el Operador adjunta el modelo cuando levanta una
+    tarea de troquel nueva (mismo modal que el Admin). Consultarlo, editarlo o
+    borrarlo sigue siendo del Admin — el Operador lo ve sanitizado dentro de su
+    propia OP (TroquelModeloOperadorSerializer).
+    """
 
     queryset = TroquelModelo.objects.select_related("orden")
     serializer_class = TroquelModeloSerializer
@@ -2162,7 +2196,8 @@ class TroquelModeloViewSet(viewsets.ModelViewSet):
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
-        _require_admin(request)
+        if self.action != "create":
+            _require_admin(request)
 
     def get_queryset(self):
         qs = super().get_queryset()

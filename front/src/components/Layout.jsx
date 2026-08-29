@@ -14,7 +14,7 @@ const PRODUCCION_SUBLINKS = [
   { label: 'Troqueladora', path: '/produccion/troqueladora', icon: <Icon.Blade width="15" height="15" /> },
   { label: 'Troqueles', path: '/produccion/troqueles', icon: <Icon.Stamp width="15" height="15" /> },
   { label: 'Producción general', path: '/produccion/general', icon: <Icon.Progress width="15" height="15" /> },
-  { label: 'Órdenes (CRUD)', path: '/ordenes', adminOnly: true, icon: <Icon.Duplicate width="15" height="15" /> },
+  { label: 'Órdenes (CRUD)', path: '/ordenes', icon: <Icon.Duplicate width="15" height="15" /> },
 ]
 
 const NAV_LINKS = [
@@ -33,6 +33,7 @@ const NAV_LINKS = [
   {
     label: 'Cotizaciones',
     path: '/cotizaciones',
+    adminOnly: true,
     icon: (
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
         <rect x="3" y="3" width="14" height="18" rx="2" stroke="currentColor" strokeWidth="1.5"/>

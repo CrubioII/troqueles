@@ -307,7 +307,7 @@ export default function CotizacionEdit() {
               <span>· Cantidad:</span> <span className="v mono">{fmtNum(d.cantidad)}</span>
             </>}
           >
-            <SectionGenerales d={d} set={set} showEstado={isAdmin} />
+            <SectionGenerales d={d} set={set} />
           </Section>
 
           <Section
@@ -316,10 +316,10 @@ export default function CotizacionEdit() {
             open={open.s2} onToggle={() => toggle('s2')}
             summary={!open.s2 && <>
               <span>Pliegos:</span> <span className="v mono">{calc.pliegosNecesarios}</span>
-              {isAdmin && <><span>· Costo papel:</span> <span className="v mono">{fmtCOP(calc.costoPapel)}</span></>}
+              <span>· Costo papel:</span> <span className="v mono">{fmtCOP(calc.costoPapel)}</span>
             </>}
           >
-            <SectionPapel d={d} set={set} calc={calc} papelCatalog={papelCatalog} showMoney={isAdmin} />
+            <SectionPapel d={d} set={set} calc={calc} papelCatalog={papelCatalog} />
           </Section>
 
           <Section
@@ -328,10 +328,10 @@ export default function CotizacionEdit() {
             open={open.s3} onToggle={() => toggle('s3')}
             summary={!open.s3 && <>
               <span>Procesos activos:</span> <span className="v">{calc.procRows.length}</span>
-              {isAdmin && <><span>· Costo procesos:</span> <span className="v mono">{fmtCOP(calc.totalProcesos)}</span></>}
+              <span>· Costo procesos:</span> <span className="v mono">{fmtCOP(calc.totalProcesos)}</span>
             </>}
           >
-            <SectionProcesos procesos={procesos} setProc={setProc} autoValues={calc.autoValues} cantidadProduccion={calc.cantidadProduccion} showMoney={isAdmin} />
+            <SectionProcesos procesos={procesos} setProc={setProc} autoValues={calc.autoValues} cantidadProduccion={calc.cantidadProduccion} />
             <div className="note" style={{ marginTop: 14 }}>
               <Icon.Info />
               <span>Los procesos marcados aquí se convertirán automáticamente en las tareas activas de la Orden de Producción al confirmar la cotización.</span>
@@ -354,24 +354,22 @@ export default function CotizacionEdit() {
             </div>
           </Section>
 
-          {isAdmin && (
-            <Section
-              num="5" title="Condiciones comerciales"
-              desc="Cómo se pacta el pago con el cliente"
-              open={open.s5} onToggle={() => toggle('s5')}
-              summary={!open.s5 && <><span>Pago:</span> <span className="v">{condicionLabel}</span></>}
-            >
-              <SectionCondiciones d={d} set={set} />
-            </Section>
-          )}
+          <Section
+            num="5" title="Condiciones comerciales"
+            desc="Cómo se pacta el pago con el cliente"
+            open={open.s5} onToggle={() => toggle('s5')}
+            summary={!open.s5 && <><span>Pago:</span> <span className="v">{condicionLabel}</span></>}
+          >
+            <SectionCondiciones d={d} set={set} />
+          </Section>
 
           <Section
             num="6" title="Acciones"
-            desc={isAdmin ? 'Enviar al cliente — los cambios se guardan automáticamente' : 'Los cambios se guardan automáticamente'}
+            desc="Enviar al cliente — los cambios se guardan automáticamente"
             open={open.s6} onToggle={() => toggle('s6')}
           >
             <SectionAcciones
-              d={d} calc={calc} showMoney={isAdmin}
+              d={d} calc={calc}
               saveStatus={saveStatus} onRetrySave={retrySave} sending={sending}
               originalEstado={originalEstado}
               onDelete={handleDelete}

@@ -834,14 +834,10 @@ export function SectionCondicionesOP({ d, set, readOnly = false }) {
 // =========================================================
 // Section 6 — Acciones
 // =========================================================
-// `showMoney=false` (Operador): sin total y sin envío al cliente — el PDF y el
-// correo llevan precios, así que ese paso sigue siendo del Admin.
-export function SectionAcciones({ d, calc, onDelete, onSaveAndSend, saveStatus, onRetrySave, sending, originalEstado, showMoney = true }) {
+export function SectionAcciones({ d, calc, onDelete, onSaveAndSend, saveStatus, onRetrySave, sending, originalEstado }) {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const isConvertida = (originalEstado || d.estado) === 'convertida'
-  const esBorrador = (originalEstado || d.estado) === 'borrador'
-  // El Operador solo descarta borradores; enviada o aprobada la maneja el Admin.
-  const canDelete = !!d.id && !isConvertida && (showMoney || esBorrador)
+  const canDelete = !!d.id && !isConvertida
   const busy = sending || saveStatus === 'saving'
 
   return (
@@ -853,18 +849,14 @@ export function SectionAcciones({ d, calc, onDelete, onSaveAndSend, saveStatus, 
         </div>
       )}
       <div className="actions-row">
-        {showMoney && (
-          <button className="btn accent" onClick={onSaveAndSend} disabled={busy || isConvertida} style={{ gap: 6 }}>
-            <Icon.Send /> {sending ? 'Enviando…' : 'Enviar al Cliente'}
-          </button>
-        )}
+        <button className="btn accent" onClick={onSaveAndSend} disabled={busy || isConvertida} style={{ gap: 6 }}>
+          <Icon.Send /> {sending ? 'Enviando…' : 'Enviar al Cliente'}
+        </button>
         <SaveStatus status={saveStatus} onRetry={onRetrySave} />
         <div className="spacer" />
-        {showMoney && (
-          <span className="muted" style={{ fontSize: 11.5 }}>
-            Total cotización: <strong className="mono" style={{ color: 'var(--ink)' }}>{fmtCOP(calc.valorTotal)}</strong>
-          </span>
-        )}
+        <span className="muted" style={{ fontSize: 11.5 }}>
+          Total cotización: <strong className="mono" style={{ color: 'var(--ink)' }}>{fmtCOP(calc.valorTotal)}</strong>
+        </span>
       </div>
       {canDelete && (
         <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -899,9 +891,7 @@ export function SectionAcciones({ d, calc, onDelete, onSaveAndSend, saveStatus, 
       )}
       <div className="muted" style={{ fontSize: 11, marginTop: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
         <Icon.Info />
-        {showMoney
-          ? 'Los cambios se guardan automáticamente. El cambio de estado y la conversión a OP se hacen desde el listado de cotizaciones.'
-          : 'Los cambios se guardan automáticamente. El administrador le pone los precios y la envía al cliente.'}
+        Los cambios se guardan automáticamente. El cambio de estado y la conversión a OP se hacen desde el listado de cotizaciones.
       </div>
     </div>
   )

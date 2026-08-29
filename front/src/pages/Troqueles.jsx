@@ -445,6 +445,7 @@ function OperadorOpDatos({ orden, onSaved }) {
 function OperadorTroqueles() {
   const { user } = useAuth()
   const [tab, setTab] = useState('pendientes')
+  const [showNueva, setShowNueva] = useState(false)   // modal Nueva tarea de troquel
   const [lista, setLista] = useState([])
   const [busqueda, setBusqueda] = useState('')
   const [loadingLista, setLoadingLista] = useState(true)
@@ -861,7 +862,14 @@ function OperadorTroqueles() {
         )}
 
         {tab === 'pendientes' && (
-          <Section title="Troqueles del día — selecciona una OP">
+          <Section
+            title="Troqueles del día — selecciona una OP"
+            actions={
+              <button className="btn sm primary" onClick={() => setShowNueva(true)}>
+                + Nueva tarea de troquel
+              </button>
+            }
+          >
             {!loadingLista && lista.length > 0 && (
               <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', fontSize: 12, color: ordenError ? 'var(--danger, #c0392b)' : 'var(--ink-3)' }}>
                 {ordenError || (filtrandoLista
@@ -1010,6 +1018,17 @@ function OperadorTroqueles() {
               })
             )}
           </Section>
+        )}
+
+        {showNueva && (
+          <NuevaTareaTroquelModal
+            onClose={() => setShowNueva(false)}
+            onCreated={(orden) => {
+              setShowNueva(false)
+              loadLista()
+              abrir(orden)
+            }}
+          />
         )}
 
         {confirmGen && (

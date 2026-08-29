@@ -29,10 +29,13 @@ draft → sent → approved (converts to PO) or rejected
 
 approved quotes read-only, cannot be edited
 
-Quotes and the Operador role
-  — Operador can create and edit quotes, but never sees or writes money: costs, rates, charge modes, paper prices, margin, totals, `opciones` and payment terms are stripped on read AND ignored on write (see COT_CAMPOS_DINERO / PROCESO_EXTRAS_DINERO in serializers.py, `showMoney` prop in components/sections.jsx)
-  — Sending to the client, changing state and converting to PO stay Admin-only; Operador can only delete quotes still in `borrador`
-  — CotizacionEdit has "+ Nueva cotización" in its topbar: flushes autosave and blanks the form in place (no round trip through the list)
+Production Orders without money (Operador role)
+  — Operador creates POs (direct PO or die task), but never sees or writes money: costs, rates, charge modes, paper prices, margin, totals, abono/saldo and payment terms are stripped on read AND ignored on write
+  — Single source of truth: OP_CAMPOS_DINERO / OP_CAMPOS_COMERCIALES / PROCESO_EXTRAS_DINERO in serializers.py; UI side is the `showMoney` prop threaded through components/sections.jsx (shared by CotizacionEdit and OrdenEdit — see front/src/lib/opQuoteShared.js)
+  — Write protection is not optional: the Operador's form posts zeros where he saw nothing, so unprotected fields would wipe the Admin's rates on the first autosave
+  — He creates and edits **direct POs only** — a PO born from a quote is Admin's (403, and the screen is read-only for him). Deleting POs and the liquidación panel stay Admin-only
+  — Die task: "+ Nueva tarea de troquel" in his Troqueles queue (same modal as Admin) creates the PO with `troquel` active and uploads the model — POST /api/troquel-modelos/ is the one non-Admin action on that viewset
+  — Quotes stay fully Admin-only. CotizacionEdit has "+ Nueva cotización" in its topbar: flushes autosave and blanks the form in place (no round trip through the list)
 
 Key Entities
 

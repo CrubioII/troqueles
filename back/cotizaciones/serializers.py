@@ -27,31 +27,29 @@ class PapelSerializer(serializers.ModelSerializer):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Cotización sin plata (Operador)
+# OP sin plata (Operador)
 #
-# El Operador cotiza —datos técnicos, cliente, procesos— pero no ve ni escribe
-# un solo valor monetario. Lo mismo que se le oculta al leer se le ignora al
-# escribir: si no se protegiera, su formulario (que llega con ceros donde no
-# vio nada) borraría las tarifas que ya puso el Admin.
+# El Operador levanta sus propias OPs —OP directa o tarea de troquel— con los
+# datos técnicos, el cliente y los procesos, pero no ve ni escribe un solo
+# valor monetario. Lo mismo que se le oculta al leer se le ignora al escribir:
+# si no se protegiera, su formulario (que llega con ceros donde no vio nada)
+# borraría las tarifas que ya puso el Admin.
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Campos monetarios de la cotización.
-COT_CAMPOS_DINERO = (
+OP_CAMPOS_DINERO = (
     "precio_pliego", "costo_papel_override",
     "corte_inicial_precio", "corte_final_precio",
     "valor_unitario_override", "valor_total_override",
     "total_costos_override", "subtotal_override",
-    "margen", "opciones",
+    "margen", "abono",
 )
 
 # Solo lectura (derivados): se ocultan al leer, no existen al escribir.
-COT_CAMPOS_DINERO_CALCULADOS = ("valor_unitario_efectivo", "valor_total_efectivo")
+OP_CAMPOS_DINERO_CALCULADOS = ("valor_unitario_efectivo", "valor_total_efectivo", "saldo")
 
 # Condiciones comerciales: no son montos, pero se pactan con el precio y viven
-# en la misma pantalla del Admin. El Operador no las ve, así que tampoco las pisa.
-# `estado` va aquí porque aprobar o enviar una cotización es decisión del Admin
-# (tiene su propia acción /estado/, también admin-only).
-COT_CAMPOS_COMERCIALES = ("condicion_pago", "condicion_custom", "tipo_facturacion", "estado")
+# en la pantalla del Admin. El Operador no las ve, así que tampoco las pisa.
+OP_CAMPOS_COMERCIALES = ("condicion_pago", "condicion_custom", "tipo_facturacion")
 
 # Claves de `extras` de un proceso que llevan plata (tarifas y modo de cobro).
 # El resto de extras son datos técnicos que el Operador sí maneja.
@@ -62,6 +60,12 @@ PROCESO_EXTRAS_DINERO = frozenset({
     "costoTiro", "costoRetiro",
     "tiroPrecioM2", "retiroPrecioM2",
 })
+
+
+def _pide_sin_plata(serializer):
+    """True si quien lee/escribe no es staff: el documento va sin plata."""
+    request = serializer.context.get("request")
+    return bool(request) and not request.user.is_staff
 
 
 def _sin_dinero(proceso_data):
@@ -181,26 +185,8 @@ class CotizacionSerializer(serializers.ModelSerializer):
             return vu * obj.cantidad
         return None
 
-    @property
-    def _sin_plata(self):
-        """True si quien pide/escribe es Operador: la cotización va sin plata."""
-        request = self.context.get("request")
-        return bool(request) and not request.user.is_staff
-
-    def to_representation(self, instance):
-        data = super().to_representation(instance)
-        if self._sin_plata:
-            for f in COT_CAMPOS_DINERO + COT_CAMPOS_DINERO_CALCULADOS:
-                data.pop(f, None)
-            data["procesos"] = [_sin_dinero(p) for p in data.get("procesos", [])]
-        return data
-
     def create(self, validated_data):
         procesos_data = validated_data.pop("procesos", [])
-        if self._sin_plata:
-            for campo in COT_CAMPOS_DINERO + COT_CAMPOS_COMERCIALES:
-                validated_data.pop(campo, None)
-            procesos_data = [_sin_dinero(p) for p in procesos_data]
         cotizacion = Cotizacion.objects.create(**validated_data)
         for p in procesos_data:
             CotizacionProceso.objects.create(cotizacion=cotizacion, **p)
@@ -208,19 +194,6 @@ class CotizacionSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         procesos_data = validated_data.pop("procesos", None)
-        sin_plata = self._sin_plata
-        if sin_plata:
-            # Sin estos campos en validated_data, el instance conserva los suyos.
-            for campo in COT_CAMPOS_DINERO + COT_CAMPOS_COMERCIALES:
-                validated_data.pop(campo, None)
-            if procesos_data is not None:
-                previos = {
-                    p.proceso_id: (p.costo, p.costo_override, p.extras)
-                    for p in instance.procesos.all()
-                }
-                procesos_data = [
-                    _con_dinero_previo(p, previos.get(p["proceso_id"])) for p in procesos_data
-                ]
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
@@ -446,23 +419,26 @@ class OrdenSerializer(serializers.ModelSerializer):
     def get_progreso(self, obj):
         return _orden_progreso(obj)
 
+    @property
+    def _sin_plata(self):
+        return _pide_sin_plata(self)
+
     def to_representation(self, instance):
         data = super().to_representation(instance)
-        request = self.context.get("request")
-        if request and not request.user.is_staff:
-            for f in (
-                "precio_pliego", "costo_papel_override",
-                "corte_inicial_precio", "corte_final_precio",
-                "valor_unitario_override", "valor_total_override",
-                "total_costos_override", "subtotal_override",
-                "margen", "abono",
-                "valor_unitario_efectivo", "valor_total_efectivo", "saldo",
-            ):
+        if self._sin_plata:
+            for f in OP_CAMPOS_DINERO + OP_CAMPOS_DINERO_CALCULADOS:
                 data.pop(f, None)
+            data["procesos"] = [_sin_dinero(p) for p in data.get("procesos", [])]
         return data
 
     def create(self, validated_data):
         procesos_data = validated_data.pop("procesos", [])
+        if self._sin_plata:
+            # OP directa creada por el Operador (o tarea de troquel): nace sin
+            # precios y el Admin los pone después.
+            for campo in OP_CAMPOS_DINERO + OP_CAMPOS_COMERCIALES:
+                validated_data.pop(campo, None)
+            procesos_data = [_sin_dinero(p) for p in procesos_data]
         orden = OrdenProduccion.objects.create(**validated_data)
         for p in procesos_data:
             OpProceso.objects.create(orden=orden, **p)
@@ -470,6 +446,19 @@ class OrdenSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         procesos_data = validated_data.pop("procesos", None)
+        if self._sin_plata:
+            # Sin estos campos en validated_data, el instance conserva los suyos.
+            for campo in OP_CAMPOS_DINERO + OP_CAMPOS_COMERCIALES:
+                validated_data.pop(campo, None)
+            if procesos_data is not None:
+                previos_plata = {
+                    p.proceso_id: (p.costo, p.costo_override, p.extras)
+                    for p in instance.procesos.all()
+                }
+                procesos_data = [
+                    _con_dinero_previo(p, previos_plata.get(p["proceso_id"]))
+                    for p in procesos_data
+                ]
         if instance.cotizacion_id is not None:
             # OP desde COT: solo liquidación editable
             validated_data = {k: v for k, v in validated_data.items() if k in OP_LOCKED_WHITELIST}

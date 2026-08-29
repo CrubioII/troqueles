@@ -168,12 +168,14 @@ export default function CotizacionList() {
           <div className="mod">Cotizaciones</div>
         </div>
         <div className="topbar-right">
-          <button
-            className="btn accent"
-            onClick={() => navigate('/cotizaciones/nuevo')}
-          >
-            + Nueva cotización
-          </button>
+          {isAdmin && (
+            <button
+              className="btn accent"
+              onClick={() => navigate('/cotizaciones/nuevo')}
+            >
+              + Nueva cotización
+            </button>
+          )}
         </div>
       </div>
 
@@ -354,7 +356,7 @@ export default function CotizacionList() {
                             </button>
                           )}
                           <div style={{ width: 34, display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
-                            {(isAdmin || cot.estado === 'borrador') && cot.estado !== 'convertida' && (
+                            {isAdmin && cot.estado !== 'convertida' && (
                               confirmDelete === cot.id ? (
                                 <div style={{ display: 'flex', gap: 4 }}>
                                   <button

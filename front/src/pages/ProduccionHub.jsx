@@ -52,21 +52,6 @@ const MODULES = [
     icon: <Icon.Blade />,
   },
   {
-    key: 'cotizaciones',
-    label: 'Cotizaciones',
-    desc: 'Arma una cotización con los datos técnicos del trabajo. Los precios y el envío al cliente los pone el administrador.',
-    action: 'Cotizar',
-    path: '/cotizaciones',
-    color: '#1F6FB2',
-    soft: '#DDEAF6',
-    icon: (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-        <rect x="3" y="3" width="14" height="18" rx="2" stroke="currentColor" strokeWidth="1.5"/>
-        <path d="M7 8h8M7 12h6M7 16h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
-      </svg>
-    ),
-  },
-  {
     key: 'general',
     label: 'Producción General',
     desc: 'Progreso de todas las órdenes de producción según sus procesos activos completados.',
@@ -88,23 +73,25 @@ export default function ProduccionHub() {
     getDashboardStats().then(s => setUtilizacion(s.utilizacion_maquinas)).catch(() => {})
   }, [])
 
-  const modules = isAdmin
-    ? [...MODULES, {
-        key: 'ordenes',
-        label: 'Órdenes (CRUD)',
-        desc: 'Crea, edita y elimina órdenes de producción.',
-        action: 'Ver órdenes',
-        path: '/ordenes',
-        color: '#A67012',
-        soft: '#FAEAC7',
-        icon: (
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-            <rect x="3" y="3" width="14" height="18" rx="2" stroke="currentColor" strokeWidth="1.5"/>
-            <path d="M7 8h8M7 12h8M7 16h5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-          </svg>
-        ),
-      }]
-    : MODULES
+  // Las órdenes son de todos: el Operador levanta las suyas (sin precios) y el
+  // Admin además las liquida y las borra.
+  const modules = [...MODULES, {
+    key: 'ordenes',
+    label: 'Órdenes de producción',
+    desc: isAdmin
+      ? 'Crea, edita y elimina órdenes de producción.'
+      : 'Crea una orden de producción con los datos del trabajo. Los precios los pone el administrador.',
+    action: isAdmin ? 'Ver órdenes' : 'Crear OP',
+    path: '/ordenes',
+    color: '#A67012',
+    soft: '#FAEAC7',
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+        <rect x="3" y="3" width="14" height="18" rx="2" stroke="currentColor" strokeWidth="1.5"/>
+        <path d="M7 8h8M7 12h8M7 16h5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+      </svg>
+    ),
+  }]
 
   return (
     <div className="app">
