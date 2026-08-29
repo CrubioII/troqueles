@@ -4,8 +4,8 @@ import { getClientes } from '../api'
 import {
   fmtCOP, fmtNum,
   PLIEGO_SIZES, DISENADORES, PROCESS_GROUPS, CONDICIONES_PAGO,
-  CONDICIONES_PAGO_OP, TIPOS_FACTURACION,
-  SheetDiagram, Checkbox, MoneyInput, StatusPicker, NumField,
+  CONDICIONES_PAGO_OP, TIPOS_FACTURACION, ESTACIONES_CONFIG,
+  SheetDiagram, Checkbox, MoneyInput, StatusPicker, NumField, SaveStatus,
 } from './core'
 import { CHARGE_MODES, applyChargeMode } from '../lib/opQuoteShared'
 
@@ -156,7 +156,11 @@ export function SectionGenerales({ d, set, showEstado = true, numeroLabel = 'N°
 // =========================================================
 // Section 2 — Calculadora de Papel
 // =========================================================
-export function SectionPapel({ d, set, calc, papelCatalog }) {
+// `showMoney=false` (Operador armando una OP): la orden se arma solo con lo
+// técnico —medidas, papel, procesos— y ni un valor en pesos a la vista. Los
+// precios que ya existan se conservan intactos: el backend ignora lo que
+// llegue en esos campos si quien guarda no es Admin (ver OP_CAMPOS_DINERO).
+export function SectionPapel({ d, set, calc, papelCatalog, showMoney = true }) {
   return (
     <div className="papel-layout">
       <div className="papel-block">
@@ -203,9 +207,9 @@ export function SectionPapel({ d, set, calc, papelCatalog }) {
       </div>
 
       <div className="papel-block">
-        <div className="papel-block-title">Catálogo de papel · costo</div>
+        <div className="papel-block-title">{showMoney ? 'Catálogo de papel · costo' : 'Catálogo de papel'}</div>
         <div className="grid grid-3" style={{ gap: 14 }}>
-          <div className="field col-span-2">
+          <div className={showMoney ? 'field col-span-2' : 'field col-span-3'}>
             <label className="field-label">Referencia del papel <span className="hint">— catálogo administrable</span></label>
             <select className="select" value={d.papelId} onChange={e => {
               const v = e.target.value
@@ -215,12 +219,17 @@ export function SectionPapel({ d, set, calc, papelCatalog }) {
             }}>
               {papelCatalog.map(p => (
                 <option key={p.id} value={String(p.id)}>
-                  {p.nombre} {p.gramaje}g · {p.material} · {fmtCOP(p.precio)} / pliego
+                  {p.nombre} {p.gramaje}g · {p.material}{showMoney ? ` · ${fmtCOP(p.precio)} / pliego` : ''}
                 </option>
               ))}
-              <option value="manual">+ Registrar papel temporal (precio manual)</option>
+              {showMoney
+                ? <option value="manual">+ Registrar papel temporal (precio manual)</option>
+                /* Sin dinero no se registran papeles temporales, pero la opción
+                   tiene que existir para no perder la del Admin al abrir. */
+                : d.papelId === 'manual' && <option value="manual">Papel temporal (definido por el administrador)</option>}
             </select>
           </div>
+          {showMoney && (
           <div className="field">
             <label className="field-label">Precio / pliego <span className="editable-flag"><Icon.Pencil /></span></label>
             <MoneyInput
@@ -229,7 +238,9 @@ export function SectionPapel({ d, set, calc, papelCatalog }) {
               onChange={(v) => set({ precioPliego: v, papelId: 'manual' })}
             />
           </div>
+          )}
 
+          {showMoney && (
           <div className="field col-span-3">
             <label className="field-label">
               <Icon.Calc /> Costo total de papel
@@ -251,11 +262,15 @@ export function SectionPapel({ d, set, calc, papelCatalog }) {
               )}
             </div>
           </div>
+          )}
         </div>
       </div>
 
       <div className="papel-block">
         <div className="papel-block-title">Cortes</div>
+        <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginBottom: 8 }}>
+          Si están activos, la OP pasa por Guillotina: corte inicial antes de Impresora y corte final después de Troqueladora.
+        </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {[
             { key: 'corteInicial', label: 'Corte inicial', activeKey: 'corteInicialActive', precioKey: 'corteInicialPrecio' },
@@ -264,14 +279,16 @@ export function SectionPapel({ d, set, calc, papelCatalog }) {
             <div key={activeKey} className={'proc-row' + (d[activeKey] ? ' active' : '')} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <Checkbox checked={!!d[activeKey]} onChange={() => set({ [activeKey]: !d[activeKey] })} />
               <div className="proc-name" style={{ flex: 1 }}>{label}</div>
-              <div className="proc-cost">
-                <MoneyInput
-                  className="admin-editable"
-                  style={{ fontWeight: d[activeKey] ? 600 : 400 }}
-                  value={d[precioKey] || 0}
-                  onChange={(v) => set({ [precioKey]: v })}
-                />
-              </div>
+              {showMoney && (
+                <div className="proc-cost">
+                  <MoneyInput
+                    className="admin-editable"
+                    style={{ fontWeight: d[activeKey] ? 600 : 400 }}
+                    value={d[precioKey] || 0}
+                    onChange={(v) => set({ [precioKey]: v })}
+                  />
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -332,13 +349,13 @@ function ChargeBreakdown({ cm }) {
   )
 }
 
-function ImpresionSide({ titulo, activo, onToggle, tipo, onTipo, colores, onColores, costo, onCosto, chargeMode, onChargeMode, valorBase, onValorBase, cm }) {
+function ImpresionSide({ titulo, activo, onToggle, tipo, onTipo, colores, onColores, costo, onCosto, chargeMode, onChargeMode, valorBase, onValorBase, cm, showMoney = true }) {
   return (
     <div className={'impresion-side' + (activo ? ' active' : ' inactive')}>
       <div className="impresion-side-header" onClick={onToggle}>
         <Checkbox checked={activo} onChange={onToggle} />
         <span className="side-title">{titulo}</span>
-        {activo && <span className="side-cost mono">{fmtCOP(cm ? cm.costo : costo)}</span>}
+        {activo && showMoney && <span className="side-cost mono">{fmtCOP(cm ? cm.costo : costo)}</span>}
       </div>
       {activo && (
         <div className="impresion-side-body">
@@ -359,22 +376,26 @@ function ImpresionSide({ titulo, activo, onToggle, tipo, onTipo, colores, onColo
               onChange={e => onColores(e.target.value)}
             />
           </div>
-          <div className="field">
-            <label className="field-label">Modo de cobro</label>
-            <ChargeModeSelect value={chargeMode} onChange={onChargeMode} />
-          </div>
-          <div className="field">
-            <label className="field-label">{cm ? 'Tarifa' : `Costo ${titulo.toLowerCase()}`} <span className="editable-flag"><Icon.Pencil /></span></label>
-            <MoneyInput value={cm ? valorBase : costo} onChange={cm ? onValorBase : onCosto} className="admin-editable" />
-            <ChargeBreakdown cm={cm} />
-          </div>
+          {showMoney && (
+            <>
+              <div className="field">
+                <label className="field-label">Modo de cobro</label>
+                <ChargeModeSelect value={chargeMode} onChange={onChargeMode} />
+              </div>
+              <div className="field">
+                <label className="field-label">{cm ? 'Tarifa' : `Costo ${titulo.toLowerCase()}`} <span className="editable-flag"><Icon.Pencil /></span></label>
+                <MoneyInput value={cm ? valorBase : costo} onChange={cm ? onValorBase : onCosto} className="admin-editable" />
+                <ChargeBreakdown cm={cm} />
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>
   )
 }
 
-function ImpresionRow({ pdef, p, onToggle, onUpdate, cantidadProduccion }) {
+function ImpresionRow({ pdef, p, onToggle, onUpdate, cantidadProduccion, showMoney = true }) {
   const active = !!p.active
   const tiroCm = applyChargeMode(p.tiroChargeMode, p.tiroValorBase, cantidadProduccion)
   const retiroCm = applyChargeMode(p.retiroChargeMode, p.retiroValorBase, cantidadProduccion)
@@ -389,21 +410,24 @@ function ImpresionRow({ pdef, p, onToggle, onUpdate, cantidadProduccion }) {
           {pdef.nombre}
           {pdef.desc && <span className="desc">— {pdef.desc}</span>}
         </div>
-        <div className="proc-cost">
-          <div className="input-affix">
-            <input
-              type="text" readOnly
-              className="input mono calc"
-              style={{ textAlign: 'right', paddingRight: 38, fontWeight: active ? 600 : 400, cursor: 'default' }}
-              value={Number(Math.round(costoTotal || 0)).toLocaleString('es-CO')}
-            />
-            <span className="suffix" style={{ fontSize: 10 }}>COP</span>
+        {showMoney && (
+          <div className="proc-cost">
+            <div className="input-affix">
+              <input
+                type="text" readOnly
+                className="input mono calc"
+                style={{ textAlign: 'right', paddingRight: 38, fontWeight: active ? 600 : 400, cursor: 'default' }}
+                value={Number(Math.round(costoTotal || 0)).toLocaleString('es-CO')}
+              />
+              <span className="suffix" style={{ fontSize: 10 }}>COP</span>
+            </div>
           </div>
-        </div>
+        )}
       </div>
       {active && (
         <div className="impresion-bottom">
           <ImpresionSide
+            showMoney={showMoney}
             titulo="Tiro"
             activo={!!p.tiroActive} onToggle={() => onUpdate({ tiroActive: !p.tiroActive })}
             tipo={p.tiroTipo} onTipo={(v) => onUpdate({ tiroTipo: v })}
@@ -414,6 +438,7 @@ function ImpresionRow({ pdef, p, onToggle, onUpdate, cantidadProduccion }) {
             cm={tiroCm}
           />
           <ImpresionSide
+            showMoney={showMoney}
             titulo="Retiro"
             activo={!!p.retiroActive} onToggle={() => onUpdate({ retiroActive: !p.retiroActive })}
             tipo={p.retiroTipo} onTipo={(v) => onUpdate({ retiroTipo: v })}
@@ -429,13 +454,13 @@ function ImpresionRow({ pdef, p, onToggle, onUpdate, cantidadProduccion }) {
   )
 }
 
-function LaminadoSide({ titulo, activo, onToggle, tipoLaminado, onTipo, precioM2, onPrecioM2, costoAuto, tipoMetalizado, onTipoMetalizado, metalizadoOtros, onMetalizadoOtros, chargeMode, onChargeMode, valorBase, onValorBase, cm }) {
+function LaminadoSide({ titulo, activo, onToggle, tipoLaminado, onTipo, precioM2, onPrecioM2, costoAuto, tipoMetalizado, onTipoMetalizado, metalizadoOtros, onMetalizadoOtros, chargeMode, onChargeMode, valorBase, onValorBase, cm, showMoney = true }) {
   return (
     <div className={'impresion-side' + (activo ? ' active' : ' inactive')}>
       <div className="impresion-side-header" onClick={onToggle}>
         <Checkbox checked={activo} onChange={onToggle} />
         <span className="side-title">{titulo}</span>
-        {activo && <span className="side-cost mono">{fmtCOP(costoAuto)}</span>}
+        {activo && showMoney && <span className="side-cost mono">{fmtCOP(costoAuto)}</span>}
       </div>
       {activo && (
         <div className="impresion-side-body">
@@ -465,21 +490,25 @@ function LaminadoSide({ titulo, activo, onToggle, tipoLaminado, onTipo, precioM2
               />
             </div>
           )}
-          <div className="field">
-            <label className="field-label">Modo de cobro</label>
-            <ChargeModeSelect value={chargeMode} onChange={onChargeMode} />
-          </div>
-          {cm ? (
-            <div className="field">
-              <label className="field-label">Tarifa <span className="editable-flag"><Icon.Pencil /></span></label>
-              <MoneyInput value={valorBase} onChange={onValorBase} className="admin-editable" suffix="" />
-              <ChargeBreakdown cm={cm} />
-            </div>
-          ) : (
-            <div className="field">
-              <label className="field-label">Precio $/m² <span className="editable-flag"><Icon.Pencil /></span></label>
-              <MoneyInput value={precioM2} onChange={onPrecioM2} className="admin-editable" suffix="" />
-            </div>
+          {showMoney && (
+            <>
+              <div className="field">
+                <label className="field-label">Modo de cobro</label>
+                <ChargeModeSelect value={chargeMode} onChange={onChargeMode} />
+              </div>
+              {cm ? (
+                <div className="field">
+                  <label className="field-label">Tarifa <span className="editable-flag"><Icon.Pencil /></span></label>
+                  <MoneyInput value={valorBase} onChange={onValorBase} className="admin-editable" suffix="" />
+                  <ChargeBreakdown cm={cm} />
+                </div>
+              ) : (
+                <div className="field">
+                  <label className="field-label">Precio $/m² <span className="editable-flag"><Icon.Pencil /></span></label>
+                  <MoneyInput value={precioM2} onChange={onPrecioM2} className="admin-editable" suffix="" />
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
@@ -487,7 +516,7 @@ function LaminadoSide({ titulo, activo, onToggle, tipoLaminado, onTipo, precioM2
   )
 }
 
-function LaminadoRow({ pdef, p, onToggle, onUpdate, autoVal, cantidadProduccion }) {
+function LaminadoRow({ pdef, p, onToggle, onUpdate, autoVal, cantidadProduccion, showMoney = true }) {
   const tiroCm = applyChargeMode(p.tiroChargeMode, p.tiroValorBase, cantidadProduccion)
   const retiroCm = applyChargeMode(p.retiroChargeMode, p.retiroValorBase, cantidadProduccion)
   const active = !!p.active
@@ -502,21 +531,24 @@ function LaminadoRow({ pdef, p, onToggle, onUpdate, autoVal, cantidadProduccion 
           {pdef.nombre}
           {pdef.desc && <span className="desc">— {pdef.desc}</span>}
         </div>
-        <div className="proc-cost">
-          <div className="input-affix">
-            <input
-              type="text" readOnly
-              className="input mono calc"
-              style={{ textAlign: 'right', paddingRight: 38, fontWeight: active ? 600 : 400, cursor: 'default' }}
-              value={Number(Math.round(costoTotal || 0)).toLocaleString('es-CO')}
-            />
-            <span className="suffix" style={{ fontSize: 10 }}>COP</span>
+        {showMoney && (
+          <div className="proc-cost">
+            <div className="input-affix">
+              <input
+                type="text" readOnly
+                className="input mono calc"
+                style={{ textAlign: 'right', paddingRight: 38, fontWeight: active ? 600 : 400, cursor: 'default' }}
+                value={Number(Math.round(costoTotal || 0)).toLocaleString('es-CO')}
+              />
+              <span className="suffix" style={{ fontSize: 10 }}>COP</span>
+            </div>
           </div>
-        </div>
+        )}
       </div>
       {active && (
         <div className="impresion-bottom">
           <LaminadoSide
+            showMoney={showMoney}
             titulo="Tiro"
             activo={!!p.tiroActive} onToggle={() => onUpdate({ tiroActive: !p.tiroActive })}
             tipoLaminado={p.tiroTipoLaminado || 'Mate'} onTipo={(v) => onUpdate({ tiroTipoLaminado: v })}
@@ -529,6 +561,7 @@ function LaminadoRow({ pdef, p, onToggle, onUpdate, autoVal, cantidadProduccion 
             cm={tiroCm}
           />
           <LaminadoSide
+            showMoney={showMoney}
             titulo="Retiro"
             activo={!!p.retiroActive} onToggle={() => onUpdate({ retiroActive: !p.retiroActive })}
             tipoLaminado={p.retiroTipoLaminado || 'Mate'} onTipo={(v) => onUpdate({ retiroTipoLaminado: v })}
@@ -546,7 +579,7 @@ function LaminadoRow({ pdef, p, onToggle, onUpdate, autoVal, cantidadProduccion 
   )
 }
 
-function ProcRowDefault({ pdef, p, onToggle, onUpdate, autoVal, cantidadProduccion }) {
+function ProcRowDefault({ pdef, p, onToggle, onUpdate, autoVal, cantidadProduccion, showMoney = true }) {
   const active = !!p.active
   const cm = applyChargeMode(p.chargeMode, p.valorBase, cantidadProduccion)
   return (
@@ -568,10 +601,12 @@ function ProcRowDefault({ pdef, p, onToggle, onUpdate, autoVal, cantidadProducci
               <NumField value={p.cantidad} onChange={v => onUpdate({ cantidad: Math.round(v) })} step={1} />
               <span className="suffix" style={{ fontSize: 10 }}>cajas</span>
             </div>
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>$/u</span>
-              <MoneyInput value={p.precioUnit} onChange={(v) => onUpdate({ precioUnit: v })} style={{ width: 130 }} suffix="" />
-            </div>
+            {showMoney && (
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>$/u</span>
+                <MoneyInput value={p.precioUnit} onChange={(v) => onUpdate({ precioUnit: v })} style={{ width: 130 }} suffix="" />
+              </div>
+            )}
           </>
         )}
         {pdef.id === 'otros' && (
@@ -584,7 +619,7 @@ function ProcRowDefault({ pdef, p, onToggle, onUpdate, autoVal, cantidadProducci
             <Icon.Info /><span>{pdef.note}</span>
           </div>
         )}
-        {active && (
+        {active && showMoney && (
           <ChargeModeSelect
             style={{ flex: '0 0 110px', marginLeft: 'auto' }}
             value={p.chargeMode}
@@ -592,6 +627,7 @@ function ProcRowDefault({ pdef, p, onToggle, onUpdate, autoVal, cantidadProducci
           />
         )}
       </div>
+      {showMoney && (
       <div className="proc-cost">
         <div style={{ position: 'relative' }}>
           {cm && p.costoOverride == null ? (
@@ -624,6 +660,7 @@ function ProcRowDefault({ pdef, p, onToggle, onUpdate, autoVal, cantidadProducci
           )}
         </div>
       </div>
+      )}
     </div>
   )
 }
@@ -634,7 +671,19 @@ function ProcRow(props) {
   return <ProcRowDefault {...props} />
 }
 
-export function SectionProcesos({ procesos, setProc, autoValues, cantidadProduccion }) {
+// Barnizadora hace un solo pase de UV por OP: activar uno de los tres apaga
+// los otros para que no se pueda dejar más de uno marcado desde el formulario.
+const BARNIZADO_EXCLUSIVOS = ESTACIONES_CONFIG.barnizadora.procesos
+
+export function SectionProcesos({ procesos, setProc, autoValues, cantidadProduccion, showMoney = true }) {
+  const toggle = (procesoId) => {
+    const willActivate = !procesos[procesoId]?.active
+    if (willActivate && BARNIZADO_EXCLUSIVOS.includes(procesoId)) {
+      BARNIZADO_EXCLUSIVOS.forEach(id => { if (id !== procesoId) setProc(id, { active: false }) })
+    }
+    setProc(procesoId, { active: willActivate })
+  }
+
   return (
     <div>
       {PROCESS_GROUPS.map(g => {
@@ -648,11 +697,12 @@ export function SectionProcesos({ procesos, setProc, autoValues, cantidadProducc
             {g.procesos.map(pdef => (
               <ProcRow
                 key={pdef.id}
+                showMoney={showMoney}
                 pdef={pdef}
                 p={procesos[pdef.id]}
                 autoVal={autoValues[pdef.id]}
                 cantidadProduccion={cantidadProduccion}
-                onToggle={() => setProc(pdef.id, { active: !procesos[pdef.id]?.active })}
+                onToggle={() => toggle(pdef.id)}
                 onUpdate={(patch) => setProc(pdef.id, patch)}
               />
             ))}
@@ -784,10 +834,11 @@ export function SectionCondicionesOP({ d, set, readOnly = false }) {
 // =========================================================
 // Section 6 — Acciones
 // =========================================================
-export function SectionAcciones({ d, calc, onSave, onDelete, onSaveAndSend, saving, originalEstado }) {
+export function SectionAcciones({ d, calc, onDelete, onSaveAndSend, saveStatus, onRetrySave, sending, originalEstado }) {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const isConvertida = (originalEstado || d.estado) === 'convertida'
   const canDelete = !!d.id && !isConvertida
+  const busy = sending || saveStatus === 'saving'
 
   return (
     <div>
@@ -798,12 +849,10 @@ export function SectionAcciones({ d, calc, onSave, onDelete, onSaveAndSend, savi
         </div>
       )}
       <div className="actions-row">
-        <button className="btn" onClick={onSave} disabled={saving || isConvertida}>
-          <Icon.Save /> {saving ? 'Guardando…' : 'Guardar'}
+        <button className="btn accent" onClick={onSaveAndSend} disabled={busy || isConvertida} style={{ gap: 6 }}>
+          <Icon.Send /> {sending ? 'Enviando…' : 'Enviar al Cliente'}
         </button>
-        <button className="btn accent" onClick={onSaveAndSend} disabled={saving || isConvertida} style={{ gap: 6 }}>
-          <Icon.Send /> {saving ? 'Guardando…' : 'Guardar y Enviar al Cliente'}
-        </button>
+        <SaveStatus status={saveStatus} onRetry={onRetrySave} />
         <div className="spacer" />
         <span className="muted" style={{ fontSize: 11.5 }}>
           Total cotización: <strong className="mono" style={{ color: 'var(--ink)' }}>{fmtCOP(calc.valorTotal)}</strong>
@@ -816,7 +865,7 @@ export function SectionAcciones({ d, calc, onSave, onDelete, onSaveAndSend, savi
               className="btn"
               style={{ color: 'var(--danger, #c0392b)', borderColor: 'var(--danger, #c0392b)' }}
               onClick={() => setConfirmDelete(true)}
-              disabled={saving}
+              disabled={busy}
             >
               <Icon.Trash /> Eliminar cotización
             </button>
@@ -829,11 +878,11 @@ export function SectionAcciones({ d, calc, onSave, onDelete, onSaveAndSend, savi
                 className="btn"
                 style={{ background: 'var(--danger, #c0392b)', color: '#fff', borderColor: 'var(--danger, #c0392b)' }}
                 onClick={onDelete}
-                disabled={saving}
+                disabled={busy}
               >
                 Sí, eliminar
               </button>
-              <button className="btn" onClick={() => setConfirmDelete(false)} disabled={saving}>
+              <button className="btn" onClick={() => setConfirmDelete(false)} disabled={busy}>
                 Cancelar
               </button>
             </>
@@ -842,7 +891,7 @@ export function SectionAcciones({ d, calc, onSave, onDelete, onSaveAndSend, savi
       )}
       <div className="muted" style={{ fontSize: 11, marginTop: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
         <Icon.Info />
-        Puedes seguir guardando como borrador todas las veces que necesites. El cambio de estado y la conversión a OP se hacen desde el listado de cotizaciones.
+        Los cambios se guardan automáticamente. El cambio de estado y la conversión a OP se hacen desde el listado de cotizaciones.
       </div>
     </div>
   )

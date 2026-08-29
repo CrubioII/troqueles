@@ -1,8 +1,9 @@
 import unicodedata
 
 from rest_framework import serializers
-from .models import Cliente, Papel, Cotizacion, CotizacionProceso, DocumentoCliente, DocumentoClienteItem, OrdenProduccion, OpProceso, OrdenCambio, RegistroMaquina, TroquelModelo, FormatoCuchillas, Remision, RemisionItem
+from .models import Cliente, Papel, Cotizacion, CotizacionProceso, DocumentoCliente, DocumentoClienteItem, OrdenProduccion, OpProceso, OrdenCambio, RegistroMaquina, TroquelModelo, FormatoCuchillas, Remision, RemisionItem, RegistroProceso, Notificacion
 from .models import ORDEN_CAMPOS_AUDITADOS, orden_valor_legible, registrar_cambios_orden
+from . import chain
 
 
 class ClienteSerializer(serializers.ModelSerializer):
@@ -23,6 +24,75 @@ class PapelSerializer(serializers.ModelSerializer):
         model = Papel
         fields = ["id", "nombre", "gramaje", "material", "precio", "activo"]
         read_only_fields = ["id"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OP sin plata (Operador)
+#
+# El Operador levanta sus propias OPs —OP directa o tarea de troquel— con los
+# datos técnicos, el cliente y los procesos, pero no ve ni escribe un solo
+# valor monetario. Lo mismo que se le oculta al leer se le ignora al escribir:
+# si no se protegiera, su formulario (que llega con ceros donde no vio nada)
+# borraría las tarifas que ya puso el Admin.
+# ─────────────────────────────────────────────────────────────────────────────
+
+OP_CAMPOS_DINERO = (
+    "precio_pliego", "costo_papel_override",
+    "corte_inicial_precio", "corte_final_precio",
+    "valor_unitario_override", "valor_total_override",
+    "total_costos_override", "subtotal_override",
+    "margen", "abono",
+)
+
+# Solo lectura (derivados): se ocultan al leer, no existen al escribir.
+OP_CAMPOS_DINERO_CALCULADOS = ("valor_unitario_efectivo", "valor_total_efectivo", "saldo")
+
+# Condiciones comerciales: no son montos, pero se pactan con el precio y viven
+# en la pantalla del Admin. El Operador no las ve, así que tampoco las pisa.
+OP_CAMPOS_COMERCIALES = ("condicion_pago", "condicion_custom", "tipo_facturacion")
+
+# Claves de `extras` de un proceso que llevan plata (tarifas y modo de cobro).
+# El resto de extras son datos técnicos que el Operador sí maneja.
+PROCESO_EXTRAS_DINERO = frozenset({
+    "chargeMode", "valorBase", "precioUnit",
+    "tiroChargeMode", "retiroChargeMode",
+    "tiroValorBase", "retiroValorBase",
+    "costoTiro", "costoRetiro",
+    "tiroPrecioM2", "retiroPrecioM2",
+})
+
+
+def _pide_sin_plata(serializer):
+    """True si quien lee/escribe no es staff: el documento va sin plata."""
+    request = serializer.context.get("request")
+    return bool(request) and not request.user.is_staff
+
+
+def _sin_dinero(proceso_data):
+    """Copia de una fila de proceso sin costo, override ni extras de plata."""
+    limpio = {k: v for k, v in proceso_data.items() if k not in ("costo", "costo_override")}
+    extras = limpio.get("extras")
+    if isinstance(extras, dict):
+        limpio["extras"] = {k: v for k, v in extras.items() if k not in PROCESO_EXTRAS_DINERO}
+    return limpio
+
+
+def _con_dinero_previo(proceso_data, previo):
+    """Fila de proceso del Operador con la plata que ya tenía guardada.
+
+    `previo` es el (costo, costo_override, extras) que había en la BD para ese
+    proceso_id; si el proceso es nuevo, nace en cero y el Admin le pone precio.
+    """
+    costo, costo_override, extras_previos = previo or (0, None, {})
+    fila = _sin_dinero(proceso_data)
+    fila["costo"] = costo
+    fila["costo_override"] = costo_override
+    extras = dict(fila.get("extras") or {})
+    for k, v in (extras_previos or {}).items():
+        if k in PROCESO_EXTRAS_DINERO:
+            extras[k] = v
+    fila["extras"] = extras
+    return fila
 
 
 class CotizacionProcesoSerializer(serializers.ModelSerializer):
@@ -204,7 +274,7 @@ def _proceso_troquel(obj):
 class OpProcesoSerializer(serializers.ModelSerializer):
     class Meta:
         model = OpProceso
-        fields = ["id", "proceso_id", "active", "costo", "costo_override", "extras", "completado", "completado_en", "visible_operador", "prioridad"]
+        fields = ["id", "proceso_id", "active", "costo", "costo_override", "extras", "completado", "completado_en", "prioridad"]
         read_only_fields = ["id", "completado", "completado_en"]
 
 
@@ -214,7 +284,6 @@ class OrdenListSerializer(serializers.ModelSerializer):
     valor_total_efectivo = serializers.SerializerMethodField()
     saldo = serializers.SerializerMethodField()
     progreso = serializers.SerializerMethodField()
-    visible_operador_troquel = serializers.SerializerMethodField()
     prioridad_troquel = serializers.SerializerMethodField()
 
     class Meta:
@@ -223,12 +292,8 @@ class OrdenListSerializer(serializers.ModelSerializer):
             "id", "numero", "fecha", "fecha_entrega", "cliente_nombre", "referencia",
             "cantidad", "valor_total_efectivo", "abono", "saldo",
             "cotizacion", "cotizacion_numero", "creado", "modificado",
-            "progreso", "visible_operador_troquel", "prioridad_troquel",
+            "progreso", "prioridad_troquel",
         ]
-
-    def get_visible_operador_troquel(self, obj):
-        p = _proceso_troquel(obj)
-        return bool(p.visible_operador) if p else False
 
     def get_prioridad_troquel(self, obj):
         p = _proceso_troquel(obj)
@@ -245,6 +310,14 @@ class OrdenListSerializer(serializers.ModelSerializer):
 
     def get_progreso(self, obj):
         return _orden_progreso(obj)
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get("request")
+        if request and not request.user.is_staff:
+            for f in ("valor_total_efectivo", "abono", "saldo"):
+                data.pop(f, None)
+        return data
 
 
 def _orden_progreso(obj):
@@ -346,8 +419,26 @@ class OrdenSerializer(serializers.ModelSerializer):
     def get_progreso(self, obj):
         return _orden_progreso(obj)
 
+    @property
+    def _sin_plata(self):
+        return _pide_sin_plata(self)
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if self._sin_plata:
+            for f in OP_CAMPOS_DINERO + OP_CAMPOS_DINERO_CALCULADOS:
+                data.pop(f, None)
+            data["procesos"] = [_sin_dinero(p) for p in data.get("procesos", [])]
+        return data
+
     def create(self, validated_data):
         procesos_data = validated_data.pop("procesos", [])
+        if self._sin_plata:
+            # OP directa creada por el Operador (o tarea de troquel): nace sin
+            # precios y el Admin los pone después.
+            for campo in OP_CAMPOS_DINERO + OP_CAMPOS_COMERCIALES:
+                validated_data.pop(campo, None)
+            procesos_data = [_sin_dinero(p) for p in procesos_data]
         orden = OrdenProduccion.objects.create(**validated_data)
         for p in procesos_data:
             OpProceso.objects.create(orden=orden, **p)
@@ -355,6 +446,19 @@ class OrdenSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         procesos_data = validated_data.pop("procesos", None)
+        if self._sin_plata:
+            # Sin estos campos en validated_data, el instance conserva los suyos.
+            for campo in OP_CAMPOS_DINERO + OP_CAMPOS_COMERCIALES:
+                validated_data.pop(campo, None)
+            if procesos_data is not None:
+                previos_plata = {
+                    p.proceso_id: (p.costo, p.costo_override, p.extras)
+                    for p in instance.procesos.all()
+                }
+                procesos_data = [
+                    _con_dinero_previo(p, previos_plata.get(p["proceso_id"]))
+                    for p in procesos_data
+                ]
         if instance.cotizacion_id is not None:
             # OP desde COT: solo liquidación editable
             validated_data = {k: v for k, v in validated_data.items() if k in OP_LOCKED_WHITELIST}
@@ -371,11 +475,22 @@ class OrdenSerializer(serializers.ModelSerializer):
             request = self.context.get("request")
             registrar_cambios_orden(instance, previos, request.user if request else None)
         if procesos_data is not None:
-            old_state = {p.proceso_id: (p.completado, p.completado_en) for p in instance.procesos.all()}
+            # Los procesos se recrean, pero el estado de producción (avance del
+            # Operador y prioridad de cola) no es del Admin: se conserva o se
+            # perdería en cada guardado de la OP.
+            old_state = {
+                p.proceso_id: (p.completado, p.completado_en, p.prioridad)
+                for p in instance.procesos.all()
+            }
             instance.procesos.all().delete()
             for p in procesos_data:
-                completado, completado_en = old_state.get(p["proceso_id"], (False, None))
-                OpProceso.objects.create(orden=instance, completado=completado, completado_en=completado_en, **p)
+                completado, completado_en, prioridad = old_state.get(
+                    p["proceso_id"], (False, None, None)
+                )
+                OpProceso.objects.create(
+                    orden=instance, completado=completado, completado_en=completado_en,
+                    prioridad=prioridad, **p,
+                )
         return instance
 
 
@@ -454,6 +569,22 @@ class FormatoCuchillasSerializer(serializers.ModelSerializer):
             filas.append({"tipo": tipo, "cm": cm})
         return filas
 
+    def validate_sacabocados(self, value):
+        medidas_validas = dict(FormatoCuchillas.SAC_MEDIDA_CHOICES)
+        if not isinstance(value, list):
+            raise serializers.ValidationError("Debe ser una lista de filas {medida, cantidad}.")
+        filas = []
+        for fila in value:
+            try:
+                medida = fila.get("medida")
+                cantidad = int(fila.get("cantidad") or 0)
+            except (AttributeError, TypeError, ValueError):
+                raise serializers.ValidationError("Cada fila de sacabocados requiere medida válida y cantidad ≥ 0.")
+            if medida not in medidas_validas or cantidad < 0:
+                raise serializers.ValidationError("Cada fila de sacabocados requiere medida válida y cantidad ≥ 0.")
+            filas.append({"medida": medida, "cantidad": cantidad})
+        return filas
+
     def validate(self, data):
         get = lambda k: data.get(k, getattr(self.instance, k, None) if self.instance else None)
         # El tipo de cuchilla solo se exige al enviar: el Operador puede guardar
@@ -480,7 +611,7 @@ class FormatoCuchillasSerializer(serializers.ModelSerializer):
             "id", "orden", "orden_numero", "cliente_nombre", "fecha_entrega", "referencia",
             "cuchilla_cm", "cuchilla_tipo", "cuchilla_puntos",
             "grafa_cm", "grafa_puntos", "grafa_altura",
-            "ch_cm", "ch_medida", "sac_cm", "sac_medida", "sac_cantidad", "perfo_cm", "perfo_medida",
+            "ch_cm", "ch_medida", "sac_cm", "sac_medida", "sac_cantidad", "sacabocados", "perfo_cm", "perfo_medida",
             "desperdicio_cm", "cauchos", "gan", "observaciones",
             "dos_puntos", "tres_puntos", "perfo", "ch", "sac", "desperdicio",  # legacy, solo lectura
             "tiempo_encalado_min", "tiempo_encuchillado_min", "tiempo_encauchado_min",
@@ -490,6 +621,7 @@ class FormatoCuchillasSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id", "operador", "fecha_hora",
             "dos_puntos", "tres_puntos", "perfo", "ch", "sac", "desperdicio",
+            "sac_cm", "sac_medida", "sac_cantidad",  # legacy, reemplazados por `sacabocados`
             "estado", "devolucion_motivo", "revisado_en",
         ]
 
@@ -510,7 +642,7 @@ class OrdenOperadorSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = OrdenProduccion
-        fields = ["id", "numero", "fecha_entrega", "cliente", "cliente_nombre", "referencia", "cantidad", "procesos", "troquel_modelo", "remision_enviada", "prioridad_troquel", "desde_cotizacion"]
+        fields = ["id", "numero", "fecha_entrega", "creado", "cliente", "cliente_nombre", "referencia", "cantidad", "procesos", "troquel_modelo", "remision_enviada", "prioridad_troquel", "desde_cotizacion"]
 
     def get_desde_cotizacion(self, obj):
         return obj.cotizacion_id is not None
@@ -534,6 +666,128 @@ class OrdenOperadorSerializer(serializers.ModelSerializer):
         if modelo is None:
             return None
         return TroquelModeloOperadorSerializer(modelo, context=self.context).data
+
+
+def _cantidad_esperada(obj):
+    """Lo que la OP espera que salga de cada máquina: solo lo requerido.
+
+    El sobrante no es esperado — es el margen de tolerancia que absorbe
+    faltantes pequeños antes de avisar (ver RegistroProcesoViewSet.create).
+    """
+    return int(obj.cantidad or 0)
+
+
+class RegistroProcesoSerializer(serializers.ModelSerializer):
+    """Registro de una máquina de la cadena. El Operador solo aporta los datos
+    del trabajo: operador, cantidad_esperada y faltante los estampa la vista."""
+
+    orden_numero = serializers.CharField(source="orden.numero", read_only=True, default="")
+    orden_cliente = serializers.CharField(source="orden.cliente.nombre", read_only=True, default="")
+    orden_referencia = serializers.CharField(source="orden.referencia", read_only=True, default="")
+    operador_username = serializers.CharField(source="operador.username", read_only=True, default="")
+    estacion_label = serializers.SerializerMethodField()
+    proceso_label = serializers.SerializerMethodField()
+    tamano_label = serializers.CharField(source="get_tamano_display", read_only=True, default="")
+
+    class Meta:
+        model = RegistroProceso
+        fields = [
+            "id", "orden", "orden_numero", "orden_cliente", "orden_referencia",
+            "estacion", "estacion_label", "proceso_id", "proceso_label",
+            "cantidad_realizada", "cantidad_esperada", "faltante",
+            "tamano", "tamano_label", "tamano_otro",
+            "tiro_active", "tiro_colores_num", "tiro_colores_desc",
+            "retiro_active", "retiro_colores_num", "retiro_colores_desc",
+            "tipo_laminado", "observaciones",
+            "operador", "operador_username", "fecha_hora",
+        ]
+        read_only_fields = ["cantidad_esperada", "faltante", "operador", "fecha_hora"]
+
+    def get_estacion_label(self, obj):
+        est = chain.ESTACION_POR_ID.get(obj.estacion)
+        return est["label"] if est else obj.estacion
+
+    def get_proceso_label(self, obj):
+        return chain.PROCESO_LABELS.get(obj.proceso_id, obj.proceso_id)
+
+
+class NotificacionSerializer(serializers.ModelSerializer):
+    orden_numero = serializers.CharField(source="orden.numero", read_only=True, default="")
+    creada_por_username = serializers.CharField(
+        source="creada_por.username", read_only=True, default=""
+    )
+    leida = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Notificacion
+        fields = [
+            "id", "tipo", "titulo", "mensaje", "orden", "orden_numero", "registro",
+            "creada_por", "creada_por_username", "leida", "leida_en", "creada",
+        ]
+
+    def get_leida(self, obj):
+        return obj.leida_en is not None
+
+
+class OrdenEstacionSerializer(OrdenOperadorSerializer):
+    """OP en la cola de una estación de la cadena.
+
+    Añade a la vista sanitizada del Operador lo que necesita el formulario de
+    máquina: cuánto se espera, qué procesos cierra esta estación y cuánto llegó
+    de la estación anterior. Sigue sin valores monetarios.
+    """
+
+    cantidad_esperada = serializers.SerializerMethodField()
+    estacion_procesos = serializers.SerializerMethodField()
+    bloqueado_por = serializers.SerializerMethodField()
+    registro_previo = serializers.SerializerMethodField()
+
+    class Meta(OrdenOperadorSerializer.Meta):
+        fields = OrdenOperadorSerializer.Meta.fields + [
+            "sobrante", "cantidad_esperada", "estacion_procesos", "bloqueado_por",
+            "registro_previo",
+        ]
+
+    def _estacion(self):
+        return self.context.get("estacion")
+
+    def get_cantidad_esperada(self, obj):
+        return _cantidad_esperada(obj)
+
+    def get_estacion_procesos(self, obj):
+        estacion = self._estacion()
+        if not estacion:
+            return []
+        return [
+            {
+                "proceso_id": p.proceso_id,
+                "label": chain.PROCESO_LABELS.get(p.proceso_id, p.proceso_id),
+                "completado": p.completado,
+            }
+            for p in chain.procesos_de(obj, estacion)
+        ]
+
+    def get_bloqueado_por(self, obj):
+        estacion = self._estacion()
+        return chain.bloqueado_por(obj, estacion) if estacion else None
+
+    def get_registro_previo(self, obj):
+        """Último registro de una estación anterior: cuánto llegó realmente."""
+        estacion = self._estacion()
+        if not estacion:
+            return None
+        anteriores = set(chain.procesos_anteriores(estacion))
+        previos = [r for r in obj.registros_proceso.all() if r.proceso_id in anteriores]
+        if not previos:
+            return None
+        ultimo = max(previos, key=lambda r: (r.fecha_hora, r.id))
+        est = chain.ESTACION_POR_ID.get(ultimo.estacion)
+        return {
+            "estacion": ultimo.estacion,
+            "estacion_label": est["label"] if est else ultimo.estacion,
+            "cantidad_realizada": ultimo.cantidad_realizada,
+            "faltante": ultimo.faltante,
+        }
 
 
 class OrdenCambioSerializer(serializers.ModelSerializer):
@@ -630,7 +884,7 @@ class RemisionSerializer(serializers.ModelSerializer):
             "id", "numero", "fecha",
             "orden", "orden_numero",
             "cliente", "cliente_nombre", "cliente_email", "cliente_telefono", "cliente_nit",
-            "direccion", "ciudad", "observaciones", "mostrar_valores",
+            "direccion", "ciudad", "observaciones", "mostrar_valores", "tiene_troquel",
             "estado", "enviada_en", "liquidada_en",
             "consolidada_en", "consolidada_en_remision", "consolidada_en_numero",
             "creado", "modificado",
@@ -661,4 +915,4 @@ class RemisionListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Remision
         fields = ["id", "numero", "fecha", "cliente_nombre", "orden_numero",
-                  "estado", "mostrar_valores", "creado", "modificado"]
+                  "estado", "mostrar_valores", "tiene_troquel", "creado", "modificado"]

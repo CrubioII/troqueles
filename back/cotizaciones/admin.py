@@ -2,6 +2,7 @@ from django.contrib import admin
 from .models import (
     Cliente, Papel, Cotizacion, CotizacionProceso, OrdenProduccion, OpProceso,
     OrdenCambio, TroquelModelo, FormatoCuchillas, Remision, RemisionItem,
+    RegistroProceso, Notificacion,
 )
 
 
@@ -102,3 +103,22 @@ class RemisionAdmin(admin.ModelAdmin):
     search_fields = ["numero", "cliente__nombre", "orden__numero"]
     readonly_fields = ["numero", "enviada_en", "liquidada_en", "creado", "modificado"]
     inlines = [RemisionItemInline]
+
+
+@admin.register(RegistroProceso)
+class RegistroProcesoAdmin(admin.ModelAdmin):
+    list_display = [
+        "orden", "estacion", "proceso_id", "cantidad_realizada",
+        "cantidad_esperada", "faltante", "operador", "fecha_hora",
+    ]
+    list_filter = ["estacion", "faltante", "tamano"]
+    search_fields = ["orden__numero", "orden__cliente__nombre", "operador__username"]
+    readonly_fields = ["fecha_hora"]
+
+
+@admin.register(Notificacion)
+class NotificacionAdmin(admin.ModelAdmin):
+    list_display = ["tipo", "titulo", "orden", "creada_por", "leida_en", "creada"]
+    list_filter = ["tipo"]
+    search_fields = ["titulo", "mensaje", "orden__numero"]
+    readonly_fields = ["creada"]

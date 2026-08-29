@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react'
 import { createPortal } from 'react-dom'
-import { fmtCOP, fmtNum, NumField, Checkbox, MoneyInput } from './core'
+import { fmtCOP, fmtNum, NumField, Checkbox, MoneyInput, SaveStatus } from './core'
+import { useAutosave } from '../hooks/useAutosave'
 import {
   getTroquelModelo, saveTroquelModelo, getTroquelCostos, saveTroquelCostos,
   saveClientePreciosTroquel,
@@ -285,25 +286,31 @@ const EMPTY_FORMATO = {
   cuchilla_cm: 0, cuchilla_tipo: '', cuchilla_puntos: '',
   grafa_cm: 0, grafa_puntos: '', grafa_altura: '',
   ch_cm: 0, ch_medida: '',
-  sac_medida: '', sac_cantidad: 0,
   perfo_cm: 0, perfo_medida: '',
   gan: '',
   observaciones: '',
   cauchos: [{ tipo: 'verde', cm: 0 }],
+  sacabocados: [{ medida: '', cantidad: 0 }],
   desperdicio_cm: 0,
   tiempo_encalado_min: 0, tiempo_encuchillado_min: 0, tiempo_encauchado_min: 0,
 }
 
 // Payload explícito: los campos legacy (ch, sac, perfo, desperdicio…) que llegan
 // al cargar un formato existente son de solo lectura y no deben reenviarse.
-const formatoPayload = (form) =>
-  Object.fromEntries(Object.keys(EMPTY_FORMATO).map(k => [k, form[k]]))
+const formatoPayload = (form) => {
+  const data = Object.fromEntries(Object.keys(EMPTY_FORMATO).map(k => [k, form[k]]))
+  // Una fila de sacabocados sin medida es solo el placeholder del formulario:
+  // no se envía, para no chocar con la validación de medida requerida.
+  data.sacabocados = (data.sacabocados || []).filter(f => f.medida !== '')
+  return data
+}
 
 const initFormato = (formato) => {
   if (!formato) return EMPTY_FORMATO
   const f = { ...EMPTY_FORMATO }
   Object.keys(EMPTY_FORMATO).forEach(k => { if (formato[k] != null) f[k] = formato[k] })
   if (!Array.isArray(f.cauchos) || !f.cauchos.length) f.cauchos = [{ tipo: 'verde', cm: 0 }]
+  if (!Array.isArray(f.sacabocados) || !f.sacabocados.length) f.sacabocados = [{ medida: '', cantidad: 0 }]
   return f
 }
 
@@ -338,68 +345,68 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
   const reenvio = resubmit && (formato?.estado === 'devuelto' || formato?.estado === 'pendiente')
   const [form, setForm] = useState(() => initFormato(formato))
   // Id del formato ya persistido (borrador o existente): los guardados
-  // siguientes hacen PATCH en vez de POST (una sola fila por OP).
-  const [draftId, setDraftId] = useState(formato?.id || null)
+  // siguientes hacen PATCH en vez de POST (una sola fila por OP). Se guarda
+  // también en un ref porque submitSend necesita el valor más reciente justo
+  // después de esperar a que el autosave en curso termine (el closure de
+  // `draftId` puede quedar desactualizado mientras React re-renderiza).
+  const draftIdRef = useRef(formato?.id || null)
+  const [draftId, setDraftIdState] = useState(formato?.id || null)
+  const setDraftId = (idVal) => { draftIdRef.current = idVal; setDraftIdState(idVal) }
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
-  const [okMsg, setOkMsg] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
   const setCaucho = (idx, k, v) =>
     setForm(f => ({ ...f, cauchos: f.cauchos.map((row, i) => (i === idx ? { ...row, [k]: v } : row)) }))
   const addCaucho = () => setForm(f => ({ ...f, cauchos: [...f.cauchos, { tipo: 'verde', cm: 0 }] }))
   const removeCaucho = (idx) => setForm(f => ({ ...f, cauchos: f.cauchos.filter((_, i) => i !== idx) }))
+  const setSac = (idx, k, v) =>
+    setForm(f => ({ ...f, sacabocados: f.sacabocados.map((row, i) => (i === idx ? { ...row, [k]: v } : row)) }))
+  const addSac = () => setForm(f => ({ ...f, sacabocados: [...f.sacabocados, { medida: '', cantidad: 0 }] }))
+  const removeSac = (idx) => setForm(f => ({ ...f, sacabocados: f.sacabocados.filter((_, i) => i !== idx) }))
 
-  // Edición (Admin): PATCH directo, sin popup de irreversibilidad.
-  const submitEdit = () => {
-    setSaving(true); setError(null); setOkMsg(null)
-    updateFormatoCuchillas(formato.id, formatoPayload(form))
-      .then(() => { setOkMsg('Formato actualizado ✓'); onUpdated && onUpdated() })
-      .catch(() => setError('No se pudo actualizar el formato'))
-      .finally(() => setSaving(false))
-  }
-
-  // Guardar avance (Operador): persiste como borrador sin enviarlo a revisión.
-  // El formulario conserva los valores para seguir trabajando.
-  const saveDraft = () => {
-    setSaving(true); setError(null); setOkMsg(null)
-    const req = draftId
-      ? updateFormatoCuchillas(draftId, formatoPayload(form))
-      : createFormatoCuchillas({ orden: ordenId, ...formatoPayload(form) })
-    req
-      .then((f) => {
+  // Edición (Admin) y avance (Operador) autoguardan mientras se escribe:
+  // sin popup de irreversibilidad, sin gate de validación (eso solo aplica al envío).
+  const { status: saveStatus, retry: retrySave, flush: flushSave } = useAutosave(
+    form,
+    async (v) => {
+      if (isEdit) {
+        await updateFormatoCuchillas(formato.id, formatoPayload(v))
+        onUpdated && onUpdated()
+      } else {
+        const f = draftIdRef.current
+          ? await updateFormatoCuchillas(draftIdRef.current, formatoPayload(v))
+          : await createFormatoCuchillas({ orden: ordenId, ...formatoPayload(v) })
         if (f?.id) setDraftId(f.id)
-        setOkMsg('Avance guardado ✓')
         onDraftSaved && onDraftSaved(f)
-      })
-      .catch((e) => setError(e?.message || 'No se pudo guardar el avance'))
-      .finally(() => setSaving(false))
-  }
+      }
+    }
+  )
 
   // Enviar (Operador): se confirma en el modal y queda pendiente de aprobación.
-  const submitSend = () => {
+  const submitSend = async () => {
     // El tipo de cuchilla define el precio: sin él la remisión no se puede cotizar.
     if ((Number(form.cuchilla_cm) || 0) > 0 && !form.cuchilla_tipo) {
       setConfirming(false)
       setError('Seleccione el tipo de cuchilla (doble bisel o Bohler).')
       return
     }
-    setSaving(true); setError(null); setOkMsg(null)
-    const req = draftId
-      ? updateFormatoCuchillas(draftId, { ...formatoPayload(form), enviar: true })
-      : createFormatoCuchillas({ orden: ordenId, ...formatoPayload(form), enviar: true })
-    req
-      .then(() => {
-        setForm(EMPTY_FORMATO)
-        setConfirming(false)
-        setOkMsg('Formato enviado ✓')
-        onCreated && onCreated()
-      })
-      .catch((e) => {
-        setConfirming(false)
-        setError(e?.message || 'No se pudo enviar el formato')
-      })
-      .finally(() => setSaving(false))
+    setSaving(true); setError(null)
+    try {
+      await flushSave()
+      const req = draftIdRef.current
+        ? updateFormatoCuchillas(draftIdRef.current, { ...formatoPayload(form), enviar: true })
+        : createFormatoCuchillas({ orden: ordenId, ...formatoPayload(form), enviar: true })
+      await req
+      setForm(EMPTY_FORMATO)
+      setConfirming(false)
+      onCreated && onCreated()
+    } catch (e) {
+      setConfirming(false)
+      setError(e?.message || 'No se pudo enviar el formato')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -476,15 +483,6 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
             </select>
           </Field>
         </FieldGroup>
-        <FieldGroup title="Sacabocados">
-          <Field label="Cantidad" w={90}><NumField step={1} placeholder="0" value={form.sac_cantidad} onChange={v => set('sac_cantidad', v)} /></Field>
-          <Field label="Tipo" w={130}>
-            <select className="input" value={form.sac_medida} onChange={e => set('sac_medida', e.target.value)}>
-              <option value="">—</option>
-              {SAC_SIZES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-            </select>
-          </Field>
-        </FieldGroup>
         <FieldGroup title="Perforado">
           <Field label="cm" w={90}><NumField placeholder="0" value={form.perfo_cm} onChange={v => set('perfo_cm', v)} /></Field>
           <Field label="Tamaño" w={100}>
@@ -528,6 +526,33 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
 
       <div>
         <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
+          Sacabocados — tipo(s) usados y cantidad de cada uno
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {form.sacabocados.map((row, idx) => (
+            <div key={idx} style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-end' }}>
+              <Field label={idx === 0 ? 'Tipo' : ''} w={130}>
+                <select className="input" value={row.medida} onChange={e => setSac(idx, 'medida', e.target.value)}>
+                  <option value="">—</option>
+                  {SAC_SIZES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                </select>
+              </Field>
+              <Field label={idx === 0 ? 'Cantidad' : ''} w={90}><NumField step={1} placeholder="0" value={row.cantidad} onChange={v => setSac(idx, 'cantidad', v)} /></Field>
+              <button
+                className="btn sm" onClick={() => removeSac(idx)}
+                disabled={form.sacabocados.length === 1}
+                style={{ marginBottom: 4 }}
+              >
+                Quitar
+              </button>
+            </div>
+          ))}
+          <button className="btn sm" onClick={addSac} style={{ alignSelf: 'flex-start', marginTop: 2 }}>+ Agregar sacabocado</button>
+        </div>
+      </div>
+
+      <div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
           Tiempos
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
@@ -553,26 +578,16 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
       </div>
 
       {error && <div style={{ color: 'var(--danger, #c0392b)', fontSize: 12 }}>{error}</div>}
-      {okMsg && <div style={{ color: 'var(--accent)', fontSize: 12 }}>{okMsg}</div>}
 
-      <div style={{ display: 'flex', gap: 8 }}>
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
         {isEdit ? (
-          <>
-            <button className="btn primary" onClick={submitEdit} disabled={saving}>
-              {saving ? 'Guardando…' : 'Guardar cambios'}
-            </button>
-            {onCancel && <button className="btn" onClick={onCancel} disabled={saving}>Cancelar</button>}
-          </>
+          onCancel && <button className="btn" onClick={onCancel} disabled={saving}>Cancelar</button>
         ) : (
-          <>
-            <button className="btn" onClick={saveDraft} disabled={saving}>
-              {saving ? 'Guardando…' : 'Guardar avance'}
-            </button>
-            <button className="btn primary" onClick={() => { setError(null); setConfirming(true) }} disabled={saving}>
-              {reenvio ? 'Reenviar formato' : 'Enviar formato'}
-            </button>
-          </>
+          <button className="btn primary" onClick={() => { setError(null); setConfirming(true) }} disabled={saving}>
+            {reenvio ? 'Reenviar formato' : 'Enviar formato'}
+          </button>
         )}
+        <SaveStatus status={saveStatus} onRetry={retrySave} />
       </div>
 
       {confirming && (
@@ -624,14 +639,14 @@ export function EstadoFormatoBadge({ estado }) {
   )
 }
 
-export function FormatosCuchillasHistory({ formatos, loading, onEdit, showOrden = false, compact = false, canEdit = () => true }) {
+export function FormatosCuchillasHistory({ formatos, loading, onEdit, showOrden = false, compact = false, canEdit = () => true, onUnlock, canUnlock = () => false, unlockBusyId }) {
   if (loading) return <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Cargando…</div>
   if (!formatos.length) return <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Sin formatos registrados.</div>
 
   // Vista compacta (historial del operador): un resumen por fila, sin todo el formulario.
   if (compact) {
     const chdrs = ['OP #', 'Referencia', 'Cliente', 'Fecha / Hora', 'Estado', 'Operador', 'Cuchilla (cm)']
-    if (onEdit) chdrs.push('')
+    if (onEdit || onUnlock) chdrs.push('')
     return (
       <div className="table-scroll">
         <table style={{ width: '100%', minWidth: 900, borderCollapse: 'collapse' }}>
@@ -646,6 +661,7 @@ export function FormatosCuchillasHistory({ formatos, loading, onEdit, showOrden 
             {formatos.map((f, idx) => {
               const totalCuchilla = (Number(f.cuchilla_cm) || 0) + (Number(f.desperdicio_cm) || 0)
               const editable = !!onEdit && canEdit(f)
+              const unlockable = !editable && !!onUnlock && canUnlock(f)
               const zebra = idx % 2 ? 'var(--surface-2)' : 'var(--surface)'
               return (
                 <tr
@@ -663,9 +679,18 @@ export function FormatosCuchillasHistory({ formatos, loading, onEdit, showOrden 
                   <td style={{ padding: '8px 12px' }}><EstadoFormatoBadge estado={f.estado} /></td>
                   <td style={{ padding: '8px 12px', fontWeight: 600, fontSize: 12 }}>{f.operador_username || '—'}</td>
                   <td style={{ padding: '8px 12px', fontWeight: 700, whiteSpace: 'nowrap' }}>{totalCuchilla > 0 ? fmtNum(totalCuchilla, 2) : '—'}</td>
-                  {onEdit && (
+                  {(onEdit || onUnlock) && (
                     <td style={{ padding: '8px 12px' }}>
                       {editable && <button className="btn sm" onClick={(e) => { e.stopPropagation(); onEdit(f) }}>Editar</button>}
+                      {unlockable && (
+                        <button
+                          className="btn sm"
+                          disabled={unlockBusyId === f.id}
+                          onClick={(e) => { e.stopPropagation(); onUnlock(f) }}
+                        >
+                          {unlockBusyId === f.id ? 'Desbloqueando…' : 'Editar'}
+                        </button>
+                      )}
                     </td>
                   )}
                 </tr>
@@ -720,9 +745,12 @@ export function FormatosCuchillasHistory({ formatos, loading, onEdit, showOrden 
             const caucho = (f.cauchos || []).length
               ? f.cauchos.map(r => `${CAUCHO_TIPO_LABELS[r.tipo] || r.tipo}: ${fmtNum(r.cm, 2)}`).join(' · ')
               : '—'
+            const sac = (f.sacabocados || []).length
+              ? f.sacabocados.map(r => `${SAC_SIZE_LABELS[r.medida] || r.medida}: ${r.cantidad}`).join(' · ')
+              : sacCell(f)
             const chSacGan = [
               medidaCell(f.ch_cm, f.ch_medida, f.ch),
-              sacCell(f),
+              sac,
               medidaCell(f.perfo_cm, f.perfo_medida, ''),
               f.gan,
             ].filter(Boolean).join(' / ') || '—'
@@ -816,60 +844,66 @@ export const TroquelCostos = forwardRef(function TroquelCostos(
 ) {
   const [items, setItems] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
-  const [okMsg, setOkMsg] = useState(false)
-  const [dirty, setDirty] = useState(false)
   const [savingCliente, setSavingCliente] = useState(false)
   const [okClienteMsg, setOkClienteMsg] = useState(false)
-
-  // El padre (p.ej. la revisión) necesita saber si hay costos sin guardar
-  useEffect(() => { onDirtyChange && onDirtyChange(dirty) }, [dirty])
 
   useEffect(() => {
     setLoading(true)
     setError(null)
     getTroquelCostos(ordenId)
-      .then(data => { setItems(data.items || []); setDirty(false) })
+      .then(data => setItems(data.items || []))
       .catch(() => setItems(null))
       .finally(() => setLoading(false))
   }, [ordenId, refreshKey])
 
   const setItem = (idx, k, v) => {
     setItems(list => list.map((it, i) => (i === idx ? { ...it, [k]: v } : it)))
-    setDirty(true)
-    setOkMsg(false)
+    setOkClienteMsg(false)
   }
 
-  const save = () => {
-    setSaving(true); setError(null); setOkMsg(false)
-    return saveTroquelCostos(ordenId, items.map(({ total, ...it }) => it))
-      .then(data => { setItems(data.items || []); setDirty(false); setOkMsg(true); onSaved && onSaved(data); return data })
-      .catch(err => { setError('No se pudieron guardar los costos'); throw err })
-      .finally(() => setSaving(false))
-  }
+  // Solo los campos editables entran al autoguardado — el `total` que devuelve
+  // el servidor se recalcula en cada guardado y no debe disparar un reguardado
+  // fantasma cuando `setItems(data.items)` lo refresca más abajo.
+  const editableSnapshot = items ? items.map(({ key, cantidad, precio }) => ({ key, cantidad, precio })) : null
 
-  useImperativeHandle(ref, () => ({
-    saveIfDirty: () => (dirty ? save() : Promise.resolve()),
-  }), [dirty, items])
+  const { status: saveStatus, retry: retrySave, flush: flushSave } = useAutosave(
+    editableSnapshot,
+    async () => {
+      const data = await saveTroquelCostos(ordenId, items.map(({ total, ...it }) => it))
+      setItems(data.items || [])
+      onSaved && onSaved(data)
+    },
+    { enabled: !loading && !!items }
+  )
+
+  useEffect(() => { onDirtyChange && onDirtyChange(saveStatus === 'saving') }, [saveStatus])
+
+  useImperativeHandle(ref, () => ({ saveIfDirty: flushSave }), [flushSave])
 
   // Guarda los precios unitarios como defaults del cliente y rellena los demás
   // troqueles suyos que estén sin precio. Primero persiste los costos de esta OP
   // para que su valor escrito a mano no se pierda al re-sembrar.
-  const guardarPreciosCliente = () => {
+  const guardarPreciosCliente = async () => {
     if (!clienteId || !items) return
-    const precios = {}
-    for (const it of items) {
-      const precio = Number(it.precio) || 0
-      if (it.price_key && precio > 0) precios[it.price_key] = precio
+    setSavingCliente(true); setError(null); setOkClienteMsg(false)
+    try {
+      await flushSave()
+      const precios = {}
+      for (const it of items) {
+        const precio = Number(it.precio) || 0
+        if (it.price_key && precio > 0) precios[it.price_key] = precio
+      }
+      await saveClientePreciosTroquel(clienteId, precios)
+      const data = await getTroquelCostos(ordenId)
+      setItems(data.items || [])
+      setOkClienteMsg(true)
+      onSaved && onSaved(data)
+    } catch {
+      setError('No se pudieron guardar los precios del cliente')
+    } finally {
+      setSavingCliente(false)
     }
-    setSavingCliente(true); setError(null); setOkMsg(false); setOkClienteMsg(false)
-    saveTroquelCostos(ordenId, items.map(({ total, ...it }) => it))
-      .then(() => saveClientePreciosTroquel(clienteId, precios))
-      .then(() => getTroquelCostos(ordenId))
-      .then(data => { setItems(data.items || []); setDirty(false); setOkClienteMsg(true); onSaved && onSaved(data) })
-      .catch(() => setError('No se pudieron guardar los precios del cliente'))
-      .finally(() => setSavingCliente(false))
   }
 
   if (loading) return <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Calculando…</div>
@@ -925,15 +959,12 @@ export const TroquelCostos = forwardRef(function TroquelCostos(
         </table>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10, padding: '10px 12px', borderTop: '1px solid var(--line)' }}>
-        <button className="btn btn-primary" onClick={save} disabled={saving || savingCliente || !dirty}>
-          {saving ? 'Guardando…' : 'Guardar costos'}
-        </button>
         {clienteId && (
-          <button className="btn" onClick={guardarPreciosCliente} disabled={saving || savingCliente} title="Usa estos precios como predeterminados del cliente y rellena sus otros troqueles sin precio">
+          <button className="btn" onClick={guardarPreciosCliente} disabled={saveStatus === 'saving' || savingCliente} title="Usa estos precios como predeterminados del cliente y rellena sus otros troqueles sin precio">
             {savingCliente ? 'Guardando…' : `Guardar precios para ${clienteNombre || 'este cliente'}`}
           </button>
         )}
-        {okMsg && <span style={{ fontSize: 12, color: 'var(--ok, #2e9e5b)' }}>Costos guardados ✓</span>}
+        <SaveStatus status={saveStatus} onRetry={retrySave} />
         {okClienteMsg && <span style={{ fontSize: 12, color: 'var(--ok, #2e9e5b)' }}>Precios del cliente guardados ✓</span>}
         {error && <span style={{ fontSize: 12, color: 'var(--danger, #c0392b)' }}>{error}</span>}
       </div>
@@ -952,7 +983,7 @@ const EMPTY_TAREA_MODELO = {
 }
 
 export function NuevaTareaTroquelModal({ onClose, onCreated }) {
-  const [op, setOp] = useState({ cliente: '', clienteId: null, referencia: '', cantidad: 0, fechaEntrega: '' })
+  const [op, setOp] = useState({ cliente: '', clienteId: null, referencia: '', cantidad: 0 })
   const [modelo, setModelo] = useState(EMPTY_TAREA_MODELO)
   const [archivo, setArchivo] = useState(null)
   const [preview, setPreview] = useState(null)
@@ -1032,7 +1063,6 @@ export function NuevaTareaTroquelModal({ onClose, onCreated }) {
         }
         orden = await createOrden({
           fecha: new Date().toISOString().slice(0, 10),
-          fecha_entrega: op.fechaEntrega || null,
           cliente: clienteId,
           referencia: op.referencia.trim(),
           cantidad: Number(op.cantidad),
@@ -1164,9 +1194,6 @@ export function NuevaTareaTroquelModal({ onClose, onCreated }) {
             </Field>
             <Field label="Cantidad *" w={100}>
               <input className="input" type="number" min="1" value={op.cantidad || ''} disabled={opLocked} onChange={e => setOp(o => ({ ...o, cantidad: e.target.value }))} />
-            </Field>
-            <Field label="Fecha de entrega" w={150}>
-              <input className="input" type="date" value={op.fechaEntrega} disabled={opLocked} onChange={e => setOp(o => ({ ...o, fechaEntrega: e.target.value }))} />
             </Field>
           </div>
         </div>

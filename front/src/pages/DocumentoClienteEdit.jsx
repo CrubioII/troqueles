@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { Icon } from '../components/Icons'
-import { fmtCOP, fmtNum, CONDICIONES_PAGO } from '../components/core'
+import { fmtCOP, fmtNum, CONDICIONES_PAGO, SaveStatus } from '../components/core'
+import { useAutosave } from '../hooks/useAutosave'
 import {
   getClientes, createCliente,
   getCotizacion, getCotizaciones,
@@ -354,15 +355,12 @@ export default function DocumentoClienteEdit() {
 
   const [d, setData] = useState(buildBlank)
   const [loading, setLoading] = useState(!isNew)
-  const [saving, setSaving] = useState(false)
   const [downloading, setDownloading] = useState(false)
   const [saveError, setSaveError] = useState(null)
-  const [toast, setToast] = useState(null)
   const [showImport, setShowImport] = useState(false)
   const [importTarget, setImportTarget] = useState(null)
   const [showSend, setShowSend] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const toastRef = useRef(null)
 
   const set = (patch) => setData(prev => ({ ...prev, ...patch }))
 
@@ -457,7 +455,6 @@ export default function DocumentoClienteEdit() {
   }
 
   const save = async () => {
-    setSaving(true)
     setSaveError(null)
     try {
       let clienteId = d.clienteId
@@ -476,15 +473,20 @@ export default function DocumentoClienteEdit() {
         result = await updateDocumento(d.id, payload)
       }
       set({ id: result.id, numero: result.numero || d.numero, estado: result.estado || d.estado })
-      clearTimeout(toastRef.current)
-      setToast('Documento guardado')
-      toastRef.current = setTimeout(() => setToast(null), 3000)
     } catch (e) {
       setSaveError(e.message)
-    } finally {
-      setSaving(false)
+      throw e
     }
   }
+
+  const { status: saveStatus, retry: retrySave } = useAutosave(
+    useMemo(() => {
+      const { id, numero, estado, ...dComparable } = d
+      return dComparable
+    }, [d]),
+    () => save(),
+    { delay: 1500, isValid: () => !!d.cliente.trim() }
+  )
 
   const handleDownload = async () => {
     if (!d.id) { setSaveError('Guarda el documento primero'); return }
@@ -740,10 +742,7 @@ export default function DocumentoClienteEdit() {
 
         {/* Actions */}
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-          <button className="btn accent" style={{ flex: '1 1 auto', justifyContent: 'center' }}
-            onClick={save} disabled={saving}>
-            <Icon.Save /> {saving ? 'Guardando…' : 'Guardar'}
-          </button>
+          <SaveStatus status={saveStatus} onRetry={retrySave} style={{ flex: '1 1 auto' }} />
           <button className="btn" style={{ flex: '1 1 auto', justifyContent: 'center' }}
             onClick={handleDownload} disabled={downloading || !d.id}>
             <Icon.Print /> {downloading ? 'Generando…' : 'Descargar PDF'}
@@ -785,17 +784,6 @@ export default function DocumentoClienteEdit() {
           onSend={(email, extras) => enviarDocumento(d.id, email, extras)}
           onClose={() => setShowSend(false)}
         />
-      )}
-
-      {/* Toast */}
-      {toast && (
-        <div className="floating-bar" style={{
-          background: '#1a4a2e', color: '#fff', padding: '10px 22px',
-          borderRadius: 8, fontSize: 13, fontWeight: 500,
-          boxShadow: '0 4px 16px rgba(0,0,0,0.25)', display: 'flex', alignItems: 'center', gap: 8,
-        }}>
-          ✓ {toast}
-        </div>
       )}
     </div>
   )

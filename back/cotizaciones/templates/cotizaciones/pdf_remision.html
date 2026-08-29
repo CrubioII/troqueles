@@ -365,7 +365,41 @@
     {% endif %}
   </div>
   {% endfor %}
+  {% endif %}
 
+  <!-- Producción: cantidad real por estación de la cadena, sin sobrante -->
+  {% for p in procesos %}
+  <div class="troquel">
+    <div class="troquel-head">
+      <div>
+        <span class="troquel-ref">{{ p.referencia|default:"Producción" }}</span>
+        &nbsp;<span class="troquel-op">{{ p.op_numero }}</span>
+      </div>
+    </div>
+    <table class="consumos">
+      <thead>
+        <tr>
+          <th>Proceso</th>
+          <th>Estación</th>
+          <th>Operador</th>
+          <th class="col-cant">Cantidad realizada</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for it in p.items %}
+        <tr>
+          <td>{{ it.proceso_label }}</td>
+          <td class="col-detalle">{{ it.estacion_label }}</td>
+          <td class="col-detalle">{{ it.operador_username|default:"—" }}</td>
+          <td class="col-cant">{{ it.cantidad_realizada }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endfor %}
+
+  {% if troqueles %}
   <div class="total-general">
     <span class="lbl">Total general del desglose</span>
     <span class="val">{{ total_general }}</span>

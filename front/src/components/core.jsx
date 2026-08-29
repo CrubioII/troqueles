@@ -13,6 +13,19 @@ export const fmtNum = (n, d = 0) => {
   return Number(n).toLocaleString('es-CO', { minimumFractionDigits: d, maximumFractionDigits: d })
 }
 
+// ============ Autosave status indicator ============
+export function SaveStatus({ status, onRetry, style }) {
+  const base = { fontSize: 11.5, display: 'inline-flex', alignItems: 'center', gap: 5, ...style }
+  if (status === 'saving') return <span className="muted" style={base}><Icon.Spinner /> Guardando…</span>
+  if (status === 'saved') return <span style={{ ...base, color: '#1a7a3e' }}><Icon.Check /> Guardado</span>
+  if (status === 'error') return (
+    <span style={{ ...base, color: '#c0392b', cursor: 'pointer' }} onClick={onRetry}>
+      Error al guardar — reintentar
+    </span>
+  )
+  return null
+}
+
 // ============ Static catalogs (UI logic, not DB data) ============
 export const PLIEGO_SIZES = [
   { id: '70x100', w: 70, h: 100, label: '70 × 100 cm  (Estándar)' },
@@ -21,6 +34,87 @@ export const PLIEGO_SIZES = [
   { id: 'custom', w: 0,  h: 0,   label: 'Personalizado…' },
 ]
 export const DISENADORES = ['Oscar', 'Camilo', 'Laura', 'Diana']
+
+// ============ Cadena de producción (estaciones de máquina) ============
+// Los ids espejan RegistroProceso.TAMANO_CHOICES del backend.
+export const TAMANOS_REGISTRO = [
+  { id: 'pliego',        label: 'Pliego completo' },
+  { id: 'medio_pliego',  label: '1/2 pliego' },
+  { id: 'cuarto_pliego', label: '1/4 pliego' },
+  { id: 'octavo_pliego', label: '1/8 pliego' },
+  { id: 'carta',         label: 'Carta' },
+  { id: 'media_carta',   label: '1/2 carta' },
+  { id: 'cuarto_carta',  label: '1/4 carta' },
+  { id: 'otro',          label: 'Otro (especificar)' },
+]
+export const TIPOS_LAMINADO_REGISTRO = [
+  { id: 'mate',       label: 'Mate' },
+  { id: 'brillante',  label: 'Brillante' },
+  { id: 'metalizado', label: 'Metalizado' },
+]
+
+// Solo presentación: el ORDEN de la cadena y el bloqueo los decide el backend
+// (back/cotizaciones/chain.py). Aquí solo vive cómo se pinta cada estación, qué
+// campos muestra su formulario y qué procesos cubre — `procesos` sirve para
+// etiquetar, nunca para calcular turnos.
+export const ESTACIONES_CONFIG = {
+  guillotina: {
+    label: 'Guillotina · Corte inicial', ruta: '/produccion/guillotina/inicial',
+    desc: 'Corte previo a la cadena: la OP pasa por acá antes de Impresora. Solo registra cuántas unidades salieron cortadas.',
+    color: '#6B5B95', soft: '#EAE6F2', campos: [],
+    procesos: ['corteInicial'],
+  },
+  impresora: {
+    label: 'Impresora', ruta: '/produccion/impresora',
+    desc: 'Primer proceso: registra lo impreso, el tamaño del papel y las tintas de cada cara.',
+    color: '#B8541C', soft: '#FBE9DA', campos: ['tamano', 'colores'],
+    procesos: ['impresion'],
+  },
+  laminadora: {
+    label: 'Laminadora', ruta: '/produccion/laminadora',
+    desc: 'Segundo proceso: registra lo laminado, el tamaño del papel y el tipo de laminado.',
+    color: '#3A5B8C', soft: '#DEE6F3', campos: ['tamano', 'laminado'],
+    procesos: ['laminado'],
+  },
+  barnizadora: {
+    label: 'Barnizadora', ruta: '/produccion/barnizadora',
+    desc: 'Tercer proceso: registra lo barnizado (UV total, parcial o reserva) y el tamaño del papel.',
+    color: '#7B4A9E', soft: '#EDE3F5', campos: ['tamano'], multiproceso: true,
+    procesos: ['uvTotal', 'uvParcial', 'uvReserva'],
+  },
+  troqueladora: {
+    label: 'Troqueladora', ruta: '/produccion/troqueladora',
+    desc: 'Último proceso: registra la cantidad troquelada que sale de la máquina.',
+    color: '#2E7D5B', soft: '#DCEFE3', campos: [],
+    procesos: ['troquelado'],
+  },
+  guillotina_final: {
+    label: 'Guillotina · Corte final', ruta: '/produccion/guillotina/final',
+    desc: 'Corte de cierre: la OP pasa por acá después de Troqueladora. Solo registra cuántas unidades terminadas salieron.',
+    color: '#6B5B95', soft: '#EAE6F2', campos: [],
+    procesos: ['corteFinal'],
+  },
+  // Config de presentación para la página centralizada de Guillotina (pestaña
+  // "Cadena"), que combina guillotina + guillotina_final en una sola cola.
+  guillotina_central: {
+    label: 'Guillotina', ruta: '/produccion/guillotina',
+    desc: 'Corte inicial, cadena y corte final en un solo lugar.',
+    color: '#6B5B95', soft: '#EAE6F2', campos: [],
+    procesos: [],
+  },
+}
+// Las cuatro estaciones "de máquina" propiamente dichas, en orden de cadena —
+// usado solo para presentación (tarjetas del hub, gráfico de utilización).
+// Guillotina queda fuera a propósito: vive en sus propias tarjetas porque no
+// es un paso intermedio del recorrido, sino la entrada y la salida de la OP.
+export const ESTACIONES_ORDEN = ['impresora', 'laminadora', 'barnizadora', 'troqueladora']
+
+// proceso_id → label de la estación que normalmente lo registra. Se arma de
+// TODO ESTACIONES_CONFIG (no solo ESTACIONES_ORDEN) para que Guillotina
+// también aparezca acá.
+export const ESTACION_DE_PROCESO = Object.fromEntries(
+  Object.keys(ESTACIONES_CONFIG).flatMap(id => ESTACIONES_CONFIG[id].procesos.map(p => [p, ESTACIONES_CONFIG[id].label]))
+)
 
 // ============ Process definitions ============
 export const PROCESS_GROUPS = [

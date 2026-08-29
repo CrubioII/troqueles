@@ -10,7 +10,7 @@ from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from django.core.mail import EmailMessage
 from django.db import connection, transaction
-from django.db.models import F, Max, OuterRef, ProtectedError, Q, Subquery
+from django.db.models import Exists, F, Max, OuterRef, ProtectedError, Q, Subquery
 from django.http import HttpResponse
 from django.template.loader import render_to_string
 from django.conf import settings
@@ -86,7 +86,7 @@ def _fmt_num(n):
 from .models import (
     Cliente, Papel, Cotizacion, DocumentoCliente, OrdenProduccion, OpProceso,
     RegistroMaquina, TroquelModelo, FormatoCuchillas,
-    Remision, RemisionItem,
+    Remision, RemisionItem, RegistroProceso, Notificacion,
 )
 from .models import ORDEN_CAMPOS_AUDITADOS, orden_valor_legible, registrar_cambios_orden
 from .serializers import (
@@ -108,10 +108,15 @@ from .serializers import (
     RemisionGeneradaOperadorSerializer,
     RemisionSerializer,
     RemisionListSerializer,
+    RegistroProcesoSerializer,
+    NotificacionSerializer,
+    OrdenEstacionSerializer,
 )
 from .serializers import (
     _orden_progreso, _orden_valor_total_efectivo, _orden_valor_unitario_efectivo,
+    _cantidad_esperada,
 )
+from . import chain
 
 
 def _require_admin(request):
@@ -121,6 +126,7 @@ def _require_admin(request):
 
 CAUCHO_LABELS = dict(FormatoCuchillas.CAUCHO_TIPO_CHOICES)
 CUCHILLA_TIPO_LABELS = dict(FormatoCuchillas.CUCHILLA_TIPO_CHOICES)
+SAC_MEDIDA_LABELS = dict(FormatoCuchillas.SAC_MEDIDA_CHOICES)
 
 
 def _build_costos_seed(formato, precios=None):
@@ -173,7 +179,15 @@ def _build_costos_seed(formato, precios=None):
         add("grafa", "Grafa", " · ".join(partes), "cm", formato.grafa_cm)
     if float(formato.ch_cm or 0) > 0:
         add("ch", "CH", formato.ch_medida, "cm", formato.ch_cm)
-    if float(formato.sac_cm or 0) > 0:  # legacy: sacabocados en cm
+    sacabocados = formato.sacabocados or []
+    if sacabocados:
+        for idx, fila in enumerate(sacabocados):
+            medida = fila.get("medida") or ""
+            cantidad = float(fila.get("cantidad") or 0)
+            if cantidad > 0:
+                add(f"sacabocados-{idx}", "Sacabocados", SAC_MEDIDA_LABELS.get(medida, medida), "und", cantidad,
+                    price_key=f"sacabocados:{medida}" if medida else "sacabocados")
+    elif float(formato.sac_cm or 0) > 0:  # legacy: sacabocados en cm
         add("sacabocados", "Sacabocados", formato.sac_medida, "cm", formato.sac_cm)
     elif formato.sac_medida or float(formato.sac_cantidad or 0) > 0:
         add("sacabocados", "Sacabocados", formato.get_sac_medida_display(), "und", formato.sac_cantidad)
@@ -193,9 +207,14 @@ def _sync_troquel_costos(op):
     modelo, _ = TroquelModelo.objects.get_or_create(orden=op)
     prev = {item.get("key"): item for item in (modelo.costos_items or [])}
     prev_caucho_precio = {}
+    prev_sac_precio = {}
     for item in (modelo.costos_items or []):
         if str(item.get("key", "")).startswith("caucho-") and float(item.get("precio") or 0) > 0:
             prev_caucho_precio.setdefault(item.get("concepto"), item.get("precio"))
+        if str(item.get("key", "")).startswith("sacabocados-") and float(item.get("precio") or 0) > 0:
+            # A diferencia del caucho, el concepto de sacabocados es genérico ("Sacabocados")
+            # para toda medida — hay que distinguir por price_key (que sí lleva la medida).
+            prev_sac_precio.setdefault(item.get("price_key"), item.get("precio"))
     # Precios por defecto del cliente (rellenan las líneas que el Admin no fijó).
     precios = (op.cliente.precios_troquel or {}) if op.cliente_id else {}
     seed = _build_costos_seed(formato, precios)
@@ -214,6 +233,9 @@ def _sync_troquel_costos(op):
         # Precio previo del mismo tipo de caucho; si no hay, conserva el default del cliente.
         if line["key"].startswith("caucho-") and not float(line["precio"] or 0):
             line["precio"] = prev_caucho_precio.get(line["concepto"]) or line["precio"]
+        # Precio previo de la misma medida de sacabocados; si no hay, conserva el default del cliente.
+        if line["key"].startswith("sacabocados-") and not float(line["precio"] or 0):
+            line["precio"] = prev_sac_precio.get(line["concepto"]) or line["precio"]
     modelo.costos_items = seed
     modelo.save(update_fields=["costos_items", "modificado"])
     _aplicar_costo_troquel(op, _costos_items_total(seed))
@@ -282,7 +304,7 @@ def _reabrir_troquel(formato, motivo="", revisor=None):
     formato.save(update_fields=["estado", "devolucion_motivo", "revisado_por", "revisado_en"])
     if formato.orden_id:
         formato.orden.procesos.filter(proceso_id="troquel").update(
-            completado=False, completado_en=None, visible_operador=True
+            completado=False, completado_en=None
         )
 
 
@@ -360,17 +382,6 @@ def _sync_remision_item_troquel(op, total):
         RemisionItem.objects.filter(pk=items[0].pk).update(valor_total=total)
 
 
-def _troquel_visible_operador(formato, visible):
-    """Marca/desmarca la visibilidad del proceso troquel en la cola del Operador.
-
-    Al enviar el formato a revisión se oculta (visible=False) para que la OP salga
-    sola de la cola; al devolver/cancelar reaparece (visible=True). No toca la
-    prioridad, para conservar el orden si la OP regresa a la cola.
-    """
-    if formato.orden_id:
-        formato.orden.procesos.filter(proceso_id="troquel").update(visible_operador=visible)
-
-
 def _seed_remision_item(rem, op):
     """Ítem inicial de la remisión derivado de la OP (referencia + valor total de
     venta, o el total de costos de troquel si la OP tiene ese proceso activo).
@@ -406,6 +417,7 @@ def _crear_remision(op):
             direccion=op.cliente.direccion,
             ciudad=op.cliente.ciudad,
             observaciones=op.observaciones,
+            tiene_troquel=op.procesos.filter(proceso_id="troquel", active=True).exists(),
         )
         _seed_remision_item(rem, op)
     return rem
@@ -452,6 +464,7 @@ def _remision_pdf_ctx(rem, admin=False):
     det = _remision_operador_pdf_ctx(rem, admin=True)
     ctx["troqueles"] = det["troqueles"]
     ctx["total_general"] = det["total_general"]
+    ctx["procesos"] = det["procesos"]
     if admin:
         modelo = TroquelModelo.objects.filter(orden=rem.orden).first() if rem.orden_id else None
         costos = list(modelo.costos_items) if modelo else []
@@ -550,6 +563,38 @@ def _sin_desperdicio(detalle):
     return _DESPERDICIO_RE.sub("", detalle or "").strip(" ·")
 
 
+def _remision_procesos_ctx(op):
+    """Bloque de resultados reales por estación de esta OP: solo la cantidad
+    que salió de cada máquina, sin cantidad_esperada ni sobrante — es
+    exclusivo para la remisión de producción completa (no toca costos ni el
+    desglose de troquel, que sigue viniendo de FormatoCuchillas)."""
+    proceso_ids = list(
+        op.procesos.filter(proceso_id__in=chain.CHAIN_PROCESOS, active=True)
+        .values_list("proceso_id", flat=True)
+    )
+    items = []
+    for proceso_id in proceso_ids:
+        registro = op.registros_proceso.filter(proceso_id=proceso_id).order_by("-fecha_hora").first()
+        if not registro:
+            continue
+        estacion = chain.PROCESO_A_ESTACION.get(proceso_id)
+        items.append({
+            "proceso_label": chain.PROCESO_LABELS.get(proceso_id, proceso_id),
+            "estacion_label": estacion["label"] if estacion else "",
+            "cantidad_realizada": _fmt_num(registro.cantidad_realizada),
+            "operador_username": registro.operador.username if registro.operador_id else "",
+            "fecha_hora": registro.fecha_hora,
+        })
+    if not items:
+        return None
+    return {
+        "op_id": op.id,
+        "op_numero": op.numero,
+        "referencia": op.referencia,
+        "items": items,
+    }
+
+
 def _remision_operador_pdf_ctx(rem, admin=False, con_desperdicio=False):
     """Contexto del PDF de remisión: consumo en cm por troquel + cantidad
     entregada. Por defecto (admin=False) nunca lleva precios: los valores
@@ -606,9 +651,12 @@ def _remision_operador_pdf_ctx(rem, admin=False, con_desperdicio=False):
             total_general += troquel_total
         troqueles.append(troquel)
 
+    procesos = [p for p in (_remision_procesos_ctx(op) for op in _remision_operador_ops(rem)) if p]
+
     ctx = {
         "rem": rem,
         "troqueles": troqueles,
+        "procesos": procesos,
         "logo_uri": _logo_data_uri(),
     }
     if admin:
@@ -1152,9 +1200,38 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
-        if self.action in ("toggle_proceso_completado", "list", "retrieve", "produccion", "buscar", "produccion_pendientes", "enviar_remision", "remision_pdf", "cancelar_remision", "remisionables_operador", "consolidar_remision_operador", "remision_operador_pdf", "remisiones_generadas_operador", "devolver_remision_operador", "editar_campos"):
+        # list/retrieve: lectura para el Operador (Producción General le muestra
+        # progreso de solo lectura); los campos monetarios se ocultan en el
+        # serializer para quien no sea staff. Escritura sigue admin-only.
+        # create/update: el Operador levanta sus propias OPs directas (una OP
+        # nueva o una tarea de troquel). El serializer le quita la plata al
+        # leer y la ignora al escribir; `_solo_op_directa` le cierra las OPs
+        # que nacieron de una cotización, que son del Admin.
+        if self.action in ("list", "retrieve", "produccion", "buscar", "produccion_pendientes", "enviar_remision", "remision_pdf", "cancelar_remision", "remisionables_operador", "consolidar_remision_operador", "remision_operador_pdf", "remisiones_generadas_operador", "devolver_remision_operador", "editar_campos", "set_proceso_prioridades", "set_estacion_prioridades", "create", "update", "partial_update", "next_numero"):
             return
         _require_admin(request)
+
+    def _solo_op_directa(self, request):
+        """Le cierra al Operador las OPs derivadas de una cotización.
+
+        En esas, lo único editable es la liquidación (OP_LOCKED_WHITELIST), que
+        es justo lo que él no puede tocar: mejor un 403 claro que un PATCH que
+        no cambia nada.
+        """
+        if request.user.is_staff:
+            return
+        if self.get_object().cotizacion_id is not None:
+            raise PermissionDenied(
+                "Esta OP viene de una cotización: solo el administrador puede editarla."
+            )
+
+    def update(self, request, *args, **kwargs):
+        self._solo_op_directa(request)
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        self._solo_op_directa(request)
+        return super().partial_update(request, *args, **kwargs)
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -1273,7 +1350,21 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["patch"], url_path=r"procesos/(?P<proceso_id>[^/.]+)/completado")
     def toggle_proceso_completado(self, request, pk=None, proceso_id=None):
-        """PATCH /api/ordenes/{id}/procesos/{proceso_id}/completado/ — Body: { completado: bool }."""
+        """PATCH /api/ordenes/{id}/procesos/{proceso_id}/completado/ — Body: { completado: bool }.
+
+        Solo para ítems de servicio sin máquina ni formato propios (diseño,
+        muestra, envío, etc.): los procesos de la cadena y troquel solo se
+        completan con un registro real (RegistroProceso / FormatoCuchillas
+        aprobado), nunca con este toggle manual.
+        """
+        if proceso_id in chain.CHAIN_PROCESOS or proceso_id == "troquel":
+            return Response(
+                {
+                    "code": "requiere_registro_real",
+                    "error": "Este proceso solo se completa con un registro real en su estación.",
+                },
+                status=409,
+            )
         op = self.get_object()
         try:
             proceso = op.procesos.get(proceso_id=proceso_id)
@@ -1284,69 +1375,60 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         proceso.completado_en = timezone.now() if completado else None
         proceso.save(update_fields=["completado", "completado_en"])
         if completado:
-            if proceso_id == "troquel":
-                # Completar troquel manualmente equivale a aprobar los formatos en cola.
-                # Los borradores no se aprueban: el operador retiró ese envío a propósito.
-                op.formatos_cuchillas.filter(estado="pendiente").update(
-                    estado="aprobado", revisado_por=request.user, revisado_en=timezone.now()
-                )
             # OP fresca: el prefetch de procesos quedó desactualizado tras el save.
             _maybe_crear_remision(OrdenProduccion.objects.get(pk=op.pk))
-        return Response(OpProcesoSerializer(proceso).data)
-
-    @action(detail=True, methods=["patch"], url_path=r"procesos/(?P<proceso_id>[^/.]+)/visible_operador")
-    def toggle_proceso_visible_operador(self, request, pk=None, proceso_id=None):
-        """PATCH /api/ordenes/{id}/procesos/{proceso_id}/visible_operador/ — Body: { visible_operador: bool }.
-
-        El Admin decide qué OPs de este proceso aparecen en la pantalla del Operador.
-        """
-        op = self.get_object()
-        try:
-            proceso = op.procesos.get(proceso_id=proceso_id)
-        except OpProceso.DoesNotExist:
-            return Response({"error": "Proceso no encontrado en esta OP."}, status=404)
-        visible = bool(request.data.get("visible_operador"))
-        proceso.visible_operador = visible
-        # La prioridad acompaña a la selección: al marcar entra al final de la cola,
-        # al desmarcar se libera para no dejar huecos numéricos al reordenar.
-        if visible:
-            if proceso.prioridad is None:
-                ultima = OpProceso.objects.filter(
-                    proceso_id=proceso_id, visible_operador=True
-                ).aggregate(m=Max("prioridad"))["m"]
-                proceso.prioridad = (ultima or 0) + 1
-        else:
-            proceso.prioridad = None
-        proceso.save(update_fields=["visible_operador", "prioridad"])
         return Response(OpProcesoSerializer(proceso).data)
 
     @action(detail=False, methods=["post"], url_path=r"procesos/(?P<proceso_id>[^/.]+)/prioridades")
     def set_proceso_prioridades(self, request, proceso_id=None):
         """POST /api/ordenes/procesos/{proceso_id}/prioridades/ — Body: { orden_ids: [id, ...] }.
 
-        Reordena la cola del Operador: la posición en la lista es la prioridad
-        (1 = primero). Solo se numeran las OPs visibles que llegan en la lista.
+        Reordena la cola arrastrando: la posición en la lista es la prioridad
+        (1 = primero). Solo se numeran las OPs que llegan en la lista.
+        """
+        return self._guardar_prioridades(request, [proceso_id], f"proceso '{proceso_id}'")
+
+    @action(detail=False, methods=["post"], url_path=r"estaciones/(?P<estacion_id>[^/.]+)/prioridades")
+    def set_estacion_prioridades(self, request, estacion_id=None):
+        """POST /api/ordenes/estaciones/{estacion_id}/prioridades/ — Body: { orden_ids: [id, ...] }.
+
+        Igual que la de un proceso suelto, pero para la cola de una estación de
+        la cadena: numera TODOS los procesos que esa estación cubre (Barnizadora
+        puede tener uvTotal + uvParcial en la misma OP), porque la cola se
+        ordena por el menor de ellos.
+        """
+        if estacion_id not in chain.ESTACION_POR_ID:
+            return Response({"error": "Estación desconocida."}, status=400)
+        est = chain.ESTACION_POR_ID[estacion_id]
+        return self._guardar_prioridades(
+            request, est["procesos"], f"procesos de {est['label']}"
+        )
+
+    def _guardar_prioridades(self, request, proceso_ids, que):
+        """Numera 1..N la prioridad de `proceso_ids` según el orden de orden_ids.
+
+        Sin _require_admin a propósito: la cola la prioriza quien la trabaja
+        (Admin u Operador), arrastrando las filas en su pantalla.
         """
         orden_ids = request.data.get("orden_ids")
         if not isinstance(orden_ids, list):
             return Response({"error": "Se espera 'orden_ids' como lista."}, status=400)
 
-        procesos = {
-            p.orden_id: p
-            for p in OpProceso.objects.filter(proceso_id=proceso_id, orden_id__in=orden_ids)
-        }
+        procesos = {}
+        for p in OpProceso.objects.filter(
+            proceso_id__in=proceso_ids, orden_id__in=orden_ids
+        ):
+            procesos.setdefault(p.orden_id, []).append(p)
         faltantes = [i for i in orden_ids if i not in procesos]
         if faltantes:
-            return Response(
-                {"error": f"OPs sin proceso '{proceso_id}': {faltantes}"}, status=400
-            )
+            return Response({"error": f"OPs sin {que}: {faltantes}"}, status=400)
 
         with transaction.atomic():
             actualizados = []
             for pos, orden_id in enumerate(orden_ids, start=1):
-                proceso = procesos[orden_id]
-                proceso.prioridad = pos
-                actualizados.append(proceso)
+                for proceso in procesos[orden_id]:
+                    proceso.prioridad = pos
+                    actualizados.append(proceso)
             OpProceso.objects.bulk_update(actualizados, ["prioridad"])
         return Response({"ok": True, "total": len(actualizados)})
 
@@ -1445,7 +1527,50 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         Vista sanitizada: sin valores monetarios (el cliente sí es visible).
         """
         proceso_id = (request.query_params.get("proceso") or "").strip()
+        estacion_id = (request.query_params.get("estacion") or "").strip()
         qs = OrdenProduccion.objects.select_related("cliente").prefetch_related("procesos")
+
+        if estacion_id:
+            # Cola de una estación de la cadena (impresora → … → troqueladora).
+            # A diferencia de `?proceso=`, aquí la visibilidad NO la marca el
+            # Admin: la OP entra sola cuando le llega el turno.
+            if estacion_id not in chain.ESTACION_POR_ID:
+                return Response({"error": "Estación desconocida."}, status=400)
+            est = chain.ESTACION_POR_ID[estacion_id]
+            bloqueantes = OpProceso.objects.filter(
+                orden=OuterRef("pk"), active=True, completado=False,
+                proceso_id__in=chain.procesos_anteriores(estacion_id),
+            )
+            qs = (
+                qs.prefetch_related("registros_proceso")
+                .filter(
+                    procesos__proceso_id__in=est["procesos"],
+                    procesos__active=True,
+                    procesos__completado=False,
+                )
+                .distinct()
+                # Bloqueo duro: mientras quede un proceso activo pendiente de una
+                # estación anterior, la OP no aparece en esta cola.
+                .exclude(Exists(bloqueantes))
+                .annotate(
+                    prioridad_estacion=Subquery(
+                        OpProceso.objects.filter(
+                            orden=OuterRef("pk"), proceso_id__in=est["procesos"]
+                        ).order_by(F("prioridad").asc(nulls_last=True)).values("prioridad")[:1]
+                    )
+                )
+                .order_by(
+                    F("prioridad_estacion").asc(nulls_last=True),
+                    F("fecha_entrega").asc(nulls_last=True),
+                    "creado",
+                )
+            )
+            return Response(
+                OrdenEstacionSerializer(
+                    qs, many=True, context={"request": request, "estacion": estacion_id}
+                ).data
+            )
+
         if proceso_id:
             # Todas estas condiciones van en un solo filter() para que apliquen a
             # la MISMA fila de proceso (no a filas distintas de la misma OP).
@@ -1454,9 +1579,6 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
                 "procesos__active": True,
                 "procesos__completado": False,
             }
-            if proceso_id == "troquel":
-                # Solo las OPs que el Admin marcó como visibles llegan al Operador.
-                proc_cond["procesos__visible_operador"] = True
             qs = qs.filter(**proc_cond).distinct()
             if proceso_id == "troquel":
                 # OPs con formato esperando aprobación del Admin no están
@@ -1975,6 +2097,7 @@ class RemisionViewSet(viewsets.ModelViewSet):
         return Response({
             "troqueles": det["troqueles"],
             "total_general": det["total_general"],
+            "procesos": det["procesos"],
         })
 
     @action(detail=True, methods=["post"], url_path="liquidar")
@@ -2059,7 +2182,13 @@ class RemisionViewSet(viewsets.ModelViewSet):
 
 
 class TroquelModeloViewSet(viewsets.ModelViewSet):
-    """Modelo del troquel asociado a una OP. CRUD solo Admin (subida de archivo)."""
+    """Modelo del troquel asociado a una OP.
+
+    Admin-only salvo `create`: el Operador adjunta el modelo cuando levanta una
+    tarea de troquel nueva (mismo modal que el Admin). Consultarlo, editarlo o
+    borrarlo sigue siendo del Admin — el Operador lo ve sanitizado dentro de su
+    propia OP (TroquelModeloOperadorSerializer).
+    """
 
     queryset = TroquelModelo.objects.select_related("orden")
     serializer_class = TroquelModeloSerializer
@@ -2067,7 +2196,8 @@ class TroquelModeloViewSet(viewsets.ModelViewSet):
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
-        _require_admin(request)
+        if self.action != "create":
+            _require_admin(request)
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -2139,20 +2269,20 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
         if formato.estado in ("borrador", "devuelto") or not formato.orden_id:
             return
         _registrar_formato_cuchillas(formato)
-        _troquel_visible_operador(formato, False)
         _sync_troquel_costos(formato.orden)
 
     def _check_update_permission(self, request):
-        # Operador solo puede editar sus propios formatos no aprobados
-        # (pendiente, devuelto o borrador). El estado solo cambia a pendiente
-        # cuando el body trae enviar=true; si no, se conserva.
+        # Cualquier operador puede editar el formato de otro operador (no solo
+        # el que lo registró): perform_update reasigna `operador` al último que
+        # guardó, que es la trazabilidad de quién lo dejó así. Solo se
+        # restringe por estado: no aprobados (pendiente, devuelto o borrador).
+        # El estado solo cambia a pendiente cuando el body trae enviar=true;
+        # si no, se conserva.
         if request.user.is_staff:
             return
         formato = self.get_object()
         if formato.estado not in ("pendiente", "devuelto", "borrador"):
             raise PermissionDenied("Solo administradores pueden realizar esta acción.")
-        if formato.operador_id != request.user.id:
-            raise PermissionDenied("Solo el operador que registró el formato puede editarlo.")
 
     def perform_update(self, serializer):
         if self.request.user.is_staff:
@@ -2175,15 +2305,14 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="cancelar_envio")
     def cancelar_envio(self, request, pk=None):
-        """POST /api/formatos-cuchillas/{id}/cancelar_envio/ — el Operador dueño
-        retira el formato que acaba de enviar para volver a editarlo (→ borrador).
+        """POST /api/formatos-cuchillas/{id}/cancelar_envio/ — cualquier Operador
+        retira un formato enviado (por cualquier operador) para volver a editarlo
+        (→ borrador).
 
         Deshace el cierre del troquel: borra la remisión que se creó al enviarlo
         y devuelve la OP a su cola. Si el Admin ya la liquidó, 409.
         """
         formato = self.get_object()
-        if not request.user.is_staff and formato.operador_id != request.user.id:
-            raise PermissionDenied("Solo el operador que envió el formato puede cancelarlo.")
         if formato.estado in ("borrador", "devuelto"):
             return Response({"error": "Este formato no está enviado."}, status=409)
         if formato.orden_id:
@@ -2191,7 +2320,7 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
             if error:
                 return Response({"error": error}, status=409)
             formato.orden.procesos.filter(proceso_id="troquel").update(
-                completado=False, completado_en=None, visible_operador=True
+                completado=False, completado_en=None
             )
         formato.estado = "borrador"
         formato.devolucion_motivo = ""
@@ -2225,3 +2354,228 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
             **self.get_serializer(formato).data,
             "remision_eliminada_id": rem_id,
         })
+
+
+class RegistroProcesoViewSet(viewsets.ModelViewSet):
+    """Registros de las máquinas de la cadena (impresora → … → troqueladora).
+
+    Listar/crear: cualquier autenticado (Operador). Editar/eliminar: admin.
+    Crear un registro cierra el OpProceso correspondiente y la OP pasa sola a la
+    cola de la estación siguiente.
+    """
+
+    queryset = RegistroProceso.objects.select_related("orden", "orden__cliente", "operador")
+    serializer_class = RegistroProcesoSerializer
+    filter_backends = [filters.OrderingFilter]
+    ordering_fields = ["fecha_hora"]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        orden_id = self.request.query_params.get("orden")
+        if orden_id:
+            qs = qs.filter(orden_id=orden_id)
+        estacion = self.request.query_params.get("estacion")
+        if estacion:
+            qs = qs.filter(estacion=estacion)
+        if self.request.query_params.get("mias"):
+            qs = qs.filter(operador=self.request.user)
+        return qs
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        datos = serializer.validated_data
+        op = datos["orden"]
+        estacion_id = datos["estacion"]
+        proceso_id = datos["proceso_id"]
+
+        est = chain.ESTACION_POR_ID.get(estacion_id)
+        if est is None or proceso_id not in est["procesos"]:
+            return Response(
+                {"error": f"El proceso '{proceso_id}' no pertenece a esta estación."},
+                status=400,
+            )
+
+        proceso = op.procesos.filter(proceso_id=proceso_id, active=True, completado=False).first()
+        if proceso is None:
+            return Response(
+                {
+                    "code": "proceso_no_activo",
+                    "error": "Este proceso no está activo o ya fue registrado en esta OP.",
+                },
+                status=409,
+            )
+
+        # Bloqueo duro: primero impresora, después laminadora, barnizadora y
+        # troquelado. Solo cuentan los procesos que la OP sí tiene activos.
+        falta = chain.bloqueado_por(op, estacion_id)
+        if falta:
+            return Response(
+                {
+                    "code": "fuera_de_orden",
+                    "error": f"Falta completar {falta} antes de registrar en {est['label']}.",
+                },
+                status=409,
+            )
+
+        if estacion_id == "troqueladora" and getattr(op, "troquel_modelo", None) is None:
+            return Response(
+                {
+                    "code": "troquel_no_registrado",
+                    "error": "Esta OP no tiene el troquel registrado. Pide al Admin que lo cargue antes de continuar.",
+                },
+                status=409,
+            )
+
+        esperada = _cantidad_esperada(op)
+        requerida = int(op.cantidad or 0)
+        margen = int(op.sobrante or 0)
+        realizada = int(datos.get("cantidad_realizada") or 0)
+        # El sobrante es el margen de error que la empresa ya está asumiendo:
+        # un faltante dentro de ese margen no bloquea el registro ni avisa al
+        # Admin, solo lo que quede por debajo de (requerida - margen).
+        faltante = realizada < (requerida - margen)
+        if faltante and not request.data.get("confirmar_faltante"):
+            # El servidor es la autoridad: sin confirmación explícita no se
+            # registra, para que el aviso al Admin no se pueda saltar.
+            return Response(
+                {
+                    "code": "cantidad_faltante",
+                    "error": "La cantidad registrada es menor a la requerida.",
+                    "cantidad_esperada": esperada,
+                    "cantidad_requerida": requerida,
+                    "cantidad_realizada": realizada,
+                },
+                status=409,
+            )
+
+        with transaction.atomic():
+            registro = serializer.save(
+                operador=request.user, cantidad_esperada=esperada, faltante=faltante,
+            )
+            op.procesos.filter(proceso_id=proceso_id).update(
+                completado=True, completado_en=timezone.now()
+            )
+            if faltante:
+                Notificacion.objects.create(
+                    tipo="cantidad_faltante",
+                    titulo=f"Faltan unidades · {op.cliente.nombre if op.cliente else 'Sin cliente'}",
+                    mensaje=(
+                        f"{est['label']}: se registraron {realizada:,} de {requerida:,} "
+                        f"requeridas en la {op.numero}"
+                        + (f" ({op.referencia})." if op.referencia else ".")
+                    ).replace(",", "."),
+                    orden=op,
+                    registro=registro,
+                    creada_por=request.user,
+                )
+
+        # El prefetch de procesos quedó obsoleto tras el update(): sin refetch,
+        # el progreso se calcularía con el estado anterior.
+        op_fresca = OrdenProduccion.objects.get(pk=op.pk)
+        _maybe_crear_remision(op_fresca)
+
+        siguiente = chain.siguiente_estacion(op_fresca)
+        return Response(
+            {
+                **self.get_serializer(registro).data,
+                "siguiente_estacion": (
+                    {"id": siguiente["id"], "label": siguiente["label"]} if siguiente else None
+                ),
+                "estacion_terminada": not chain.procesos_pendientes_de(op_fresca, estacion_id),
+                "progreso": _orden_progreso(op_fresca),
+            },
+            status=201,
+        )
+
+    @action(detail=True, methods=["post"], url_path="anular")
+    def anular(self, request, pk=None):
+        """POST /api/registros-proceso/{id}/anular/ — deshace un registro.
+
+        Bajo bloqueo duro un error de tecleo dejaría la OP atascada en la
+        estación siguiente, así que el Operador puede deshacer lo suyo mientras
+        ninguna estación posterior haya registrado ya sobre esta OP.
+        """
+        registro = self.get_object()
+        op = registro.orden
+        es_admin = request.user.is_staff
+        if not es_admin and registro.operador_id != request.user.id:
+            return Response({"error": "Solo puedes anular tus propios registros."}, status=403)
+
+        orden_estacion = chain.ESTACION_POR_ID[registro.estacion]["orden"]
+        hay_posterior = any(
+            chain.ESTACION_POR_ID[r.estacion]["orden"] > orden_estacion
+            for r in op.registros_proceso.all()
+            if r.estacion in chain.ESTACION_POR_ID
+        )
+        if hay_posterior and not es_admin:
+            return Response(
+                {"error": "Ya se registró una estación posterior; pide al administrador que lo corrija."},
+                status=409,
+            )
+
+        with transaction.atomic():
+            error = _borrar_remision_de_op(op)
+            if error:
+                return Response({"error": error}, status=409)
+            op.procesos.filter(proceso_id=registro.proceso_id).update(
+                completado=False, completado_en=None
+            )
+            Notificacion.objects.filter(registro=registro).delete()
+            registro.delete()
+        return Response({"ok": True})
+
+    def update(self, request, *args, **kwargs):
+        _require_admin(request)
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        _require_admin(request)
+        return super().partial_update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        _require_admin(request)
+        return super().destroy(request, *args, **kwargs)
+
+
+class NotificacionViewSet(viewsets.ReadOnlyModelViewSet):
+    """Avisos para el Admin (por ahora, faltantes de cantidad en producción).
+
+    Admin-only en todas sus acciones: al Operador no le corresponde ver el
+    tablero de alertas.
+    """
+
+    queryset = Notificacion.objects.select_related("orden", "creada_por")
+    serializer_class = NotificacionSerializer
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        _require_admin(request)
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if self.request.query_params.get("no_leidas"):
+            qs = qs.filter(leida_en__isnull=True)
+        return qs
+
+    @action(detail=True, methods=["post"], url_path="leer")
+    def leer(self, request, pk=None):
+        noti = self.get_object()
+        if noti.leida_en is None:
+            noti.leida_en = timezone.now()
+            noti.leida_por = request.user
+            noti.save(update_fields=["leida_en", "leida_por"])
+        return Response(self.get_serializer(noti).data)
+
+    @action(detail=False, methods=["post"], url_path="marcar_todas_leidas")
+    def marcar_todas_leidas(self, request):
+        n = Notificacion.objects.filter(leida_en__isnull=True).update(
+            leida_en=timezone.now(), leida_por=request.user
+        )
+        return Response({"ok": True, "total": n})
+
+    @action(detail=False, methods=["get"], url_path="resumen")
+    def resumen(self, request):
+        return Response(
+            {"no_leidas": Notificacion.objects.filter(leida_en__isnull=True).count()}
+        )

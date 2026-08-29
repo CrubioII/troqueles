@@ -4,7 +4,7 @@ from .views import (
     ClienteViewSet, PapelViewSet, CotizacionViewSet, DocumentoClienteViewSet,
     OrdenProduccionViewSet, RegistroMaquinaViewSet,
     TroquelModeloViewSet, FormatoCuchillasViewSet,
-    RemisionViewSet,
+    RemisionViewSet, RegistroProcesoViewSet, NotificacionViewSet,
 )
 from .dashboard_views import DashboardStatsView
 from .sync_views import SyncView
@@ -19,6 +19,8 @@ router.register("remisiones", RemisionViewSet, basename="remision")
 router.register("registros-maquina", RegistroMaquinaViewSet, basename="registro-maquina")
 router.register("troquel-modelos", TroquelModeloViewSet, basename="troquel-modelo")
 router.register("formatos-cuchillas", FormatoCuchillasViewSet, basename="formato-cuchillas")
+router.register("registros-proceso", RegistroProcesoViewSet, basename="registro-proceso")
+router.register("notificaciones", NotificacionViewSet, basename="notificacion")
 
 urlpatterns = [
     path("dashboard/stats/", DashboardStatsView.as_view(), name="dashboard-stats"),

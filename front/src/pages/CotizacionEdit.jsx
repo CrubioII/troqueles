@@ -1,9 +1,10 @@
-import { useState, useMemo, useEffect, useRef } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Icon } from '../components/Icons'
 import { fmtCOP, fmtNum, CONDICIONES_PAGO, Section } from '../components/core'
 import { SectionGenerales, SectionPapel, SectionProcesos, SectionCondiciones, SectionAcciones } from '../components/sections'
 import LiquidationPanel from '../components/LiquidationPanel'
+import { useAutosave } from '../hooks/useAutosave'
 import { getCotizacion, getPapeles, createCotizacion, updateCotizacion, cambiarEstado, createCliente, updateCliente, deleteCotizacion, crearOpDesdeCotizacion } from '../api'
 import { useAuth } from '../context/AuthContext'
 import { buildDefaultProcesos, buildBlankState, docToState, stateToDoc, seedProcesosFromApi, computeCalc } from '../lib/opQuoteShared'
@@ -24,12 +25,11 @@ export default function CotizacionEdit() {
   const [papelCatalog, setPapelCatalog] = useState([])
   const [open, setOpen] = useState({ s1: true, s2: true, s3: true, s5: true, s6: true })
   const [loading, setLoading] = useState(!isNew)
-  const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState(null)
-  const [toast, setToast] = useState(null)
+  const [sending, setSending] = useState(false)
   const [creatingOp, setCreatingOp] = useState(false)
   const [ordenId, setOrdenId] = useState(null)
-  const toastRef = useRef(null)
+  const [empezandoNueva, setEmpezandoNueva] = useState(false)
 
   const set = (patch) => setData(prev => ({ ...prev, ...patch }))
   const setProc = (pid, patch) => setProcesos(prev => ({ ...prev, [pid]: { ...prev[pid], ...patch } }))
@@ -69,10 +69,10 @@ export default function CotizacionEdit() {
 
   // ============ Calculations ============
   const calc = useMemo(() => computeCalc(d, procesos), [d, procesos])
+  const isConvertida = (originalEstado || d.estado) === 'convertida'
 
   // ============ Save handlers ============
   const save = async (estadoOverride = null) => {
-    setSaving(true)
     setSaveError(null)
     try {
       let clienteId = d.clienteId
@@ -120,20 +120,66 @@ export default function CotizacionEdit() {
         estado: result.estado || prev.estado,
       }))
       setOriginalEstado(result.estado || 'borrador')
-      clearTimeout(toastRef.current)
-      setToast('Cotización guardada correctamente')
-      toastRef.current = setTimeout(() => setToast(null), 3000)
       return result.id
     } catch (e) {
       setSaveError(e.message)
-    } finally {
-      setSaving(false)
+      throw e
     }
   }
+
+  const { status: saveStatus, retry: retrySave, flush: flushSave } = useAutosave(
+    useMemo(() => {
+      const { id, numero, estado, ...dComparable } = d
+      return { d: dComparable, procesos }
+    }, [d, procesos]),
+    () => save(),
+    { delay: 1500, isValid: () => !isConvertida && !!d.cliente.trim() && !!d.referencia.trim() }
+  )
 
   const handleDelete = () => {
     navigate('/cotizaciones')
     deleteCotizacion(d.id).catch(() => {})
+  }
+
+  // Arrancar otra cotización sin volver al listado: se cierra la actual
+  // (autosave al día) y la pantalla queda en blanco, lista para la siguiente.
+  // Se reescribe la URL a /cotizaciones/nuevo para que recargar no traiga de
+  // vuelta la anterior; el id real se vuelve a poner solo al primer guardado.
+  const handleNuevaCotizacion = async () => {
+    if (empezandoNueva) return
+    setEmpezandoNueva(true)
+    try {
+      await flushSave()
+    } catch {
+      // el fallo ya quedó en saveError; igual se abre la nueva
+    }
+    const blank = buildBlankState('cot')
+    const primerPapel = papelCatalog[0]
+    setData(primerPapel
+      ? { ...blank, papelId: String(primerPapel.id), precioPliego: parseFloat(primerPapel.precio) }
+      : blank)
+    setProcesos(buildDefaultProcesos())
+    setOriginalEstado('borrador')
+    setOrdenId(null)
+    setSaveError(null)
+    window.history.replaceState(null, '', '/cotizaciones/nuevo')
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+    setEmpezandoNueva(false)
+  }
+
+  const handleSaveAndSend = async () => {
+    setSending(true)
+    try {
+      await flushSave()
+      const savedId = await save()
+      const vu = Math.round(calc.valorUnitario || 0)
+      const vt = Math.round(calc.valorTotal || 0)
+      navigate(`/documentos/nuevo?cotizacion=${savedId}&vu=${vu}&vt=${vt}`)
+    } catch (e) {
+      // el error ya quedó reflejado en saveError vía save()
+    } finally {
+      setSending(false)
+    }
   }
 
   // Convierte la COT aprobada en OP (backend copia campos + marca convertida)
@@ -190,6 +236,15 @@ export default function CotizacionEdit() {
           <div className="mod mono">{d.numero}</div>
         </div>
         <div className="topbar-right">
+          <button
+            className="btn accent"
+            style={{ padding: '2px 10px', fontSize: 12 }}
+            disabled={empezandoNueva}
+            onClick={handleNuevaCotizacion}
+            title="Guarda esta y abre una cotización nueva en blanco, sin salir de aquí"
+          >
+            {empezandoNueva ? 'Guardando…' : '+ Nueva cotización'}
+          </button>
           {saveError && (
             <span style={{ color: 'var(--danger, #c0392b)', fontSize: 12 }}>
               Error: {saveError}
@@ -310,22 +365,15 @@ export default function CotizacionEdit() {
 
           <Section
             num="6" title="Acciones"
-            desc="Guardar borrador o enviar al cliente"
+            desc="Enviar al cliente — los cambios se guardan automáticamente"
             open={open.s6} onToggle={() => toggle('s6')}
           >
             <SectionAcciones
               d={d} calc={calc}
-              saving={saving}
+              saveStatus={saveStatus} onRetrySave={retrySave} sending={sending}
               originalEstado={originalEstado}
-              onSave={() => save()}
               onDelete={handleDelete}
-              onSaveAndSend={async () => {
-                const savedId = await save()
-                if (!savedId) return
-                const vu = Math.round(calc.valorUnitario || 0)
-                const vt = Math.round(calc.valorTotal || 0)
-                navigate(`/documentos/nuevo?cotizacion=${savedId}&vu=${vu}&vt=${vt}`)
-              }}
+              onSaveAndSend={handleSaveAndSend}
             />
           </Section>
         </div>
@@ -335,32 +383,13 @@ export default function CotizacionEdit() {
           <div className="column-side">
             <LiquidationPanel
                 d={d} set={set} calc={calc} procesos={procesos}
-                saving={saving}
+                saveStatus={saveStatus} onRetrySave={retrySave} sending={sending}
                 originalEstado={originalEstado}
-                onSave={() => save()}
-                onSaveAndSend={async () => {
-                  const savedId = await save()
-                  if (!savedId) return
-                  const vu = Math.round(calc.valorUnitario || 0)
-                  const vt = Math.round(calc.valorTotal || 0)
-                  navigate(`/documentos/nuevo?cotizacion=${savedId}&vu=${vu}&vt=${vt}`)
-                }}
+                onSaveAndSend={handleSaveAndSend}
               />
           </div>
         )}
       </div>
-
-      {/* Save toast */}
-      {toast && (
-        <div className="floating-bar" style={{
-          background: '#1a4a2e', color: '#fff', padding: '10px 22px',
-          borderRadius: 8, fontSize: 13, fontWeight: 500,
-          boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
-          display: 'flex', alignItems: 'center', gap: 8, textAlign: 'center',
-        }}>
-          ✓ {toast}
-        </div>
-      )}
     </div>
   )
 }

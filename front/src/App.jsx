@@ -17,6 +17,7 @@ import Troqueles from './pages/Troqueles'
 import TroquelGestion from './pages/TroquelGestion'
 import Guillotina from './pages/Guillotina'
 import ProduccionGeneral from './pages/ProduccionGeneral'
+import EstacionMaquina from './pages/EstacionMaquina'
 import Login from './pages/Login'
 
 function ProtectedRoute({ children }) {
@@ -44,15 +45,24 @@ function AppRoutes() {
         <Route path="/cotizaciones" element={<AdminRoute><CotizacionList /></AdminRoute>} />
         <Route path="/cotizaciones/:id" element={<AdminRoute><CotizacionEdit /></AdminRoute>} />
         <Route path="/documentos/:id" element={<AdminRoute><DocumentoClienteEdit /></AdminRoute>} />
-        <Route path="/ordenes" element={<AdminRoute><OrdenList /></AdminRoute>} />
-        <Route path="/ordenes/:id" element={<AdminRoute><OrdenEdit /></AdminRoute>} />
+        {/* El Operador crea y edita sus OPs directas: la pantalla le oculta
+            lo monetario y el backend le cierra las OPs que vienen de una COT. */}
+        <Route path="/ordenes" element={<OrdenList />} />
+        <Route path="/ordenes/:id" element={<OrdenEdit />} />
         <Route path="/remisiones" element={<AdminRoute><Remisiones /></AdminRoute>} />
         <Route path="/remisiones/:id" element={<AdminRoute><RemisionEdit /></AdminRoute>} />
         <Route path="/clientes" element={<AdminRoute><ClienteList /></AdminRoute>} />
         <Route path="/clientes/:id" element={<AdminRoute><ClienteDetail /></AdminRoute>} />
         <Route path="/produccion" element={<ProduccionHub />} />
+        {/* Cadena de producción: una sola pantalla, cuatro estaciones */}
+        <Route path="/produccion/impresora" element={<EstacionMaquina estacion="impresora" />} />
+        <Route path="/produccion/laminadora" element={<EstacionMaquina estacion="laminadora" />} />
+        <Route path="/produccion/barnizadora" element={<EstacionMaquina estacion="barnizadora" />} />
+        <Route path="/produccion/troqueladora" element={<EstacionMaquina estacion="troqueladora" />} />
         <Route path="/produccion/troqueles" element={<Troqueles />} />
         <Route path="/produccion/troqueles/:id" element={<AdminRoute><TroquelGestion /></AdminRoute>} />
+        {/* Guillotina: página centralizada — cadena (corte inicial + corte final de
+            las OPs) y registro libre (cortes sueltos sin OP), en un solo lugar. */}
         <Route path="/produccion/guillotina" element={<Guillotina />} />
         <Route path="/produccion/general" element={<ProduccionGeneral />} />
       </Route>

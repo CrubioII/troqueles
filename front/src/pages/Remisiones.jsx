@@ -239,7 +239,17 @@ export default function Remisiones() {
                         <span className="mono" style={{ fontSize: 12, color: 'var(--ink-2)' }}>{rem.orden_numero || '—'}</span>
                       </td>
                       <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                        <StatusBadge estado={rem.estado} />
+                        <div style={{ display: 'flex', gap: 4, justifyContent: 'center', flexWrap: 'wrap' }}>
+                          <StatusBadge estado={rem.estado} />
+                          {rem.tiene_troquel && (
+                            <span
+                              title="Esta remisión incluye trabajo de troquel"
+                              style={{ fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 999, background: 'var(--surface-2)', color: 'var(--ink-2)', whiteSpace: 'nowrap' }}
+                            >
+                              🔧 Troquel
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td style={{ padding: '12px 8px', whiteSpace: 'nowrap', width: 1 }}>
                         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>

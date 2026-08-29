@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef, Fragment } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Icon } from '../components/Icons'
-import { fmtNum, ProgressBar, Checkbox } from '../components/core'
+import { fmtNum, ProgressBar, Checkbox, ESTACION_DE_PROCESO } from '../components/core'
 import { getOrdenes, getOrden, toggleProcesoCompletado } from '../api'
 import { useSyncPolling } from '../lib/useSyncPolling'
+import { useAuth } from '../context/AuthContext'
 
 const PROCESO_LABELS = {
+  corteInicial: 'Corte inicial',
   impresion: 'Impresión',
   laminado: 'Laminado',
   uvTotal: 'UV total',
@@ -14,6 +16,7 @@ const PROCESO_LABELS = {
   estampado: 'Estampado',
   troquel: 'Troquel',
   troquelado: 'Troquelado',
+  corteFinal: 'Corte final',
   positivo: 'Positivo',
   muestra: 'Muestra',
   terminado: 'Terminado',
@@ -42,11 +45,21 @@ function Skeleton() {
   )
 }
 
-function ChecklistRow({ ordId, proceso, onToggled }) {
+// Procesos de la cadena (Impresora/Laminadora/Barnizadora/Troqueladora) y
+// troquel: solo se completan con un registro real en su estación o con la
+// aprobación del formato de cuchillas — nunca a mano, ni siquiera el Admin.
+function procesoBloqueado(proceso) {
+  return !!ESTACION_DE_PROCESO[proceso.proceso_id] || proceso.proceso_id === 'troquel'
+}
+
+function ProcesoRow({ ordId, proceso, onToggled, isAdmin }) {
   const [busy, setBusy] = useState(false)
+  const bloqueado = procesoBloqueado(proceso)
+  const estacion = ESTACION_DE_PROCESO[proceso.proceso_id]
+  const label = PROCESO_LABELS[proceso.proceso_id] || proceso.proceso_id
 
   const handleToggle = () => {
-    if (busy) return
+    if (busy || bloqueado || !isAdmin) return
     setBusy(true)
     toggleProcesoCompletado(ordId, proceso.proceso_id, !proceso.completado)
       .then(updated => onToggled(proceso.proceso_id, updated.completado))
@@ -55,16 +68,37 @@ function ChecklistRow({ ordId, proceso, onToggled }) {
   }
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0' }}>
-      <Checkbox checked={proceso.completado} onChange={handleToggle} />
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', flexWrap: 'wrap' }}>
+      {!bloqueado && isAdmin ? (
+        <Checkbox checked={proceso.completado} onChange={handleToggle} disabled={busy} />
+      ) : (
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          width: 16, height: 16, borderRadius: 4, fontSize: 11, fontWeight: 700,
+          color: proceso.completado ? 'var(--ok, #2e8b57)' : 'var(--ink-3)',
+          border: `1px solid ${proceso.completado ? 'var(--ok, #2e8b57)' : 'var(--line)'}`,
+        }}>
+          {proceso.completado ? '✓' : ''}
+        </span>
+      )}
       <span style={{ fontSize: 13, color: proceso.completado ? 'var(--ink-3)' : 'var(--ink)', textDecoration: proceso.completado ? 'line-through' : 'none' }}>
-        {PROCESO_LABELS[proceso.proceso_id] || proceso.proceso_id}
+        {label}
       </span>
+      {bloqueado && (
+        <span
+          title={estacion
+            ? `Se completa solo con un registro real en ${estacion}.`
+            : 'Se completa solo cuando se aprueba el formato de cuchillas.'}
+          style={{ fontSize: 10, color: 'var(--ink-3)', border: '1px solid var(--line)', borderRadius: 4, padding: '1px 5px' }}
+        >
+          {estacion || 'Troquel'}
+        </span>
+      )}
     </div>
   )
 }
 
-function ExpandedDetail({ ordId, onProgresoChange }) {
+function ExpandedDetail({ ordId, onProgresoChange, isAdmin }) {
   const [procesos, setProcesos] = useState(null)
   const [loading, setLoading] = useState(true)
 
@@ -87,10 +121,15 @@ function ExpandedDetail({ ordId, onProgresoChange }) {
   if (loading) return <div style={{ padding: '8px 16px', color: 'var(--ink-3)', fontSize: 12 }}>Cargando procesos…</div>
   if (!procesos.length) return <div style={{ padding: '8px 16px', color: 'var(--ink-3)', fontSize: 12 }}>Esta OP no tiene procesos activos</div>
 
+  const completados = procesos.filter(p => p.completado).length
+
   return (
     <div style={{ padding: '8px 16px 14px' }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink-2)', marginBottom: 4 }}>
+        {completados} de {procesos.length} procesos completados
+      </div>
       {procesos.map(p => (
-        <ChecklistRow key={p.proceso_id} ordId={ordId} proceso={p} onToggled={handleToggled} />
+        <ProcesoRow key={p.proceso_id} ordId={ordId} proceso={p} onToggled={handleToggled} isAdmin={isAdmin} />
       ))}
     </div>
   )
@@ -98,6 +137,8 @@ function ExpandedDetail({ ordId, onProgresoChange }) {
 
 export default function ProduccionGeneral() {
   const navigate = useNavigate()
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
 
   const [ordenes, setOrdenes] = useState([])
   const [loading, setLoading] = useState(true)
@@ -255,7 +296,7 @@ export default function ProduccionGeneral() {
                       {isExpanded && (
                         <tr style={{ borderBottom: '1px solid var(--line)', background: idx % 2 === 0 ? 'var(--surface)' : 'var(--surface-2)' }}>
                           <td colSpan={7} style={{ padding: 0 }} onClick={e => e.stopPropagation()}>
-                            <ExpandedDetail ordId={ord.id} onProgresoChange={handleProgresoChange} />
+                            <ExpandedDetail ordId={ord.id} onProgresoChange={handleProgresoChange} isAdmin={isAdmin} />
                           </td>
                         </tr>
                       )}
