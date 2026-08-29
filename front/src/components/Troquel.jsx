@@ -978,7 +978,7 @@ export const TroquelCostos = forwardRef(function TroquelCostos(
 // adjunta el modelo (PDF/imagen + campos técnicos) en un solo flujo.
 
 export function NuevaTareaTroquelModal({ onClose, onCreated }) {
-  const [op, setOp] = useState({ cliente: '', clienteId: null, referencia: '', cantidad: 0 })
+  const [op, setOp] = useState({ cliente: '', clienteId: null, referencia: '' })
   const [archivo, setArchivo] = useState(null)
   const [preview, setPreview] = useState(null)
   const [suggestions, setSuggestions] = useState([])
@@ -1021,7 +1021,6 @@ export function NuevaTareaTroquelModal({ onClose, onCreated }) {
     if (!createdOrden) {
       if (!op.cliente.trim()) { setError('El campo Cliente es obligatorio'); return }
       if (!op.referencia.trim()) { setError('El campo Referencia es obligatorio'); return }
-      if (!(Number(op.cantidad) > 0)) { setError('La cantidad debe ser mayor a 0'); return }
     }
     setSaving(true)
     try {
@@ -1037,7 +1036,7 @@ export function NuevaTareaTroquelModal({ onClose, onCreated }) {
           fecha: new Date().toISOString().slice(0, 10),
           cliente: clienteId,
           referencia: op.referencia.trim(),
-          cantidad: Number(op.cantidad),
+          cantidad: 1,
           procesos: [{ proceso_id: 'troquel', active: true }],
         })
         setCreatedOrden(orden)
@@ -1132,9 +1131,6 @@ export function NuevaTareaTroquelModal({ onClose, onCreated }) {
             </Field>
             <Field label="Referencia *">
               <input className="input" value={op.referencia} disabled={opLocked} onChange={e => setOp(o => ({ ...o, referencia: e.target.value }))} />
-            </Field>
-            <Field label="Cantidad *" w={100}>
-              <input className="input" type="number" min="1" value={op.cantidad || ''} disabled={opLocked} onChange={e => setOp(o => ({ ...o, cantidad: e.target.value }))} />
             </Field>
           </div>
         </div>
