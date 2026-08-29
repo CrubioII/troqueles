@@ -133,7 +133,7 @@ export default function CotizacionEdit() {
       return { d: dComparable, procesos }
     }, [d, procesos]),
     () => save(),
-    { delay: 1500, isValid: () => !isConvertida && !!d.cliente.trim() && !!d.referencia.trim() }
+    { enabled: false, isValid: () => !isConvertida && !!d.cliente.trim() && !!d.referencia.trim() }
   )
 
   const handleDelete = () => {
@@ -365,7 +365,7 @@ export default function CotizacionEdit() {
 
           <Section
             num="6" title="Acciones"
-            desc="Enviar al cliente — los cambios se guardan automáticamente"
+            desc="Guardar cambios o enviar al cliente"
             open={open.s6} onToggle={() => toggle('s6')}
           >
             <SectionAcciones

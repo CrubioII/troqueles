@@ -485,7 +485,7 @@ export default function DocumentoClienteEdit() {
       return dComparable
     }, [d]),
     () => save(),
-    { delay: 1500, isValid: () => !!d.cliente.trim() }
+    { enabled: false, isValid: () => !!d.cliente.trim() }
   )
 
   const handleDownload = async () => {
@@ -742,6 +742,7 @@ export default function DocumentoClienteEdit() {
 
         {/* Actions */}
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+          <button className="btn" onClick={retrySave} disabled={saveStatus === 'saving'}>Guardar</button>
           <SaveStatus status={saveStatus} onRetry={retrySave} style={{ flex: '1 1 auto' }} />
           <button className="btn" style={{ flex: '1 1 auto', justifyContent: 'center' }}
             onClick={handleDownload} disabled={downloading || !d.id}>

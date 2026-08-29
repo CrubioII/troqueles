@@ -534,7 +534,7 @@ export default function RemisionEdit() {
   const { status: saveStatus, retry: retrySave, flush: flushSave } = useAutosave(
     useMemo(() => ({ direccion, ciudad, observaciones, items }), [direccion, ciudad, observaciones, items]),
     async () => { const updated = await updateRemision(id, payload()); hydrate(updated) },
-    { enabled: editable }
+    { enabled: false }
   )
 
   const handleSend = async (email, extraEmails) => {
@@ -778,6 +778,9 @@ export default function RemisionEdit() {
         {/* Acciones */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', justifyContent: 'flex-end' }}>
           {pdfError && <span style={{ fontSize: 12, color: 'var(--danger)' }}>{pdfError}</span>}
+          {editable && (
+            <button className="btn" onClick={retrySave} disabled={saveStatus === 'saving'}>Guardar</button>
+          )}
           {editable && <SaveStatus status={saveStatus} onRetry={retrySave} />}
           {!consolidada && (
             <button

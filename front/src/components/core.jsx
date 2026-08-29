@@ -13,7 +13,7 @@ export const fmtNum = (n, d = 0) => {
   return Number(n).toLocaleString('es-CO', { minimumFractionDigits: d, maximumFractionDigits: d })
 }
 
-// ============ Autosave status indicator ============
+// ============ Save status indicator ============
 export function SaveStatus({ status, onRetry, style }) {
   const base = { fontSize: 11.5, display: 'inline-flex', alignItems: 'center', gap: 5, ...style }
   if (status === 'saving') return <span className="muted" style={base}><Icon.Spinner /> Guardando…</span>

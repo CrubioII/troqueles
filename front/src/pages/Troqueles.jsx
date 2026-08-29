@@ -384,7 +384,7 @@ function OperadorOpDatos({ orden, onSaved }) {
       if (!locked) payload.cliente = v.clienteId
       return editarCamposOrden(orden.id, payload).then(full => { onSaved && onSaved(full) })
     },
-    { isValid: (v) => locked || !!v.clienteId }
+    { enabled: false, isValid: (v) => locked || !!v.clienteId }
   )
   const needsClienteSelection = !locked && !clienteId && clienteNombre.trim().length > 0
 
@@ -435,7 +435,12 @@ function OperadorOpDatos({ orden, onSaved }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {needsClienteSelection
             ? <span style={{ fontSize: 12, color: 'var(--danger, #c0392b)' }}>Selecciona un cliente de la lista</span>
-            : <SaveStatus status={saveStatus} onRetry={retrySave} style={{ fontSize: 12 }} />}
+            : (
+              <>
+                <button className="btn sm" onClick={retrySave} disabled={saveStatus === 'saving'}>Guardar</button>
+                <SaveStatus status={saveStatus} onRetry={retrySave} style={{ fontSize: 12 }} />
+              </>
+            )}
         </div>
       </div>
     </div>

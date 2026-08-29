@@ -317,7 +317,10 @@ export default function LiquidationPanel({
             <Icon.Send /> {sending ? 'Enviando…' : 'Enviar al Cliente'}
           </button>
         )}
-        <div style={{ display: 'flex', justifyContent: 'center', marginTop: 6 }}>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'center', alignItems: 'center', marginTop: 6 }}>
+          {!isConvertida && (
+            <button className="btn" style={{ fontSize: 11 }} onClick={onRetrySave} disabled={saving}>Guardar</button>
+          )}
           <SaveStatus status={saveStatus} onRetry={onRetrySave} />
         </div>
         <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>

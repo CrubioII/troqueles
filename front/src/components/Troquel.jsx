@@ -365,8 +365,6 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
   const addSac = () => setForm(f => ({ ...f, sacabocados: [...f.sacabocados, { medida: '', cantidad: 0 }] }))
   const removeSac = (idx) => setForm(f => ({ ...f, sacabocados: f.sacabocados.filter((_, i) => i !== idx) }))
 
-  // Edición (Admin) y avance (Operador) autoguardan mientras se escribe:
-  // sin popup de irreversibilidad, sin gate de validación (eso solo aplica al envío).
   const { status: saveStatus, retry: retrySave, flush: flushSave } = useAutosave(
     form,
     async (v) => {
@@ -380,7 +378,8 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
         if (f?.id) setDraftId(f.id)
         onDraftSaved && onDraftSaved(f)
       }
-    }
+    },
+    { enabled: false }
   )
 
   // Enviar (Operador): se confirma en el modal y queda pendiente de aprobación.
@@ -587,6 +586,7 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
             {reenvio ? 'Reenviar formato' : 'Enviar formato'}
           </button>
         )}
+        <button className="btn" onClick={retrySave} disabled={saveStatus === 'saving'}>Guardar</button>
         <SaveStatus status={saveStatus} onRetry={retrySave} />
       </div>
 
@@ -862,9 +862,9 @@ export const TroquelCostos = forwardRef(function TroquelCostos(
     setOkClienteMsg(false)
   }
 
-  // Solo los campos editables entran al autoguardado — el `total` que devuelve
-  // el servidor se recalcula en cada guardado y no debe disparar un reguardado
-  // fantasma cuando `setItems(data.items)` lo refresca más abajo.
+  // Solo los campos editables entran al guardado — el `total` que devuelve
+  // el servidor se recalcula en cada guardado y no debe marcar el formulario
+  // como modificado cuando `setItems(data.items)` lo refresca más abajo.
   const editableSnapshot = items ? items.map(({ key, cantidad, precio }) => ({ key, cantidad, precio })) : null
 
   const { status: saveStatus, retry: retrySave, flush: flushSave } = useAutosave(
@@ -874,7 +874,7 @@ export const TroquelCostos = forwardRef(function TroquelCostos(
       setItems(data.items || [])
       onSaved && onSaved(data)
     },
-    { enabled: !loading && !!items }
+    { enabled: false }
   )
 
   useEffect(() => { onDirtyChange && onDirtyChange(saveStatus === 'saving') }, [saveStatus])
@@ -964,6 +964,7 @@ export const TroquelCostos = forwardRef(function TroquelCostos(
             {savingCliente ? 'Guardando…' : `Guardar precios para ${clienteNombre || 'este cliente'}`}
           </button>
         )}
+        <button className="btn" onClick={retrySave} disabled={saveStatus === 'saving'}>Guardar</button>
         <SaveStatus status={saveStatus} onRetry={retrySave} />
         {okClienteMsg && <span style={{ fontSize: 12, color: 'var(--ok, #2e9e5b)' }}>Precios del cliente guardados ✓</span>}
         {error && <span style={{ fontSize: 12, color: 'var(--danger, #c0392b)' }}>{error}</span>}

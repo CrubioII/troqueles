@@ -109,7 +109,7 @@ export default function ClienteDetail() {
   const { status: saveStatus, retry: retrySave } = useAutosave(
     form,
     (v) => updateCliente(id, v).then(updated => setData(prev => ({ ...prev, cliente: { ...prev.cliente, ...updated } }))),
-    { enabled: editing, isValid: (v) => !!v.nombre.trim() }
+    { enabled: false, isValid: (v) => !!v.nombre.trim() }
   )
 
   if (loading) {
@@ -189,7 +189,8 @@ export default function ClienteDetail() {
                 <input className="input" value={form.nit} onChange={e => setForm(f => ({ ...f, nit: e.target.value }))} />
               </label>
               <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                <button className="btn" onClick={() => setEditing(false)}>Listo</button>
+                <button className="btn" onClick={retrySave} disabled={saveStatus === 'saving'}>Guardar</button>
+                <button className="btn" onClick={() => setEditing(false)}>Cerrar</button>
                 <SaveStatus status={saveStatus} onRetry={retrySave} />
               </div>
             </div>

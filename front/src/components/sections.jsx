@@ -852,6 +852,9 @@ export function SectionAcciones({ d, calc, onDelete, onSaveAndSend, saveStatus, 
         <button className="btn accent" onClick={onSaveAndSend} disabled={busy || isConvertida} style={{ gap: 6 }}>
           <Icon.Send /> {sending ? 'Enviando…' : 'Enviar al Cliente'}
         </button>
+        {!isConvertida && (
+          <button className="btn" onClick={onRetrySave} disabled={busy}>Guardar</button>
+        )}
         <SaveStatus status={saveStatus} onRetry={onRetrySave} />
         <div className="spacer" />
         <span className="muted" style={{ fontSize: 11.5 }}>
@@ -891,7 +894,7 @@ export function SectionAcciones({ d, calc, onDelete, onSaveAndSend, saveStatus, 
       )}
       <div className="muted" style={{ fontSize: 11, marginTop: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
         <Icon.Info />
-        Los cambios se guardan automáticamente. El cambio de estado y la conversión a OP se hacen desde el listado de cotizaciones.
+        Usa el botón Guardar para persistir los cambios. El cambio de estado y la conversión a OP se hacen desde el listado de cotizaciones.
       </div>
     </div>
   )

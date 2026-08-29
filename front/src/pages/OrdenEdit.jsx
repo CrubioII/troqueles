@@ -188,7 +188,7 @@ export default function OrdenEdit() {
     }, [d, procesos]),
     () => save(),
     {
-      delay: 1500,
+      enabled: false,
       isValid: () => (isAdmin || !locked)
         && (locked || (!!d.cliente.trim() && !!d.referencia.trim())),
     }
