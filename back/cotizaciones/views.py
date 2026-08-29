@@ -127,6 +127,7 @@ def _require_admin(request):
 CAUCHO_LABELS = dict(FormatoCuchillas.CAUCHO_TIPO_CHOICES)
 CUCHILLA_TIPO_LABELS = dict(FormatoCuchillas.CUCHILLA_TIPO_CHOICES)
 SAC_MEDIDA_LABELS = dict(FormatoCuchillas.SAC_MEDIDA_CHOICES)
+GAN_LABELS = dict(FormatoCuchillas.GAN_TIPO_CHOICES)
 
 
 def _build_costos_seed(formato, precios=None):
@@ -193,8 +194,16 @@ def _build_costos_seed(formato, precios=None):
         add("sacabocados", "Sacabocados", formato.get_sac_medida_display(), "und", formato.sac_cantidad)
     if float(formato.perfo_cm or 0) > 0:
         add("perforaciones", "Perforado", formato.perfo_medida, "cm", formato.perfo_cm)
-    if (formato.gan or "").strip():
-        add("gan", "Gan", formato.gan.strip(), "und", 0)
+    gan = formato.gan or []
+    if gan:
+        for idx, fila in enumerate(gan):
+            tipo = fila.get("tipo") or ""
+            cantidad = float(fila.get("cantidad") or 0)
+            if cantidad > 0:
+                add(f"gan-{idx}", GAN_LABELS.get(tipo, tipo or "Gan"), "", "und", cantidad,
+                    price_key=f"gan:{tipo}" if tipo else "gan")
+    elif (formato.gan_legacy or "").strip():
+        add("gan", "Gan", formato.gan_legacy.strip(), "und", 0)
     return lines
 
 
@@ -208,6 +217,7 @@ def _sync_troquel_costos(op):
     prev = {item.get("key"): item for item in (modelo.costos_items or [])}
     prev_caucho_precio = {}
     prev_sac_precio = {}
+    prev_gan_precio = {}
     for item in (modelo.costos_items or []):
         if str(item.get("key", "")).startswith("caucho-") and float(item.get("precio") or 0) > 0:
             prev_caucho_precio.setdefault(item.get("concepto"), item.get("precio"))
@@ -215,6 +225,8 @@ def _sync_troquel_costos(op):
             # A diferencia del caucho, el concepto de sacabocados es genérico ("Sacabocados")
             # para toda medida — hay que distinguir por price_key (que sí lleva la medida).
             prev_sac_precio.setdefault(item.get("price_key"), item.get("precio"))
+        if str(item.get("key", "")).startswith("gan-") and float(item.get("precio") or 0) > 0:
+            prev_gan_precio.setdefault(item.get("concepto"), item.get("precio"))
     # Precios por defecto del cliente (rellenan las líneas que el Admin no fijó).
     precios = (op.cliente.precios_troquel or {}) if op.cliente_id else {}
     seed = _build_costos_seed(formato, precios)
@@ -236,6 +248,9 @@ def _sync_troquel_costos(op):
         # Precio previo de la misma medida de sacabocados; si no hay, conserva el default del cliente.
         if line["key"].startswith("sacabocados-") and not float(line["precio"] or 0):
             line["precio"] = prev_sac_precio.get(line["concepto"]) or line["precio"]
+        # Precio previo del mismo tipo de gan; si no hay, conserva el default del cliente.
+        if line["key"].startswith("gan-") and not float(line["precio"] or 0):
+            line["precio"] = prev_gan_precio.get(line["concepto"]) or line["precio"]
     modelo.costos_items = seed
     modelo.save(update_fields=["costos_items", "modificado"])
     _aplicar_costo_troquel(op, _costos_items_total(seed))

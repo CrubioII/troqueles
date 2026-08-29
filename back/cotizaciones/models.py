@@ -540,6 +540,11 @@ class FormatoCuchillas(models.Model):
     PUNTOS_CHOICES = [("2", "2 puntos"), ("3", "3 puntos")]
     GRAFA_ALTURA_CHOICES = [("23.4", "23,4 mm"), ("23.3", "23,3 mm")]
     CUCHILLA_TIPO_CHOICES = [("doble_bisel", "Doble bisel"), ("bohler", "Bohler")]
+    GAN_TIPO_CHOICES = [
+        ("ojo_pescado", "Ojo de pescado"),
+        ("gancho", "Gancho"),
+        ("ventanera", "Ventanera"),
+    ]
 
     orden = models.ForeignKey(
         OrdenProduccion, on_delete=models.CASCADE, related_name="formatos_cuchillas"
@@ -570,7 +575,8 @@ class FormatoCuchillas(models.Model):
     desperdicio_cm = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     # Filas de caucho: [{"tipo": "verde"|"profigumi"|"blucolan", "cm": <number>}, ...]
     cauchos = models.JSONField(default=list, blank=True)
-    gan = models.CharField(max_length=100, blank=True, default="")
+    # Filas de gan: [{"tipo": "ojo_pescado"|"gancho"|"ventanera", "cantidad": <number>}, ...]
+    gan = models.JSONField(default=list, blank=True)
     # Nota libre del Operador sobre este troquel. Viaja a la remisión: se imprime
     # bajo el bloque de su OP en todos los PDF (operador, cliente y admin).
     observaciones = models.TextField(blank=True, default="")
@@ -581,6 +587,7 @@ class FormatoCuchillas(models.Model):
     ch = models.CharField(max_length=100, blank=True, default="")
     sac = models.CharField(max_length=100, blank=True, default="")
     desperdicio = models.CharField(max_length=200, blank=True, default="")
+    gan_legacy = models.CharField(max_length=100, blank=True, default="")
     # Tiempos por fase en minutos enteros (analizable: promedios, sumas, gráficos)
     tiempo_encalado_min = models.PositiveIntegerField(default=0)
     tiempo_encuchillado_min = models.PositiveIntegerField(default=0)

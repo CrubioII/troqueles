@@ -585,6 +585,22 @@ class FormatoCuchillasSerializer(serializers.ModelSerializer):
             filas.append({"medida": medida, "cantidad": cantidad})
         return filas
 
+    def validate_gan(self, value):
+        tipos_validos = dict(FormatoCuchillas.GAN_TIPO_CHOICES)
+        if not isinstance(value, list):
+            raise serializers.ValidationError("Debe ser una lista de filas {tipo, cantidad}.")
+        filas = []
+        for fila in value:
+            try:
+                tipo = fila.get("tipo")
+                cantidad = float(fila.get("cantidad") or 0)
+            except (AttributeError, TypeError, ValueError):
+                raise serializers.ValidationError("Cada fila de gan requiere tipo válido y cantidad ≥ 0.")
+            if tipo not in tipos_validos or cantidad < 0:
+                raise serializers.ValidationError("Cada fila de gan requiere tipo válido y cantidad ≥ 0.")
+            filas.append({"tipo": tipo, "cantidad": cantidad})
+        return filas
+
     def validate(self, data):
         get = lambda k: data.get(k, getattr(self.instance, k, None) if self.instance else None)
         # El tipo de cuchilla solo se exige al enviar: el Operador puede guardar
@@ -612,7 +628,7 @@ class FormatoCuchillasSerializer(serializers.ModelSerializer):
             "cuchilla_cm", "cuchilla_tipo", "cuchilla_puntos",
             "grafa_cm", "grafa_puntos", "grafa_altura",
             "ch_cm", "ch_medida", "sac_cm", "sac_medida", "sac_cantidad", "sacabocados", "perfo_cm", "perfo_medida",
-            "desperdicio_cm", "cauchos", "gan", "observaciones",
+            "desperdicio_cm", "cauchos", "gan", "gan_legacy", "observaciones",
             "dos_puntos", "tres_puntos", "perfo", "ch", "sac", "desperdicio",  # legacy, solo lectura
             "tiempo_encalado_min", "tiempo_encuchillado_min", "tiempo_encauchado_min",
             "operador", "operador_username", "fecha_hora",
@@ -622,6 +638,7 @@ class FormatoCuchillasSerializer(serializers.ModelSerializer):
             "id", "operador", "fecha_hora",
             "dos_puntos", "tres_puntos", "perfo", "ch", "sac", "desperdicio",
             "sac_cm", "sac_medida", "sac_cantidad",  # legacy, reemplazados por `sacabocados`
+            "gan_legacy",  # legacy, reemplazado por `gan`
             "estado", "devolucion_motivo", "revisado_en",
         ]
 

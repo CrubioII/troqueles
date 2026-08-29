@@ -31,6 +31,12 @@ const CUCHILLA_TIPOS = [
   { value: 'bohler', label: 'Bohler' },
 ]
 const CUCHILLA_TIPO_LABELS = Object.fromEntries(CUCHILLA_TIPOS.map(t => [t.value, t.label]))
+const GAN_TIPOS = [
+  { value: 'ojo_pescado', label: 'Ojo de pescado' },
+  { value: 'gancho', label: 'Gancho' },
+  { value: 'ventanera', label: 'Ventanera' },
+]
+const GAN_TIPO_LABELS = Object.fromEntries(GAN_TIPOS.map(t => [t.value, t.label]))
 const SAC_SIZE_LABELS = Object.fromEntries(SAC_SIZES.map(s => [s.value, s.label]))
 // Medidas fijas por tipo de puntos (mm); solo la altura de grafa 2pt es elegible
 const PUNTOS_SPECS = {
@@ -287,10 +293,10 @@ const EMPTY_FORMATO = {
   grafa_cm: 0, grafa_puntos: '', grafa_altura: '',
   ch_cm: 0, ch_medida: '',
   perfo_cm: 0, perfo_medida: '',
-  gan: '',
   observaciones: '',
   cauchos: [{ tipo: 'verde', cm: 0 }],
   sacabocados: [{ medida: '', cantidad: 0 }],
+  gan: [{ tipo: '', cantidad: 0 }],
   desperdicio_cm: 0,
   tiempo_encalado_min: 0, tiempo_encuchillado_min: 0, tiempo_encauchado_min: 0,
 }
@@ -299,9 +305,10 @@ const EMPTY_FORMATO = {
 // al cargar un formato existente son de solo lectura y no deben reenviarse.
 const formatoPayload = (form) => {
   const data = Object.fromEntries(Object.keys(EMPTY_FORMATO).map(k => [k, form[k]]))
-  // Una fila de sacabocados sin medida es solo el placeholder del formulario:
-  // no se envía, para no chocar con la validación de medida requerida.
+  // Una fila de sacabocados sin medida (o de gan sin tipo) es solo el placeholder
+  // del formulario: no se envía, para no chocar con la validación de tipo requerido.
   data.sacabocados = (data.sacabocados || []).filter(f => f.medida !== '')
+  data.gan = (data.gan || []).filter(f => f.tipo !== '')
   return data
 }
 
@@ -311,6 +318,7 @@ const initFormato = (formato) => {
   Object.keys(EMPTY_FORMATO).forEach(k => { if (formato[k] != null) f[k] = formato[k] })
   if (!Array.isArray(f.cauchos) || !f.cauchos.length) f.cauchos = [{ tipo: 'verde', cm: 0 }]
   if (!Array.isArray(f.sacabocados) || !f.sacabocados.length) f.sacabocados = [{ medida: '', cantidad: 0 }]
+  if (!Array.isArray(f.gan) || !f.gan.length) f.gan = [{ tipo: '', cantidad: 0 }]
   return f
 }
 
@@ -364,6 +372,10 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
     setForm(f => ({ ...f, sacabocados: f.sacabocados.map((row, i) => (i === idx ? { ...row, [k]: v } : row)) }))
   const addSac = () => setForm(f => ({ ...f, sacabocados: [...f.sacabocados, { medida: '', cantidad: 0 }] }))
   const removeSac = (idx) => setForm(f => ({ ...f, sacabocados: f.sacabocados.filter((_, i) => i !== idx) }))
+  const setGan = (idx, k, v) =>
+    setForm(f => ({ ...f, gan: f.gan.map((row, i) => (i === idx ? { ...row, [k]: v } : row)) }))
+  const addGan = () => setForm(f => ({ ...f, gan: [...f.gan, { tipo: '', cantidad: 0 }] }))
+  const removeGan = (idx) => setForm(f => ({ ...f, gan: f.gan.filter((_, i) => i !== idx) }))
 
   const { status: saveStatus, retry: retrySave, flush: flushSave } = useAutosave(
     form,
@@ -493,10 +505,6 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
         </FieldGroup>
       </div>
 
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-        <Field label="gan" w={140}><input className="input" value={form.gan} onChange={e => set('gan', e.target.value)} /></Field>
-      </div>
-
       <div>
         <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
           Caucho — tipo(s) usados y cm de cada uno
@@ -547,6 +555,33 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
             </div>
           ))}
           <button className="btn sm" onClick={addSac} style={{ alignSelf: 'flex-start', marginTop: 2 }}>+ Agregar sacabocado</button>
+        </div>
+      </div>
+
+      <div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
+          Gan — tipo(s) usados y cantidad de cada uno
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {form.gan.map((row, idx) => (
+            <div key={idx} style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-end' }}>
+              <Field label={idx === 0 ? 'Tipo' : ''} w={150}>
+                <select className="input" value={row.tipo} onChange={e => setGan(idx, 'tipo', e.target.value)}>
+                  <option value="">—</option>
+                  {GAN_TIPOS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
+              </Field>
+              <Field label={idx === 0 ? 'Cantidad' : ''} w={90}><NumField step={1} placeholder="0" value={row.cantidad} onChange={v => setGan(idx, 'cantidad', v)} /></Field>
+              <button
+                className="btn sm" onClick={() => removeGan(idx)}
+                disabled={form.gan.length === 1}
+                style={{ marginBottom: 4 }}
+              >
+                Quitar
+              </button>
+            </div>
+          ))}
+          <button className="btn sm" onClick={addGan} style={{ alignSelf: 'flex-start', marginTop: 2 }}>+ Agregar gan</button>
         </div>
       </div>
 
@@ -748,11 +783,14 @@ export function FormatosCuchillasHistory({ formatos, loading, onEdit, showOrden 
             const sac = (f.sacabocados || []).length
               ? f.sacabocados.map(r => `${SAC_SIZE_LABELS[r.medida] || r.medida}: ${r.cantidad}`).join(' · ')
               : sacCell(f)
+            const gan = (f.gan || []).length
+              ? f.gan.map(r => `${GAN_TIPO_LABELS[r.tipo] || r.tipo}: ${r.cantidad}`).join(' · ')
+              : (f.gan_legacy || '')
             const chSacGan = [
               medidaCell(f.ch_cm, f.ch_medida, f.ch),
               sac,
               medidaCell(f.perfo_cm, f.perfo_medida, ''),
-              f.gan,
+              gan,
             ].filter(Boolean).join(' / ') || '—'
             const desperdicio = Number(f.desperdicio_cm) > 0
               ? `${fmtNum(f.desperdicio_cm, 2)} cm`
