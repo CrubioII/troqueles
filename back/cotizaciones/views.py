@@ -1207,7 +1207,7 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         # nueva o una tarea de troquel). El serializer le quita la plata al
         # leer y la ignora al escribir; `_solo_op_directa` le cierra las OPs
         # que nacieron de una cotización, que son del Admin.
-        if self.action in ("list", "retrieve", "produccion", "buscar", "produccion_pendientes", "enviar_remision", "remision_pdf", "cancelar_remision", "remisionables_operador", "consolidar_remision_operador", "remision_operador_pdf", "remisiones_generadas_operador", "devolver_remision_operador", "editar_campos", "set_proceso_prioridades", "set_estacion_prioridades", "create", "update", "partial_update"):
+        if self.action in ("list", "retrieve", "produccion", "buscar", "produccion_pendientes", "enviar_remision", "remision_pdf", "cancelar_remision", "remisionables_operador", "consolidar_remision_operador", "remision_operador_pdf", "remisiones_generadas_operador", "devolver_remision_operador", "editar_campos", "set_proceso_prioridades", "set_estacion_prioridades", "create", "update", "partial_update", "next_numero"):
             return
         _require_admin(request)
 

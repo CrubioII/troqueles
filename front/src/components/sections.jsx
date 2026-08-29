@@ -156,10 +156,10 @@ export function SectionGenerales({ d, set, showEstado = true, numeroLabel = 'N°
 // =========================================================
 // Section 2 — Calculadora de Papel
 // =========================================================
-// `showMoney=false` (Operador): la cotización se arma solo con lo técnico —
-// medidas, papel, procesos — y ni un valor en pesos a la vista. Los precios
-// que ya existan se conservan intactos: el backend ignora lo que llegue en
-// esos campos si quien guarda no es Admin (ver COT_CAMPOS_DINERO).
+// `showMoney=false` (Operador armando una OP): la orden se arma solo con lo
+// técnico —medidas, papel, procesos— y ni un valor en pesos a la vista. Los
+// precios que ya existan se conservan intactos: el backend ignora lo que
+// llegue en esos campos si quien guarda no es Admin (ver OP_CAMPOS_DINERO).
 export function SectionPapel({ d, set, calc, papelCatalog, showMoney = true }) {
   return (
     <div className="papel-layout">
