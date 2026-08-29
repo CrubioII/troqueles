@@ -26,6 +26,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "corsheaders",
     "cotizaciones",
+    "correos",
 ]
 
 MIDDLEWARE = [
@@ -188,3 +189,14 @@ DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "Troqueles INK <norepl
 # El `or` (y no un default de .get) es intencional: la variable puede venir
 # definida pero vacía, y en ese caso también debe caer al valor por defecto.
 CONTADURIA_EMAIL = os.environ.get("CONTADURIA_EMAIL") or "contabilidad@troquelesink.com"
+
+# --- Batch de procesamiento de correos (app `correos`, ver correos/management/commands/procesar_correos.py) ---
+IMAP_HOST = os.environ.get("IMAP_HOST", "mail.spacemail.com")
+IMAP_PORT = int(os.environ.get("IMAP_PORT", 993))
+IMAP_USER = os.environ.get("IMAP_USER", "produccion@troquelesink.com")
+IMAP_PASSWORD = os.environ.get("IMAP_PASSWORD", "")
+IMAP_CARPETA_COTIZAR = os.environ.get("IMAP_CARPETA_COTIZAR", "Cotizar")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+BATCH_DIAS_ATRAS = int(os.environ.get("BATCH_DIAS_ATRAS", 3))
+BATCH_DRY_RUN = os.environ.get("BATCH_DRY_RUN", "false").lower() == "true"
