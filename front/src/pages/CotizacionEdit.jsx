@@ -29,6 +29,7 @@ export default function CotizacionEdit() {
   const [sending, setSending] = useState(false)
   const [creatingOp, setCreatingOp] = useState(false)
   const [ordenId, setOrdenId] = useState(null)
+  const [empezandoNueva, setEmpezandoNueva] = useState(false)
 
   const set = (patch) => setData(prev => ({ ...prev, ...patch }))
   const setProc = (pid, patch) => setProcesos(prev => ({ ...prev, [pid]: { ...prev[pid], ...patch } }))
@@ -140,6 +141,32 @@ export default function CotizacionEdit() {
     deleteCotizacion(d.id).catch(() => {})
   }
 
+  // Arrancar otra cotización sin volver al listado: se cierra la actual
+  // (autosave al día) y la pantalla queda en blanco, lista para la siguiente.
+  // Se reescribe la URL a /cotizaciones/nuevo para que recargar no traiga de
+  // vuelta la anterior; el id real se vuelve a poner solo al primer guardado.
+  const handleNuevaCotizacion = async () => {
+    if (empezandoNueva) return
+    setEmpezandoNueva(true)
+    try {
+      await flushSave()
+    } catch {
+      // el fallo ya quedó en saveError; igual se abre la nueva
+    }
+    const blank = buildBlankState('cot')
+    const primerPapel = papelCatalog[0]
+    setData(primerPapel
+      ? { ...blank, papelId: String(primerPapel.id), precioPliego: parseFloat(primerPapel.precio) }
+      : blank)
+    setProcesos(buildDefaultProcesos())
+    setOriginalEstado('borrador')
+    setOrdenId(null)
+    setSaveError(null)
+    window.history.replaceState(null, '', '/cotizaciones/nuevo')
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+    setEmpezandoNueva(false)
+  }
+
   const handleSaveAndSend = async () => {
     setSending(true)
     try {
@@ -209,6 +236,15 @@ export default function CotizacionEdit() {
           <div className="mod mono">{d.numero}</div>
         </div>
         <div className="topbar-right">
+          <button
+            className="btn accent"
+            style={{ padding: '2px 10px', fontSize: 12 }}
+            disabled={empezandoNueva}
+            onClick={handleNuevaCotizacion}
+            title="Guarda esta y abre una cotización nueva en blanco, sin salir de aquí"
+          >
+            {empezandoNueva ? 'Guardando…' : '+ Nueva cotización'}
+          </button>
           {saveError && (
             <span style={{ color: 'var(--danger, #c0392b)', fontSize: 12 }}>
               Error: {saveError}
@@ -271,7 +307,7 @@ export default function CotizacionEdit() {
               <span>· Cantidad:</span> <span className="v mono">{fmtNum(d.cantidad)}</span>
             </>}
           >
-            <SectionGenerales d={d} set={set} />
+            <SectionGenerales d={d} set={set} showEstado={isAdmin} />
           </Section>
 
           <Section
@@ -280,10 +316,10 @@ export default function CotizacionEdit() {
             open={open.s2} onToggle={() => toggle('s2')}
             summary={!open.s2 && <>
               <span>Pliegos:</span> <span className="v mono">{calc.pliegosNecesarios}</span>
-              <span>· Costo papel:</span> <span className="v mono">{fmtCOP(calc.costoPapel)}</span>
+              {isAdmin && <><span>· Costo papel:</span> <span className="v mono">{fmtCOP(calc.costoPapel)}</span></>}
             </>}
           >
-            <SectionPapel d={d} set={set} calc={calc} papelCatalog={papelCatalog} />
+            <SectionPapel d={d} set={set} calc={calc} papelCatalog={papelCatalog} showMoney={isAdmin} />
           </Section>
 
           <Section
@@ -292,10 +328,10 @@ export default function CotizacionEdit() {
             open={open.s3} onToggle={() => toggle('s3')}
             summary={!open.s3 && <>
               <span>Procesos activos:</span> <span className="v">{calc.procRows.length}</span>
-              <span>· Costo procesos:</span> <span className="v mono">{fmtCOP(calc.totalProcesos)}</span>
+              {isAdmin && <><span>· Costo procesos:</span> <span className="v mono">{fmtCOP(calc.totalProcesos)}</span></>}
             </>}
           >
-            <SectionProcesos procesos={procesos} setProc={setProc} autoValues={calc.autoValues} cantidadProduccion={calc.cantidadProduccion} />
+            <SectionProcesos procesos={procesos} setProc={setProc} autoValues={calc.autoValues} cantidadProduccion={calc.cantidadProduccion} showMoney={isAdmin} />
             <div className="note" style={{ marginTop: 14 }}>
               <Icon.Info />
               <span>Los procesos marcados aquí se convertirán automáticamente en las tareas activas de la Orden de Producción al confirmar la cotización.</span>
@@ -318,22 +354,24 @@ export default function CotizacionEdit() {
             </div>
           </Section>
 
-          <Section
-            num="5" title="Condiciones comerciales"
-            desc="Cómo se pacta el pago con el cliente"
-            open={open.s5} onToggle={() => toggle('s5')}
-            summary={!open.s5 && <><span>Pago:</span> <span className="v">{condicionLabel}</span></>}
-          >
-            <SectionCondiciones d={d} set={set} />
-          </Section>
+          {isAdmin && (
+            <Section
+              num="5" title="Condiciones comerciales"
+              desc="Cómo se pacta el pago con el cliente"
+              open={open.s5} onToggle={() => toggle('s5')}
+              summary={!open.s5 && <><span>Pago:</span> <span className="v">{condicionLabel}</span></>}
+            >
+              <SectionCondiciones d={d} set={set} />
+            </Section>
+          )}
 
           <Section
             num="6" title="Acciones"
-            desc="Enviar al cliente — los cambios se guardan automáticamente"
+            desc={isAdmin ? 'Enviar al cliente — los cambios se guardan automáticamente' : 'Los cambios se guardan automáticamente'}
             open={open.s6} onToggle={() => toggle('s6')}
           >
             <SectionAcciones
-              d={d} calc={calc}
+              d={d} calc={calc} showMoney={isAdmin}
               saveStatus={saveStatus} onRetrySave={retrySave} sending={sending}
               originalEstado={originalEstado}
               onDelete={handleDelete}

@@ -52,6 +52,21 @@ const MODULES = [
     icon: <Icon.Blade />,
   },
   {
+    key: 'cotizaciones',
+    label: 'Cotizaciones',
+    desc: 'Arma una cotización con los datos técnicos del trabajo. Los precios y el envío al cliente los pone el administrador.',
+    action: 'Cotizar',
+    path: '/cotizaciones',
+    color: '#1F6FB2',
+    soft: '#DDEAF6',
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+        <rect x="3" y="3" width="14" height="18" rx="2" stroke="currentColor" strokeWidth="1.5"/>
+        <path d="M7 8h8M7 12h6M7 16h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+      </svg>
+    ),
+  },
+  {
     key: 'general',
     label: 'Producción General',
     desc: 'Progreso de todas las órdenes de producción según sus procesos activos completados.',

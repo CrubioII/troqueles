@@ -323,9 +323,18 @@ export const toggleProcesoCompletado = (opId, procesoId, completado) =>
     body: JSON.stringify({ completado }),
   }).then(json)
 
-// Reordena la cola del Operador: la posición en orden_ids es la prioridad (1 = primero)
+// Reordena una cola: la posición en orden_ids es la prioridad (1 = primero)
 export const setProcesoPrioridades = (procesoId, ordenIds) =>
   apiFetch(`${BASE}/ordenes/procesos/${procesoId}/prioridades/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ orden_ids: ordenIds }),
+  }).then(json)
+
+// Igual, pero para la cola de una estación de la cadena (numera todos los
+// procesos que la estación cubre, no uno solo)
+export const setEstacionPrioridades = (estacionId, ordenIds) =>
+  apiFetch(`${BASE}/ordenes/estaciones/${estacionId}/prioridades/`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ orden_ids: ordenIds }),

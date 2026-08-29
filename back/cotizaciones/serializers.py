@@ -26,6 +26,71 @@ class PapelSerializer(serializers.ModelSerializer):
         read_only_fields = ["id"]
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Cotización sin plata (Operador)
+#
+# El Operador cotiza —datos técnicos, cliente, procesos— pero no ve ni escribe
+# un solo valor monetario. Lo mismo que se le oculta al leer se le ignora al
+# escribir: si no se protegiera, su formulario (que llega con ceros donde no
+# vio nada) borraría las tarifas que ya puso el Admin.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Campos monetarios de la cotización.
+COT_CAMPOS_DINERO = (
+    "precio_pliego", "costo_papel_override",
+    "corte_inicial_precio", "corte_final_precio",
+    "valor_unitario_override", "valor_total_override",
+    "total_costos_override", "subtotal_override",
+    "margen", "opciones",
+)
+
+# Solo lectura (derivados): se ocultan al leer, no existen al escribir.
+COT_CAMPOS_DINERO_CALCULADOS = ("valor_unitario_efectivo", "valor_total_efectivo")
+
+# Condiciones comerciales: no son montos, pero se pactan con el precio y viven
+# en la misma pantalla del Admin. El Operador no las ve, así que tampoco las pisa.
+# `estado` va aquí porque aprobar o enviar una cotización es decisión del Admin
+# (tiene su propia acción /estado/, también admin-only).
+COT_CAMPOS_COMERCIALES = ("condicion_pago", "condicion_custom", "tipo_facturacion", "estado")
+
+# Claves de `extras` de un proceso que llevan plata (tarifas y modo de cobro).
+# El resto de extras son datos técnicos que el Operador sí maneja.
+PROCESO_EXTRAS_DINERO = frozenset({
+    "chargeMode", "valorBase", "precioUnit",
+    "tiroChargeMode", "retiroChargeMode",
+    "tiroValorBase", "retiroValorBase",
+    "costoTiro", "costoRetiro",
+    "tiroPrecioM2", "retiroPrecioM2",
+})
+
+
+def _sin_dinero(proceso_data):
+    """Copia de una fila de proceso sin costo, override ni extras de plata."""
+    limpio = {k: v for k, v in proceso_data.items() if k not in ("costo", "costo_override")}
+    extras = limpio.get("extras")
+    if isinstance(extras, dict):
+        limpio["extras"] = {k: v for k, v in extras.items() if k not in PROCESO_EXTRAS_DINERO}
+    return limpio
+
+
+def _con_dinero_previo(proceso_data, previo):
+    """Fila de proceso del Operador con la plata que ya tenía guardada.
+
+    `previo` es el (costo, costo_override, extras) que había en la BD para ese
+    proceso_id; si el proceso es nuevo, nace en cero y el Admin le pone precio.
+    """
+    costo, costo_override, extras_previos = previo or (0, None, {})
+    fila = _sin_dinero(proceso_data)
+    fila["costo"] = costo
+    fila["costo_override"] = costo_override
+    extras = dict(fila.get("extras") or {})
+    for k, v in (extras_previos or {}).items():
+        if k in PROCESO_EXTRAS_DINERO:
+            extras[k] = v
+    fila["extras"] = extras
+    return fila
+
+
 class CotizacionProcesoSerializer(serializers.ModelSerializer):
     class Meta:
         model = CotizacionProceso
@@ -116,8 +181,26 @@ class CotizacionSerializer(serializers.ModelSerializer):
             return vu * obj.cantidad
         return None
 
+    @property
+    def _sin_plata(self):
+        """True si quien pide/escribe es Operador: la cotización va sin plata."""
+        request = self.context.get("request")
+        return bool(request) and not request.user.is_staff
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if self._sin_plata:
+            for f in COT_CAMPOS_DINERO + COT_CAMPOS_DINERO_CALCULADOS:
+                data.pop(f, None)
+            data["procesos"] = [_sin_dinero(p) for p in data.get("procesos", [])]
+        return data
+
     def create(self, validated_data):
         procesos_data = validated_data.pop("procesos", [])
+        if self._sin_plata:
+            for campo in COT_CAMPOS_DINERO + COT_CAMPOS_COMERCIALES:
+                validated_data.pop(campo, None)
+            procesos_data = [_sin_dinero(p) for p in procesos_data]
         cotizacion = Cotizacion.objects.create(**validated_data)
         for p in procesos_data:
             CotizacionProceso.objects.create(cotizacion=cotizacion, **p)
@@ -125,6 +208,19 @@ class CotizacionSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         procesos_data = validated_data.pop("procesos", None)
+        sin_plata = self._sin_plata
+        if sin_plata:
+            # Sin estos campos en validated_data, el instance conserva los suyos.
+            for campo in COT_CAMPOS_DINERO + COT_CAMPOS_COMERCIALES:
+                validated_data.pop(campo, None)
+            if procesos_data is not None:
+                previos = {
+                    p.proceso_id: (p.costo, p.costo_override, p.extras)
+                    for p in instance.procesos.all()
+                }
+                procesos_data = [
+                    _con_dinero_previo(p, previos.get(p["proceso_id"])) for p in procesos_data
+                ]
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
@@ -205,7 +301,7 @@ def _proceso_troquel(obj):
 class OpProcesoSerializer(serializers.ModelSerializer):
     class Meta:
         model = OpProceso
-        fields = ["id", "proceso_id", "active", "costo", "costo_override", "extras", "completado", "completado_en", "visible_operador", "prioridad"]
+        fields = ["id", "proceso_id", "active", "costo", "costo_override", "extras", "completado", "completado_en", "prioridad"]
         read_only_fields = ["id", "completado", "completado_en"]
 
 
@@ -391,20 +487,20 @@ class OrdenSerializer(serializers.ModelSerializer):
             registrar_cambios_orden(instance, previos, request.user if request else None)
         if procesos_data is not None:
             # Los procesos se recrean, pero el estado de producción (avance del
-            # Operador, visibilidad y prioridad de cola) no es del Admin: se
-            # conserva o se perdería en cada guardado de la OP.
+            # Operador y prioridad de cola) no es del Admin: se conserva o se
+            # perdería en cada guardado de la OP.
             old_state = {
-                p.proceso_id: (p.completado, p.completado_en, p.visible_operador, p.prioridad)
+                p.proceso_id: (p.completado, p.completado_en, p.prioridad)
                 for p in instance.procesos.all()
             }
             instance.procesos.all().delete()
             for p in procesos_data:
-                completado, completado_en, visible_operador, prioridad = old_state.get(
-                    p["proceso_id"], (False, None, False, None)
+                completado, completado_en, prioridad = old_state.get(
+                    p["proceso_id"], (False, None, None)
                 )
                 OpProceso.objects.create(
                     orden=instance, completado=completado, completado_en=completado_en,
-                    visible_operador=visible_operador, prioridad=prioridad, **p,
+                    prioridad=prioridad, **p,
                 )
         return instance
 

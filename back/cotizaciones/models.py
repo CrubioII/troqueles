@@ -340,11 +340,9 @@ class OpProceso(models.Model):
     extras = models.JSONField(default=dict, blank=True)
     completado = models.BooleanField(default=False)
     completado_en = models.DateTimeField(null=True, blank=True)
-    # El Admin marca qué OPs de este proceso aparecen en la pantalla del Operador.
-    # Oculto por defecto: nada llega al Operador hasta que el Admin lo marca.
-    visible_operador = models.BooleanField(default=False)
-    # Orden de trabajo que el Admin le da a los procesos visibles: 1 = primero.
-    # null = sin prioridad asignada; el Operador las ve al final, por fecha de entrega.
+    # Orden de trabajo dentro de la cola: 1 = primero. null = sin prioridad
+    # asignada; se ve al final, por fecha de entrega. Toda OP creada entra
+    # directamente a la cola de su estación — no hay visibilidad manual.
     prioridad = models.PositiveIntegerField(null=True, blank=True)
 
     class Meta:

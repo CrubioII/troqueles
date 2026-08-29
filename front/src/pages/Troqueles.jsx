@@ -18,6 +18,7 @@ import {
   getClientes, editarCamposOrden,
 } from '../api'
 import { useSyncPolling } from '../lib/useSyncPolling'
+import { useDragOrder } from '../hooks/useDragOrder'
 
 const asList = (data) => (Array.isArray(data) ? data : (data?.results || []))
 
@@ -52,6 +53,15 @@ const byCreado = (a, b) => {
   if (!a.creado) return 1
   if (!b.creado) return -1
   return a.creado < b.creado ? -1 : (a.creado > b.creado ? 1 : 0)
+}
+
+// Manija de arrastre: recibe tal cual lo que devuelve drag.handleProps(op).
+function DragHandle({ style, ...props }) {
+  return (
+    <span {...props} style={{ ...style, display: 'inline-flex', color: 'var(--ink-3)' }}>
+      <Icon.Drag />
+    </span>
+  )
 }
 
 function Section({ title, children, style, actions }) {
@@ -168,6 +178,7 @@ function AdminTroqueles() {
     })
   ), [ordenes])
 
+  const filtrando = !!busqueda.trim()
   const ordenesFiltradas = useMemo(() => {
     const t = norm(busqueda.trim())
     if (!t) return ordenesEnCola
@@ -194,6 +205,10 @@ function AdminTroqueles() {
     const cola = [ord, ...ordenesEnCola.filter(o => o.id !== ord.id)]
     reordenar(cola)
   }
+
+  // Con búsqueda activa se ve solo un pedazo de la cola: reordenar ahí
+  // renumeraría mal las OPs escondidas, así que el arrastre se apaga.
+  const drag = useDragOrder(ordenesFiltradas, reordenar, { disabled: filtrando })
 
   // Los precios del troquel se ponen sobre la remisión, no en la OP.
   const irAPrecios = (s) => navigate(`/remisiones/${s.remision_id}`)
@@ -230,7 +245,9 @@ function AdminTroqueles() {
       >
         <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', fontSize: 12, color: 'var(--ink-3)' }}>
           Toda tarea de troquel que se crea entra automáticamente aquí, en orden de subida (FIFO).
-          Usa «Priorizar» para mandar una al primer puesto.
+          {filtrando
+            ? ' Limpia la búsqueda para poder reordenar la cola.'
+            : ' Arrastra una fila por su manija para cambiar la prioridad, o usa «Priorizar» para mandarla al primer puesto.'}
         </div>
         {prioridadError && (
           <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', fontSize: 12, color: 'var(--danger, #c0392b)' }}>
@@ -264,19 +281,23 @@ function AdminTroqueles() {
           <table style={{ width: '100%', minWidth: 860, borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ borderBottom: '2px solid var(--line)' }}>
-                {['#', 'OP #', 'Subida', 'Cliente', 'Referencia', 'Progreso', '', ''].map((h, i) => (
+                {['', '#', 'OP #', 'Subida', 'Cliente', 'Referencia', 'Progreso', '', ''].map((h, i) => (
                   <th key={i} style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--ink-3)', background: 'var(--surface-2)' }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {ordenesFiltradas.map((ord, idx) => {
+              {drag.items.map((ord, idx) => {
                 const sub = fmtSubida(ord.creado)
                 const esPrimero = ordenesEnCola[0]?.id === ord.id
+                const dr = drag.rowProps(ord)
                 return (
-                  <tr key={ord.id}
-                    style={{ borderBottom: '1px solid var(--line)', background: idx % 2 ? 'var(--surface-2)' : 'var(--surface)', cursor: 'pointer' }}
+                  <tr key={ord.id} {...dr}
+                    style={{ borderBottom: '1px solid var(--line)', background: idx % 2 ? 'var(--surface-2)' : 'var(--surface)', cursor: 'pointer', ...dr.style }}
                     onClick={() => abrirGestion(ord)}>
+                    <td style={{ padding: '10px 6px', width: 28 }}>
+                      {!filtrando && <DragHandle {...drag.handleProps(ord)} />}
+                    </td>
                     <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 13, color: 'var(--ink-3)', width: 40 }}>{idx + 1}</td>
                     <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 12 }}>{ord.numero}</td>
                     <td style={{ padding: '10px 12px', fontSize: 12, fontWeight: 600, color: sub.color }}>{sub.txt}</td>
@@ -603,11 +624,26 @@ function OperadorTroqueles() {
     }
   }
 
+  const filtrandoLista = !!busqueda.trim()
   const listaFiltrada = useMemo(() => {
     const t = norm(busqueda.trim())
     if (!t) return lista
     return lista.filter(op => [op.numero, op.cliente_nombre, op.referencia].some(v => norm(v).includes(t)))
   }, [lista, busqueda])
+
+  // El Operador prioriza su propia cola arrastrando: la posición se guarda como
+  // prioridad del proceso troquel (1 = primero), igual que la vista del Admin.
+  const [ordenError, setOrdenError] = useState(null)
+  const guardarOrden = (nueva) => {
+    const snapshot = lista
+    setLista(nueva)
+    setOrdenError(null)
+    setProcesoPrioridades('troquel', nueva.map(op => op.id)).catch(() => {
+      setLista(snapshot)
+      setOrdenError('No se pudo guardar el orden. Intenta de nuevo.')
+    })
+  }
+  const drag = useDragOrder(listaFiltrada, guardarOrden, { disabled: filtrandoLista })
 
   const historialFiltrado = useMemo(() => {
     const t = norm(busquedaHist.trim())
@@ -826,6 +862,13 @@ function OperadorTroqueles() {
 
         {tab === 'pendientes' && (
           <Section title="Troqueles del día — selecciona una OP">
+            {!loadingLista && lista.length > 0 && (
+              <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', fontSize: 12, color: ordenError ? 'var(--danger, #c0392b)' : 'var(--ink-3)' }}>
+                {ordenError || (filtrandoLista
+                  ? 'Limpia la búsqueda para poder reordenar la cola.'
+                  : 'Arrastra una fila por su manija para cambiar la prioridad: la de arriba se trabaja primero.')}
+              </div>
+            )}
             {loadingLista ? (
               <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Cargando…</div>
             ) : lista.length === 0 ? (
@@ -853,18 +896,22 @@ function OperadorTroqueles() {
               <table style={{ width: '100%', minWidth: 760, borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ borderBottom: '2px solid var(--line)' }}>
-                    {['#', 'OP #', 'Subida', 'Cliente', 'Referencia', 'Cantidad', ''].map((h, i) => (
+                    {['', '#', 'OP #', 'Subida', 'Cliente', 'Referencia', 'Cantidad', ''].map((h, i) => (
                       <th key={i} style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--ink-3)', background: 'var(--surface-2)' }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {listaFiltrada.map((op, idx) => {
+                  {drag.items.map((op, idx) => {
                     const sub = fmtSubida(op.creado)
+                    const dr = drag.rowProps(op)
                     return (
-                      <tr key={op.id}
-                        style={{ borderBottom: '1px solid var(--line)', background: idx % 2 ? 'var(--surface-2)' : 'var(--surface)', cursor: 'pointer' }}
+                      <tr key={op.id} {...dr}
+                        style={{ borderBottom: '1px solid var(--line)', background: idx % 2 ? 'var(--surface-2)' : 'var(--surface)', cursor: 'pointer', ...dr.style }}
                         onClick={() => !opening && abrir(op)}>
+                        <td style={{ padding: '12px 6px', width: 28 }}>
+                          {!filtrandoLista && <DragHandle {...drag.handleProps(op)} />}
+                        </td>
                         <td style={{ padding: '12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 13, color: 'var(--ink-3)', width: 40 }}>{idx + 1}</td>
                         <td style={{ padding: '12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 13 }}>{op.numero}</td>
                         <td style={{ padding: '12px', fontSize: 12, fontWeight: 600, color: sub.color }}>{sub.txt}</td>

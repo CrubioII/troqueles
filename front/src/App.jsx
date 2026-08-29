@@ -42,8 +42,10 @@ function AppRoutes() {
       <Route path="/login" element={<Login />} />
       <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
         <Route path="/" element={<AdminRoute><Dashboard /></AdminRoute>} />
-        <Route path="/cotizaciones" element={<AdminRoute><CotizacionList /></AdminRoute>} />
-        <Route path="/cotizaciones/:id" element={<AdminRoute><CotizacionEdit /></AdminRoute>} />
+        {/* Cotizar está abierto al Operador: la pantalla le oculta todo lo
+            monetario y el backend ignora esos campos si no es Admin. */}
+        <Route path="/cotizaciones" element={<CotizacionList />} />
+        <Route path="/cotizaciones/:id" element={<CotizacionEdit />} />
         <Route path="/documentos/:id" element={<AdminRoute><DocumentoClienteEdit /></AdminRoute>} />
         <Route path="/ordenes" element={<AdminRoute><OrdenList /></AdminRoute>} />
         <Route path="/ordenes/:id" element={<AdminRoute><OrdenEdit /></AdminRoute>} />

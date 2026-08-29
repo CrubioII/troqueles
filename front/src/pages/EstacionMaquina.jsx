@@ -3,8 +3,9 @@ import { useNavigate } from 'react-router-dom'
 import { fmtNum, ESTACIONES_CONFIG } from '../components/core'
 import { Icon } from '../components/Icons'
 import { RegistroProcesoForm, RegistroProcesoHistory } from '../components/RegistroProceso'
-import { getOrdenesEstacion, getRegistrosProceso } from '../api'
+import { getOrdenesEstacion, getRegistrosProceso, setEstacionPrioridades } from '../api'
 import { useSyncPolling } from '../lib/useSyncPolling'
+import { useDragOrder } from '../hooks/useDragOrder'
 
 const asList = (data) => (Array.isArray(data) ? data : (data?.results || []))
 
@@ -46,6 +47,15 @@ const TH = {
 // + corte final en una sola cola) para distinguir de un vistazo cada fila.
 const TIPO_CORTE_LABEL = { guillotina: 'Corte inicial', guillotina_final: 'Corte final' }
 
+// Manija de arrastre: recibe tal cual lo que devuelve drag.handleProps(op).
+function DragHandle({ style, ...props }) {
+  return (
+    <span {...props} style={{ ...style, display: 'inline-flex', color: 'var(--ink-3)' }}>
+      <Icon.Drag />
+    </span>
+  )
+}
+
 /**
  * Puesto de trabajo de una máquina de la cadena.
  *
@@ -74,6 +84,7 @@ export default function EstacionMaquina({ estacion, estaciones, embedded = false
   const [loadingHist, setLoadingHist] = useState(false)
   const [busquedaHist, setBusquedaHist] = useState('')
   const [aviso, setAviso] = useState(null)      // { tipo, texto } tras registrar
+  const [ordenError, setOrdenError] = useState(null)  // fallo al guardar prioridades
 
   const loadLista = (silent = false) => {
     if (!silent) setLoadingLista(true)
@@ -105,11 +116,32 @@ export default function EstacionMaquina({ estacion, estaciones, embedded = false
     { enabled: !orden && tab === 'pendientes' },
   )
 
+  const filtrando = !!busqueda.trim()
   const filtradas = useMemo(() => {
     const t = norm(busqueda.trim())
     if (!t) return lista
     return lista.filter(op => [op.numero, op.cliente_nombre, op.referencia].some(v => norm(v).includes(t)))
   }, [lista, busqueda])
+
+  // Reordenar la cola arrastrando. La prioridad vive por estación, así que una
+  // pantalla combinada (Guillotina) guarda la subsecuencia de cada una por
+  // separado, conservando el orden relativo que quedó en la lista.
+  const guardarOrden = (nueva) => {
+    const snapshot = lista
+    setLista(nueva)
+    setOrdenError(null)
+    Promise.all(ids.map(id => {
+      const suyas = nueva.filter(op => op._estacionId === id).map(op => op.id)
+      return suyas.length ? setEstacionPrioridades(id, suyas) : Promise.resolve()
+    })).catch(() => {
+      setLista(snapshot)
+      setOrdenError('No se pudo guardar el orden. Intenta de nuevo.')
+    })
+  }
+
+  // Con búsqueda activa se ve solo un pedazo de la cola: reordenar ahí
+  // renumeraría mal las OPs escondidas, así que el arrastre se apaga.
+  const drag = useDragOrder(filtradas, guardarOrden, { disabled: filtrando })
 
   const histFiltrado = useMemo(() => {
     const t = norm(busquedaHist.trim())
@@ -191,6 +223,13 @@ export default function EstacionMaquina({ estacion, estaciones, embedded = false
                   />
                 }
               >
+                {(ordenError || filtradas.length > 0) && (
+                  <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--line)', fontSize: 12, color: ordenError ? 'var(--danger, #c0392b)' : 'var(--ink-3)' }}>
+                    {ordenError || (filtrando
+                      ? 'Limpia la búsqueda para poder reordenar la cola.'
+                      : 'Arrastra una fila por su manija para cambiar la prioridad: la de arriba se trabaja primero.')}
+                  </div>
+                )}
                 {loadingLista ? (
                   <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Cargando…</div>
                 ) : filtradas.length === 0 ? (
@@ -204,20 +243,25 @@ export default function EstacionMaquina({ estacion, estaciones, embedded = false
                     <table style={{ width: '100%', minWidth: 720, borderCollapse: 'collapse' }}>
                       <thead>
                         <tr style={{ borderBottom: '2px solid var(--line)' }}>
-                          {['#', ...(combinado ? ['Tipo'] : []), 'OP #', 'Entrega', 'Cliente', 'Referencia', ...(cfg.multiproceso ? ['Trabajo'] : []), 'Esperadas', ''].map((h, i) => (
+                          {['', '#', ...(combinado ? ['Tipo'] : []), 'OP #', 'Entrega', 'Cliente', 'Referencia', ...(cfg.multiproceso ? ['Trabajo'] : []), 'Esperadas', ''].map((h, i) => (
                             <th key={i} style={TH}>{h}</th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
-                        {filtradas.map((op, idx) => {
+                        {drag.items.map((op, idx) => {
                           const ent = fmtEntrega(op.fecha_entrega)
+                          const dr = drag.rowProps(op)
                           return (
-                            <tr key={op.id} style={{
+                            <tr key={op.id} {...dr} style={{
                               borderBottom: '1px solid var(--line)',
                               background: idx % 2 === 0 ? 'var(--surface)' : 'var(--surface-2)',
                               cursor: 'pointer',
+                              ...dr.style,
                             }} onClick={() => abrir(op)}>
+                              <td style={{ padding: '10px 6px', width: 28, color: 'var(--ink-3)' }}>
+                                {!filtrando && <DragHandle {...drag.handleProps(op)} />}
+                              </td>
                               <td style={{ padding: '10px 12px', color: 'var(--ink-3)', fontSize: 12 }}>{idx + 1}</td>
                               {combinado && (
                                 <td style={{ padding: '10px 12px' }}>

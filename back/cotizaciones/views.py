@@ -304,7 +304,7 @@ def _reabrir_troquel(formato, motivo="", revisor=None):
     formato.save(update_fields=["estado", "devolucion_motivo", "revisado_por", "revisado_en"])
     if formato.orden_id:
         formato.orden.procesos.filter(proceso_id="troquel").update(
-            completado=False, completado_en=None, visible_operador=True
+            completado=False, completado_en=None
         )
 
 
@@ -380,17 +380,6 @@ def _sync_remision_item_troquel(op, total):
         items = list(destino.items.all())
     if len(items) == 1:
         RemisionItem.objects.filter(pk=items[0].pk).update(valor_total=total)
-
-
-def _troquel_visible_operador(formato, visible):
-    """Marca/desmarca la visibilidad del proceso troquel en la cola del Operador.
-
-    Al enviar el formato a revisión se oculta (visible=False) para que la OP salga
-    sola de la cola; al devolver/cancelar reaparece (visible=True). No toca la
-    prioridad, para conservar el orden si la OP regresa a la cola.
-    """
-    if formato.orden_id:
-        formato.orden.procesos.filter(proceso_id="troquel").update(visible_operador=visible)
 
 
 def _seed_remision_item(rem, op):
@@ -902,20 +891,18 @@ class CotizacionViewSet(viewsets.ModelViewSet):
             return CotizacionListSerializer
         return CotizacionSerializer
 
-    def create(self, request, *args, **kwargs):
-        _require_admin(request)
-        return super().create(request, *args, **kwargs)
-
-    def update(self, request, *args, **kwargs):
-        _require_admin(request)
-        return super().update(request, *args, **kwargs)
-
-    def partial_update(self, request, *args, **kwargs):
-        _require_admin(request)
-        return super().partial_update(request, *args, **kwargs)
-
+    # Crear y editar cotizaciones está abierto al Operador: el serializer se
+    # encarga de que no vea ni escriba un solo valor monetario (ver
+    # COT_CAMPOS_DINERO). Enviar al cliente, cambiar de estado y convertir a OP
+    # siguen siendo del Admin.
     def destroy(self, request, *args, **kwargs):
-        _require_admin(request)
+        cot = self.get_object()
+        # El Operador solo puede descartar borradores suyos que aún no se
+        # cotizaron; una vez enviada o aprobada, la maneja el Admin.
+        if not request.user.is_staff and cot.estado != "borrador":
+            raise PermissionDenied(
+                "Solo se pueden eliminar cotizaciones en borrador."
+            )
         return super().destroy(request, *args, **kwargs)
 
     @action(detail=True, methods=["post"], url_path="duplicar")
@@ -1214,7 +1201,7 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         # list/retrieve: lectura para el Operador (Producción General le muestra
         # progreso de solo lectura); los campos monetarios se ocultan en el
         # serializer para quien no sea staff. Escritura sigue admin-only.
-        if self.action in ("list", "retrieve", "produccion", "buscar", "produccion_pendientes", "enviar_remision", "remision_pdf", "cancelar_remision", "remisionables_operador", "consolidar_remision_operador", "remision_operador_pdf", "remisiones_generadas_operador", "devolver_remision_operador", "editar_campos"):
+        if self.action in ("list", "retrieve", "produccion", "buscar", "produccion_pendientes", "enviar_remision", "remision_pdf", "cancelar_remision", "remisionables_operador", "consolidar_remision_operador", "remision_operador_pdf", "remisiones_generadas_operador", "devolver_remision_operador", "editar_campos", "set_proceso_prioridades", "set_estacion_prioridades"):
             return
         _require_admin(request)
 
@@ -1368,29 +1355,52 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
     def set_proceso_prioridades(self, request, proceso_id=None):
         """POST /api/ordenes/procesos/{proceso_id}/prioridades/ — Body: { orden_ids: [id, ...] }.
 
-        Reordena la cola del Operador: la posición en la lista es la prioridad
-        (1 = primero). Solo se numeran las OPs visibles que llegan en la lista.
+        Reordena la cola arrastrando: la posición en la lista es la prioridad
+        (1 = primero). Solo se numeran las OPs que llegan en la lista.
+        """
+        return self._guardar_prioridades(request, [proceso_id], f"proceso '{proceso_id}'")
+
+    @action(detail=False, methods=["post"], url_path=r"estaciones/(?P<estacion_id>[^/.]+)/prioridades")
+    def set_estacion_prioridades(self, request, estacion_id=None):
+        """POST /api/ordenes/estaciones/{estacion_id}/prioridades/ — Body: { orden_ids: [id, ...] }.
+
+        Igual que la de un proceso suelto, pero para la cola de una estación de
+        la cadena: numera TODOS los procesos que esa estación cubre (Barnizadora
+        puede tener uvTotal + uvParcial en la misma OP), porque la cola se
+        ordena por el menor de ellos.
+        """
+        if estacion_id not in chain.ESTACION_POR_ID:
+            return Response({"error": "Estación desconocida."}, status=400)
+        est = chain.ESTACION_POR_ID[estacion_id]
+        return self._guardar_prioridades(
+            request, est["procesos"], f"procesos de {est['label']}"
+        )
+
+    def _guardar_prioridades(self, request, proceso_ids, que):
+        """Numera 1..N la prioridad de `proceso_ids` según el orden de orden_ids.
+
+        Sin _require_admin a propósito: la cola la prioriza quien la trabaja
+        (Admin u Operador), arrastrando las filas en su pantalla.
         """
         orden_ids = request.data.get("orden_ids")
         if not isinstance(orden_ids, list):
             return Response({"error": "Se espera 'orden_ids' como lista."}, status=400)
 
-        procesos = {
-            p.orden_id: p
-            for p in OpProceso.objects.filter(proceso_id=proceso_id, orden_id__in=orden_ids)
-        }
+        procesos = {}
+        for p in OpProceso.objects.filter(
+            proceso_id__in=proceso_ids, orden_id__in=orden_ids
+        ):
+            procesos.setdefault(p.orden_id, []).append(p)
         faltantes = [i for i in orden_ids if i not in procesos]
         if faltantes:
-            return Response(
-                {"error": f"OPs sin proceso '{proceso_id}': {faltantes}"}, status=400
-            )
+            return Response({"error": f"OPs sin {que}: {faltantes}"}, status=400)
 
         with transaction.atomic():
             actualizados = []
             for pos, orden_id in enumerate(orden_ids, start=1):
-                proceso = procesos[orden_id]
-                proceso.prioridad = pos
-                actualizados.append(proceso)
+                for proceso in procesos[orden_id]:
+                    proceso.prioridad = pos
+                    actualizados.append(proceso)
             OpProceso.objects.bulk_update(actualizados, ["prioridad"])
         return Response({"ok": True, "total": len(actualizados)})
 
@@ -2224,7 +2234,6 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
         if formato.estado in ("borrador", "devuelto") or not formato.orden_id:
             return
         _registrar_formato_cuchillas(formato)
-        _troquel_visible_operador(formato, False)
         _sync_troquel_costos(formato.orden)
 
     def _check_update_permission(self, request):
@@ -2276,7 +2285,7 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
             if error:
                 return Response({"error": error}, status=409)
             formato.orden.procesos.filter(proceso_id="troquel").update(
-                completado=False, completado_en=None, visible_operador=True
+                completado=False, completado_en=None
             )
         formato.estado = "borrador"
         formato.devolucion_motivo = ""

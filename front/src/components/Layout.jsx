@@ -33,7 +33,6 @@ const NAV_LINKS = [
   {
     label: 'Cotizaciones',
     path: '/cotizaciones',
-    adminOnly: true,
     icon: (
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
         <rect x="3" y="3" width="14" height="18" rx="2" stroke="currentColor" strokeWidth="1.5"/>

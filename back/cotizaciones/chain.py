@@ -13,7 +13,7 @@ con órdenes 0 y 5 para que el bloqueo funcione en ambos extremos; comparten
 label y pantalla en el front.
 
 `troquel` (fabricación del molde) NO pertenece a la cadena: tiene su propio
-flujo de formato de cuchillas con visibilidad manual del Admin.
+flujo de formato de cuchillas.
 """
 
 ESTACIONES = [
