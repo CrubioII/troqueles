@@ -92,8 +92,16 @@ _PATRON_TROQUEL_LINEA = re.compile(r"\btroquel\s*:\s*(\d+)", re.IGNORECASE)
 
 def _tareas_inmcor(texto_busqueda, adjuntos_validos):
     """Spec 6.7: una orden por cada "Troquel: nnnn" en el cuerpo, todas con
-    el mismo archivo (el primer adjunto válido), sin split."""
-    numeros = _PATRON_TROQUEL_LINEA.findall(texto_busqueda or "")
+    el mismo archivo (el primer adjunto válido), sin split.
+
+    texto_busqueda concatena texto plano + HTML-como-texto (necesario para
+    el caso iPhone, donde el cuerpo real llega partido en dos bloques
+    text/plain). Pero en un correo multipart/alternative normal, plano y
+    HTML son dos representaciones DEL MISMO contenido — concatenarlos
+    duplica cada línea "Troquel: nnnn" y generaría el doble de órdenes
+    (bug real encontrado con un .eml de Inmcor de producción). Se
+    deduplica preservando el orden de aparición."""
+    numeros = list(dict.fromkeys(_PATRON_TROQUEL_LINEA.findall(texto_busqueda or "")))
     if not numeros:
         # No enmascarar con un fallback plausible (principio spec 16, #11):
         # un correo de Inmcor sin líneas "Troquel: nnnn" es un error, no un

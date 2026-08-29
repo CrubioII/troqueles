@@ -35,9 +35,11 @@ class FixturesEndToEndTests(TestCase):
             ["TROQUEL 3245", "TROQUEL 3246"],
         )
         self.assertTrue(all(o.cliente.nombre == "Inmcor" for o in ordenes))
-        # Las dos órdenes comparten el mismo PDF (spec 6.7).
-        nombres_archivo = {o.troquel_modelo.archivo.name.rsplit("/", 1)[-1] for o in ordenes}
-        self.assertEqual(len(nombres_archivo), 1)
+        # Las dos órdenes comparten el mismo PDF (spec 6.7) — Django les da
+        # rutas de almacenamiento distintas para no pisarse, pero el
+        # contenido subido es idéntico.
+        contenidos = {o.troquel_modelo.archivo.read() for o in ordenes}
+        self.assertEqual(len(contenidos), 1)
 
     def test_richard_pdf_de_dos_paginas_genera_dos_ordenes(self):
         mensaje = _cargar("TEST IMPRESOS RICHARD 8495 IMPRESOS RICHARD - CUADERNO 2026_TROQUELES.eml")
