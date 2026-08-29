@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react'
 import { createPortal } from 'react-dom'
-import { fmtCOP, fmtNum, NumField, Checkbox, MoneyInput, SaveStatus } from './core'
+import { fmtCOP, fmtNum, NumField, MoneyInput, SaveStatus } from './core'
 import { useAutosave } from '../hooks/useAutosave'
 import {
   getTroquelModelo, saveTroquelModelo, getTroquelCostos, saveTroquelCostos,
@@ -977,15 +977,8 @@ export const TroquelCostos = forwardRef(function TroquelCostos(
 // Crea una OP directa (sin cotización) con el proceso "troquel" activo y le
 // adjunta el modelo (PDF/imagen + campos técnicos) en un solo flujo.
 
-const EMPTY_TAREA_MODELO = {
-  troquel_numero: '', pinza: '', madera: '', cuchilla_puntos: '', material: '',
-  espejo: false, instrucciones: '',
-  corte_cm: 0, score_cm: 0, hendido_cm: 0,
-}
-
 export function NuevaTareaTroquelModal({ onClose, onCreated }) {
   const [op, setOp] = useState({ cliente: '', clienteId: null, referencia: '', cantidad: 0 })
-  const [modelo, setModelo] = useState(EMPTY_TAREA_MODELO)
   const [archivo, setArchivo] = useState(null)
   const [preview, setPreview] = useState(null)
   const [suggestions, setSuggestions] = useState([])
@@ -994,8 +987,6 @@ export function NuevaTareaTroquelModal({ onClose, onCreated }) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
   const [createdOrden, setCreatedOrden] = useState(null)  // OP ya creada: el reintento solo re-envía el modelo
-
-  const setM = (k, v) => setModelo(m => ({ ...m, [k]: v }))
 
   useEffect(() => {
     if (archivo && archivo.type?.startsWith('image/')) {
@@ -1025,26 +1016,6 @@ export function NuevaTareaTroquelModal({ onClose, onCreated }) {
     setShowSugg(false)
   }
 
-  const hasModeloData = () =>
-    ['troquel_numero', 'pinza', 'madera', 'cuchilla_puntos', 'material', 'instrucciones'].some(k => String(modelo[k] || '').trim())
-    || modelo.espejo
-    || ['corte_cm', 'score_cm', 'hendido_cm'].some(k => Number(modelo[k]) > 0)
-
-  // El visor del operador solo muestra instrucciones + archivo: si no se
-  // escribieron instrucciones, se componen desde los campos técnicos.
-  const composedInstrucciones = () => {
-    if (modelo.instrucciones.trim()) return modelo.instrucciones
-    const campos = [
-      ['Troquel', modelo.troquel_numero],
-      ['Pinza', modelo.pinza],
-      ['Madera', modelo.madera],
-      ['Cuchilla', modelo.cuchilla_puntos],
-      ['Material', modelo.material],
-    ].filter(([, v]) => String(v || '').trim())
-    if (!campos.length) return ''
-    return campos.map(([k, v]) => `${k}: ${v}`).join('\n') + (modelo.espejo ? '' : '\n(NO Hacer espejo)')
-  }
-
   const submit = async () => {
     setError(null)
     if (!createdOrden) {
@@ -1071,14 +1042,10 @@ export function NuevaTareaTroquelModal({ onClose, onCreated }) {
         })
         setCreatedOrden(orden)
       }
-      if (archivo || hasModeloData()) {
+      if (archivo) {
         const fd = new FormData()
         fd.append('orden', orden.id)
-        ;['troquel_numero', 'pinza', 'madera', 'cuchilla_puntos', 'material'].forEach(k => fd.append(k, modelo[k] ?? ''))
-        fd.append('instrucciones', composedInstrucciones())
-        fd.append('espejo', modelo.espejo ? 'true' : 'false')
-        ;['corte_cm', 'score_cm', 'hendido_cm'].forEach(k => fd.append(k, modelo[k] ?? 0))
-        if (archivo) fd.append('archivo', archivo)
+        fd.append('archivo', archivo)
         await saveTroquelModelo(null, fd)
       }
       onCreated(orden)
@@ -1117,33 +1084,6 @@ export function NuevaTareaTroquelModal({ onClose, onCreated }) {
           ) : archivo ? (
             <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>📄 {archivo.name}</span>
           ) : null}
-        </div>
-
-        <div>
-          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
-            Datos del troquel
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
-            <Field label="N° troquel"><input className="input" value={modelo.troquel_numero} onChange={e => setM('troquel_numero', e.target.value)} /></Field>
-            <Field label="Pinza"><input className="input" value={modelo.pinza} onChange={e => setM('pinza', e.target.value)} /></Field>
-            <Field label="Madera"><input className="input" value={modelo.madera} onChange={e => setM('madera', e.target.value)} /></Field>
-            <Field label="Cuchilla (puntos)"><input className="input" value={modelo.cuchilla_puntos} onChange={e => setM('cuchilla_puntos', e.target.value)} /></Field>
-            <Field label="Material"><input className="input" value={modelo.material} onChange={e => setM('material', e.target.value)} /></Field>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
-            <Checkbox checked={modelo.espejo} onChange={() => setM('espejo', !modelo.espejo)} />
-            <span style={{ fontSize: 12, color: 'var(--ink-2)' }}>Hacer espejo <span style={{ color: 'var(--ink-3)' }}>(sin marcar = NO hacer espejo)</span></span>
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 10 }}>
-            <Field label="Corte (cm)" w={110}><NumField value={modelo.corte_cm} onChange={v => setM('corte_cm', v)} /></Field>
-            <Field label="Score (cm)" w={110}><NumField value={modelo.score_cm} onChange={v => setM('score_cm', v)} /></Field>
-            <Field label="C. Hendido (cm)" w={110}><NumField value={modelo.hendido_cm} onChange={v => setM('hendido_cm', v)} /></Field>
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 10 }}>
-            <Field label="Instrucciones adicionales (visibles al operador)" full>
-              <textarea className="input" rows={3} value={modelo.instrucciones} onChange={e => setM('instrucciones', e.target.value)} />
-            </Field>
-          </div>
         </div>
 
         <div>
