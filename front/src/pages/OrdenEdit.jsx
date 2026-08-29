@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Icon } from '../components/Icons'
-import { fmtCOP, fmtNum, CONDICIONES_PAGO_OP, TIPOS_FACTURACION, Section } from '../components/core'
+import { fmtCOP, fmtNum, CONDICIONES_PAGO_OP, TIPOS_FACTURACION, Section, SaveStatus } from '../components/core'
 import { SectionGenerales, SectionPapel, SectionProcesos, SectionCondicionesOP } from '../components/sections'
 import LiquidationPanel from '../components/LiquidationPanel'
 import { ModeloTroquelGestion } from '../components/Troquel'
@@ -17,7 +17,9 @@ import { buildDefaultProcesos, buildBlankState, docToState, stateToDoc, seedProc
 // Resumen estático para OP creada desde cotización (datos bloqueados)
 function OrdenResumenLocked({ d, calc, papelCatalog, showMoney = true }) {
   const papelObj = papelCatalog.find(p => String(p.id) === d.papelId)
-  const papelLabel = papelObj ? `${papelObj.nombre} ${papelObj.gramaje}g · ${papelObj.material}` : 'Manual'
+  const papelLabel = papelObj
+    ? `${papelObj.nombre} ${papelObj.gramaje}g · ${papelObj.material}`
+    : (d.papelManualNombre || 'Manual')
   const rows = [
     ['Cliente', d.cliente],
     ['NIT / Cédula', d.clienteNit || '—'],
@@ -197,7 +199,7 @@ export default function OrdenEdit() {
   // ============ PDFs ============
   const papelReferencia = (() => {
     const papel = papelCatalog.find(p => String(p.id) === d.papelId)
-    return papel ? `${papel.nombre} ${papel.gramaje}g · ${papel.material}` : 'Manual'
+    return papel ? `${papel.nombre} ${papel.gramaje}g · ${papel.material}` : (d.papelManualNombre || 'Manual')
   })()
 
   const downloadBlob = async (resp, filename) => {
@@ -376,6 +378,15 @@ export default function OrdenEdit() {
                 >
                   <SectionCondicionesOP d={d} set={set} />
                 </Section>
+              )}
+
+              {!isAdmin && (
+                <div className="section" style={{ marginTop: 16, padding: '14px 16px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10 }}>
+                  <SaveStatus status={saveStatus} onRetry={retrySave} />
+                  <button className="btn primary" onClick={retrySave} disabled={saveStatus === 'saving'}>
+                    {saveStatus === 'saving' ? 'Guardando…' : 'Guardar'}
+                  </button>
+                </div>
               )}
             </>
           )}

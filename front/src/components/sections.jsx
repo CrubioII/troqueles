@@ -160,6 +160,8 @@ export function SectionGenerales({ d, set, showEstado = true, numeroLabel = 'N°
 // técnico —medidas, papel, procesos— y ni un valor en pesos a la vista. Los
 // precios que ya existan se conservan intactos: el backend ignora lo que
 // llegue en esos campos si quien guarda no es Admin (ver OP_CAMPOS_DINERO).
+// El Operador sí puede registrar un papel que no está en el catálogo — solo
+// el nombre, sin precio; el Admin le pone precio después.
 export function SectionPapel({ d, set, calc, papelCatalog, showMoney = true }) {
   return (
     <div className="papel-layout">
@@ -215,20 +217,30 @@ export function SectionPapel({ d, set, calc, papelCatalog, showMoney = true }) {
               const v = e.target.value
               if (v === 'manual') { set({ papelId: 'manual' }); return }
               const p = papelCatalog.find(x => String(x.id) === v)
-              set({ papelId: v, precioPliego: p ? Number(p.precio) : d.precioPliego })
+              set({ papelId: v, precioPliego: p ? Number(p.precio) : d.precioPliego, papelManualNombre: '' })
             }}>
               {papelCatalog.map(p => (
                 <option key={p.id} value={String(p.id)}>
                   {p.nombre} {p.gramaje}g · {p.material}{showMoney ? ` · ${fmtCOP(p.precio)} / pliego` : ''}
                 </option>
               ))}
-              {showMoney
-                ? <option value="manual">+ Registrar papel temporal (precio manual)</option>
-                /* Sin dinero no se registran papeles temporales, pero la opción
-                   tiene que existir para no perder la del Admin al abrir. */
-                : d.papelId === 'manual' && <option value="manual">Papel temporal (definido por el administrador)</option>}
+              <option value="manual">
+                {showMoney ? '+ Registrar papel temporal (precio manual)' : '+ Papel no listado (escribir el tipo)'}
+              </option>
             </select>
           </div>
+          {d.papelId === 'manual' && (
+          <div className="field col-span-3">
+            <label className="field-label">Tipo de papel <span className="hint">— no está en el catálogo, descríbelo aquí</span></label>
+            <input
+              className="input"
+              type="text"
+              placeholder="Ej. Propalcote 250g brillante"
+              value={d.papelManualNombre || ''}
+              onChange={e => set({ papelManualNombre: e.target.value })}
+            />
+          </div>
+          )}
           {showMoney && (
           <div className="field">
             <label className="field-label">Precio / pliego <span className="editable-flag"><Icon.Pencil /></span></label>
