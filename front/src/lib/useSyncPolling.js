@@ -49,6 +49,11 @@ export function useSyncPolling(loaders, { enabled = true } = {}) {
       }
     }
 
+    // Sembrar las versiones ya, no en el primer tick: el consumidor carga sus
+    // datos al montar, así que si la firma se captura 10 s después se pierde
+    // todo lo que cambie en medio (y no se nota hasta el refresh completo).
+    tick()
+
     const id = setInterval(tick, INTERVAL)
     const onVisible = () => {
       if (!document.hidden) { versions = null; reloadAll() }

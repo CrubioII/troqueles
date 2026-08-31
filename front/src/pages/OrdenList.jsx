@@ -101,11 +101,9 @@ export default function OrdenList() {
           <div className="mod">Órdenes de Producción</div>
         </div>
         <div className="topbar-right">
-          {isAdmin && (
-            <button className="btn accent" onClick={() => navigate('/ordenes/nuevo')}>
-              + Nueva OP
-            </button>
-          )}
+          <button className="btn accent" onClick={() => navigate('/ordenes/nuevo')}>
+            + Nueva OP
+          </button>
         </div>
       </div>
 
@@ -138,18 +136,18 @@ export default function OrdenList() {
             <div style={{ padding: 48, textAlign: 'center', color: 'var(--ink-3)' }}>
               <div style={{ fontSize: 32, marginBottom: 8 }}>📋</div>
               <div>No hay órdenes de producción</div>
-              {isAdmin && (
-                <button className="btn accent" style={{ marginTop: 16 }} onClick={() => navigate('/ordenes/nuevo')}>
-                  <Icon.Plus /> Crear primera OP
-                </button>
-              )}
+              <button className="btn accent" style={{ marginTop: 16 }} onClick={() => navigate('/ordenes/nuevo')}>
+                <Icon.Plus /> Crear primera OP
+              </button>
             </div>
           ) : (
             <div className="table-scroll">
             <table style={{ width: '100%', minWidth: 1100, borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ borderBottom: '2px solid var(--line)' }}>
-                  {['OP #', 'Fecha', 'Cliente', 'Referencia', 'Cantidad', 'Valor total', 'Abono', 'Saldo', 'Origen', ''].map((h, i) => (
+                  {['OP #', 'Fecha', 'Cliente', 'Referencia', 'Cantidad',
+                    ...(isAdmin ? ['Valor total', 'Abono', 'Saldo'] : []),
+                    'Origen', ''].map((h, i) => (
                     <th key={i} style={{
                       padding: '10px 12px', textAlign: 'left',
                       fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
@@ -184,15 +182,19 @@ export default function OrdenList() {
                     <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}>
                       {fmtNum(ord.cantidad)}
                     </td>
-                    <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}>
-                      {fmtCOP(ord.valor_total_efectivo)}
-                    </td>
-                    <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontSize: 12, color: 'var(--ink-2)' }}>
-                      {fmtCOP(ord.abono)}
-                    </td>
-                    <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontSize: 12, color: ord.saldo > 0 ? 'var(--danger, #c0392b)' : 'var(--ok, #27ae60)' }}>
-                      {fmtCOP(ord.saldo)}
-                    </td>
+                    {isAdmin && (
+                      <>
+                        <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}>
+                          {fmtCOP(ord.valor_total_efectivo)}
+                        </td>
+                        <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontSize: 12, color: 'var(--ink-2)' }}>
+                          {fmtCOP(ord.abono)}
+                        </td>
+                        <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontSize: 12, color: ord.saldo > 0 ? 'var(--danger, #c0392b)' : 'var(--ok, #27ae60)' }}>
+                          {fmtCOP(ord.saldo)}
+                        </td>
+                      </>
+                    )}
                     <td style={{ padding: '10px 12px' }}>
                       {ord.cotizacion_numero ? (
                         <span className="badge converted"><span className="dot"></span>{ord.cotizacion_numero}</span>

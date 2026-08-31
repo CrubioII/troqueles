@@ -85,6 +85,7 @@ export function buildBlankState(kind = 'cot') {
     pliegoW: 70,
     pliegoH: 100,
     papelId: '',
+    papelManualNombre: '',
     precioPliego: 0,
     costoPapelOverride: null,
     corteInicialActive: false,
@@ -136,6 +137,7 @@ export function docToState(doc, papelCatalog, kind = 'cot') {
     pliegoW: parseFloat(doc.pliego_w) || 70,
     pliegoH: parseFloat(doc.pliego_h) || 100,
     papelId,
+    papelManualNombre: doc.papel_manual_nombre || '',
     precioPliego: parseFloat(doc.precio_pliego) || (papelObj ? parseFloat(papelObj.precio) : 0),
     costoPapelOverride: doc.costo_papel_override != null ? parseFloat(doc.costo_papel_override) : null,
     corteInicialActive: !!doc.corte_inicial_active,
@@ -184,6 +186,13 @@ export function stateToDoc(d, procesos, kind = 'cot') {
       return rest
     })(),
   }))
+  // Corte inicial/final no viven en PROCESS_GROUPS (tienen su propio campo de
+  // precio en "Papel"), pero sí necesitan una fila de proceso para que la
+  // cadena de Guillotina los pueda bloquear/completar. costo:0 a propósito —
+  // ya se suman aparte vía corte_inicial_precio/corte_final_precio, sumar
+  // también acá duplicaría el costo.
+  procesosArr.push({ proceso_id: 'corteInicial', active: !!d.corteInicialActive, costo: 0, costo_override: null, extras: {} })
+  procesosArr.push({ proceso_id: 'corteFinal', active: !!d.corteFinalActive, costo: 0, costo_override: null, extras: {} })
 
   const base = {
     fecha: d.fecha,
@@ -200,6 +209,7 @@ export function stateToDoc(d, procesos, kind = 'cot') {
     pliego_w: d.pliegoW,
     pliego_h: d.pliegoH,
     papel: d.papelId !== 'manual' ? parseInt(d.papelId) : null,
+    papel_manual_nombre: d.papelId === 'manual' ? (d.papelManualNombre || '').trim() : '',
     precio_pliego: d.precioPliego,
     costo_papel_override: d.costoPapelOverride,
     corte_inicial_active: d.corteInicialActive,

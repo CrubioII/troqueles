@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { createPortal } from 'react-dom'
 import { Icon } from '../components/Icons'
-import { fmtCOP, fmtNum, REMISION_STATUS_DEFS } from '../components/core'
+import { fmtCOP, fmtNum, REMISION_STATUS_DEFS, SaveStatus } from '../components/core'
+import { useAutosave } from '../hooks/useAutosave'
 import { TroquelCostos } from '../components/Troquel'
 import { getRemision, updateRemision, liquidarRemision, pdfRemision, getRemisionDesglose, getRemisionesImportables, importarRemisiones, devolverFormatoCuchillas, deleteRemision } from '../api'
 import logo from '../assets/logo.png'
@@ -59,6 +60,45 @@ function DesgloseTroqueles({ desglose }) {
         </span>
         <span className="mono" style={{ fontSize: 15, fontWeight: 800, color: 'var(--accent)' }}>{desglose.total_general}</span>
       </div>
+    </>
+  )
+}
+
+// ─────────── Desglose de producción por estación (solo lectura) ───────────
+// Cantidad real que salió de cada máquina de la cadena — sin cantidad esperada
+// ni sobrante, solo lo que efectivamente se produjo.
+function DesgloseProcesos({ desglose }) {
+  if (!desglose || !desglose.procesos?.length) return null
+  return (
+    <>
+      {desglose.procesos.map((p, i) => (
+        <div key={i} style={{ marginBottom: 16 }}>
+          <div style={{ marginBottom: 6 }}>
+            <strong style={{ fontSize: 13 }}>{p.referencia || 'Producción'}</strong>{' '}
+            <span className="mono" style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 700 }}>{p.op_numero}</span>
+          </div>
+          <div className="table-scroll">
+            <table className="cot-doc-table" style={{ minWidth: 480 }}>
+              <thead>
+                <tr>
+                  <th>Proceso</th><th>Estación</th><th>Operador</th>
+                  <th className="num">Cantidad realizada</th>
+                </tr>
+              </thead>
+              <tbody>
+                {p.items.map((it, j) => (
+                  <tr key={j}>
+                    <td>{it.proceso_label}</td>
+                    <td style={{ color: 'var(--ink-3)' }}>{it.estacion_label}</td>
+                    <td style={{ color: 'var(--ink-3)' }}>{it.operador_username || '—'}</td>
+                    <td className="num">{it.cantidad_realizada}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ))}
     </>
   )
 }
@@ -284,6 +324,12 @@ function SendModal({ rem, items, total, desglose, onClose, onSend }) {
               <DesgloseTroqueles desglose={desglose} />
             </div>
           )}
+          {desglose?.procesos?.length > 0 && (
+            <div className="cot-doc-section">
+              <div className="cot-doc-section-title">Producción por estación</div>
+              <DesgloseProcesos desglose={desglose} />
+            </div>
+          )}
           <div className="note" style={{ fontSize: 12 }}>
             <Icon.Info /> Se enviará al cliente y a contabilidad@troquelesink.com, con el total en COP y este mismo desglose en el correo y en el PDF adjunto.
           </div>
@@ -420,8 +466,7 @@ export default function RemisionEdit() {
   const [observaciones, setObservaciones] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [saving, setSaving] = useState(false)
-  const [savedMsg, setSavedMsg] = useState(null)
+  const [pdfError, setPdfError] = useState(null)
   const [showModal, setShowModal] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [toast, setToast] = useState(null)
@@ -486,25 +531,16 @@ export default function RemisionEdit() {
     })),
   })
 
-  const handleSave = async () => {
-    setSaving(true)
-    setSavedMsg(null)
-    try {
-      const updated = await updateRemision(id, payload())
-      hydrate(updated)
-      setSavedMsg('Cambios guardados')
-      setTimeout(() => setSavedMsg(null), 2500)
-    } catch (e) {
-      setSavedMsg('Error: ' + e.message)
-    } finally {
-      setSaving(false)
-    }
-  }
+  const { status: saveStatus, retry: retrySave, flush: flushSave } = useAutosave(
+    useMemo(() => ({ direccion, ciudad, observaciones, items }), [direccion, ciudad, observaciones, items]),
+    async () => { const updated = await updateRemision(id, payload()); hydrate(updated) },
+    { enabled: false }
+  )
 
   const handleSend = async (email, extraEmails) => {
     // Persistir ediciones antes de liquidar (incluye costos de troquel sin guardar)
     await saveAllTroquelCostos()
-    await updateRemision(id, payload())
+    await flushSave()
     const res = await liquidarRemision(id, email, extraEmails)
     if (res.remision) hydrate(res.remision)
     setTimeout(() => {
@@ -516,7 +552,7 @@ export default function RemisionEdit() {
 
   const handleImport = async (ids) => {
     // Persistir ediciones locales antes de fusionar (importar agrega sobre lo guardado)
-    await updateRemision(id, payload())
+    await flushSave()
     const updated = await importarRemisiones(id, ids)
     hydrate(updated)
     // Al consolidar entran troqueles de otras OPs: el desglose cambia
@@ -560,11 +596,12 @@ export default function RemisionEdit() {
   const [dlPdf, setDlPdf] = useState(null) // 'cliente' | 'admin' mientras descarga
   const handlePdf = async (tipo) => {
     setDlPdf(tipo)
+    setPdfError(null)
     try {
       // Persistir ediciones para que el PDF refleje lo que se ve en pantalla
       // (incluye costos de troquel sin guardar, p.ej. cantidad/precio de Sacabocados)
       await saveAllTroquelCostos()
-      if (editable) await updateRemision(id, payload()).then(hydrate)
+      if (editable) await flushSave()
       const r = await pdfRemision(id, tipo)
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       const blob = await r.blob()
@@ -575,7 +612,7 @@ export default function RemisionEdit() {
       a.click()
       URL.revokeObjectURL(url)
     } catch (e) {
-      setSavedMsg('Error: no se pudo generar el PDF')
+      setPdfError('No se pudo generar el PDF')
     } finally {
       setDlPdf(null)
     }
@@ -718,6 +755,19 @@ export default function RemisionEdit() {
           </div>
         )}
 
+        {/* Producción por estación — solo lectura, siempre */}
+        {desglose?.procesos?.length > 0 && (
+          <div className="section open" style={{ marginBottom: 16, padding: 18 }}>
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Producción por estación</div>
+            <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 12 }}>
+              Cantidad real registrada en cada máquina de la cadena, sin sobrante.
+            </div>
+            <div className="table-scroll">
+              <DesgloseProcesos desglose={desglose} />
+            </div>
+          </div>
+        )}
+
         {/* Observaciones */}
         <div className="section open" style={{ marginBottom: 16, padding: 18 }}>
           <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12 }}>Observaciones</div>
@@ -727,7 +777,11 @@ export default function RemisionEdit() {
 
         {/* Acciones */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', justifyContent: 'flex-end' }}>
-          {savedMsg && <span style={{ fontSize: 12, color: savedMsg.startsWith('Error') ? 'var(--danger)' : 'var(--ok)' }}>{savedMsg}</span>}
+          {pdfError && <span style={{ fontSize: 12, color: 'var(--danger)' }}>{pdfError}</span>}
+          {editable && (
+            <button className="btn" onClick={retrySave} disabled={saveStatus === 'saving'}>Guardar</button>
+          )}
+          {editable && <SaveStatus status={saveStatus} onRetry={retrySave} />}
           {!consolidada && (
             <button
               className="btn"
@@ -745,14 +799,9 @@ export default function RemisionEdit() {
             <Icon.Print /> {dlPdf === 'admin' ? 'Generando…' : 'PDF admin (desglose)'}
           </button>
           {editable && (
-            <>
-              <button className="btn" onClick={handleSave} disabled={saving}>
-                <Icon.Save /> {saving ? 'Guardando…' : 'Guardar cambios'}
-              </button>
-              <button className="btn accent" onClick={() => setShowModal(true)}>
-                <Icon.Send /> Liquidar y enviar
-              </button>
-            </>
+            <button className="btn accent" onClick={() => setShowModal(true)}>
+              <Icon.Send /> Liquidar y enviar
+            </button>
           )}
         </div>
       </div>

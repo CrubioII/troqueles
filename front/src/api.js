@@ -323,16 +323,18 @@ export const toggleProcesoCompletado = (opId, procesoId, completado) =>
     body: JSON.stringify({ completado }),
   }).then(json)
 
-export const toggleProcesoVisibleOperador = (opId, procesoId, visible) =>
-  apiFetch(`${BASE}/ordenes/${opId}/procesos/${procesoId}/visible_operador/`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ visible_operador: visible }),
-  }).then(json)
-
-// Reordena la cola del Operador: la posición en orden_ids es la prioridad (1 = primero)
+// Reordena una cola: la posición en orden_ids es la prioridad (1 = primero)
 export const setProcesoPrioridades = (procesoId, ordenIds) =>
   apiFetch(`${BASE}/ordenes/procesos/${procesoId}/prioridades/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ orden_ids: ordenIds }),
+  }).then(json)
+
+// Igual, pero para la cola de una estación de la cadena (numera todos los
+// procesos que la estación cubre, no uno solo)
+export const setEstacionPrioridades = (estacionId, ordenIds) =>
+  apiFetch(`${BASE}/ordenes/estaciones/${estacionId}/prioridades/`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ orden_ids: ordenIds }),
@@ -482,6 +484,37 @@ export const buscarOrdenPorNumero = (numero) =>
 // Lista de OPs con proceso pendiente, ordenadas por fecha de entrega asc (Operador)
 export const getOrdenesPendientes = (proceso = 'troquel') =>
   apiFetch(`${BASE}/ordenes/produccion_pendientes/?proceso=${encodeURIComponent(proceso)}`).then(json)
+
+// ─────────────── Cadena de producción (4 estaciones de máquina) ───────────────
+// La cola de cada estación ya viene filtrada por el backend: una OP solo aparece
+// cuando le llega su turno (ver back/cotizaciones/chain.py).
+export const getOrdenesEstacion = (estacion) =>
+  apiFetch(`${BASE}/ordenes/produccion_pendientes/?estacion=${encodeURIComponent(estacion)}`).then(json)
+
+export const getRegistrosProceso = (params = '') =>
+  apiFetch(`${BASE}/registros-proceso/${params}`).then(json)
+
+// jsonConCodigo: los 409 `cantidad_faltante` / `fuera_de_orden` traen `code`,
+// y el formulario decide qué hacer según cuál sea.
+export const createRegistroProceso = (data) =>
+  apiFetch(`${BASE}/registros-proceso/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  }).then(jsonConCodigo)
+
+export const anularRegistroProceso = (id) =>
+  apiFetch(`${BASE}/registros-proceso/${id}/anular/`, { method: 'POST' }).then(jsonConError)
+
+// ─────────────── Notificaciones (solo Admin) ───────────────
+export const getNotificaciones = (params = '') =>
+  apiFetch(`${BASE}/notificaciones/${params}`).then(json)
+
+export const leerNotificacion = (id) =>
+  apiFetch(`${BASE}/notificaciones/${id}/leer/`, { method: 'POST' }).then(json)
+
+export const marcarNotificacionesLeidas = () =>
+  apiFetch(`${BASE}/notificaciones/marcar_todas_leidas/`, { method: 'POST' }).then(json)
 
 // Costos de troquel (solo Admin): líneas sembradas del formato de cuchillas
 export const getTroquelCostos = (id) =>

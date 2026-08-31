@@ -5,6 +5,7 @@ import { Icon } from '../components/Icons'
 import { RegistroMaquinaForm, RegistroMaquinaHistory } from '../components/RegistroMaquina'
 import { getRegistrosMaquina } from '../api'
 import { useSyncPolling } from '../lib/useSyncPolling'
+import EstacionMaquina from './EstacionMaquina'
 
 const BLOQUE_HORAS = 4
 
@@ -36,9 +37,8 @@ function agruparPorBloque(registros) {
   return Array.from(grupos.values()).sort((a, b) => b.timestamp - a.timestamp)
 }
 
-export default function Guillotina() {
-  const navigate = useNavigate()
-
+// Cortes sueltos que no vienen de una OP: descripción y costo cobrado a mano.
+function RegistroLibre() {
   const [registros, setRegistros] = useState([])
   const [loadingRegistros, setLoadingRegistros] = useState(true)
 
@@ -57,47 +57,75 @@ export default function Guillotina() {
   const grupos = agruparPorBloque(registros)
 
   return (
+    <div style={{ marginTop: 4 }}>
+      <RegistroMaquinaForm maquina="guillotina" onCreated={() => loadRegistros(true)} />
+
+      {loadingRegistros ? (
+        <div className="section" style={{ marginTop: 16, padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>
+          Cargando…
+        </div>
+      ) : grupos.length === 0 ? (
+        <div className="section" style={{ marginTop: 16, padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>
+          Sin registros todavía
+        </div>
+      ) : (
+        grupos.map(grupo => (
+          <div className="section" key={grupo.key} style={{ marginTop: 16 }}>
+            <div style={{
+              padding: '12px 16px', borderBottom: '1px solid var(--line)',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8,
+            }}>
+              <div style={{ fontWeight: 700, fontSize: 13 }}>
+                {grupo.dia} · {grupo.rango}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--ink-2)' }}>
+                {fmtNum(grupo.registros.length)} corte{grupo.registros.length !== 1 ? 's' : ''} · Total: <strong style={{ fontFamily: 'JetBrains Mono, monospace' }}>{fmtCOP(grupo.total)}</strong>
+              </div>
+            </div>
+            <RegistroMaquinaHistory registros={grupo.registros} loading={false} showOrden={false} />
+          </div>
+        ))
+      )}
+    </div>
+  )
+}
+
+// Página centralizada de Guillotina: cadena (corte inicial + corte final de
+// las OPs) y registro libre (cortes sueltos sin OP), en un solo lugar.
+export default function Guillotina() {
+  const navigate = useNavigate()
+  const [tab, setTab] = useState('cadena')
+
+  return (
     <div className="app">
       <div className="topbar">
         <div className="brand">
           <div className="mod">Guillotina</div>
         </div>
         <div className="topbar-right">
-          <button className="btn" onClick={() => (window.history.length > 1 ? navigate(-1) : navigate('/produccion'))}>
+          <button className="btn" onClick={() => navigate('/produccion')}>
             <Icon.ArrowLeft /> Volver
           </button>
         </div>
       </div>
 
       <div style={{ maxWidth: 1200, margin: '0 auto', padding: 'clamp(12px, 4vw, 28px) clamp(12px, 4vw, 24px)', width: '100%' }}>
+        <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+          {[['cadena', 'Cadena (OPs)'], ['libre', 'Registro libre']].map(([id, label]) => (
+            <button
+              key={id}
+              className={'btn' + (tab === id ? ' primary' : '')}
+              onClick={() => setTab(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
 
-        <RegistroMaquinaForm maquina="guillotina" onCreated={() => loadRegistros(true)} />
-
-        {loadingRegistros ? (
-          <div className="section" style={{ marginTop: 16, padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>
-            Cargando…
-          </div>
-        ) : grupos.length === 0 ? (
-          <div className="section" style={{ marginTop: 16, padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>
-            Sin registros todavía
-          </div>
+        {tab === 'cadena' ? (
+          <EstacionMaquina estaciones={['guillotina', 'guillotina_final']} embedded />
         ) : (
-          grupos.map(grupo => (
-            <div className="section" key={grupo.key} style={{ marginTop: 16 }}>
-              <div style={{
-                padding: '12px 16px', borderBottom: '1px solid var(--line)',
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8,
-              }}>
-                <div style={{ fontWeight: 700, fontSize: 13 }}>
-                  {grupo.dia} · {grupo.rango}
-                </div>
-                <div style={{ fontSize: 12, color: 'var(--ink-2)' }}>
-                  {fmtNum(grupo.registros.length)} corte{grupo.registros.length !== 1 ? 's' : ''} · Total: <strong style={{ fontFamily: 'JetBrains Mono, monospace' }}>{fmtCOP(grupo.total)}</strong>
-                </div>
-              </div>
-              <RegistroMaquinaHistory registros={grupo.registros} loading={false} showOrden={false} />
-            </div>
-          ))
+          <RegistroLibre />
         )}
       </div>
     </div>

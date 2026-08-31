@@ -1,12 +1,36 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { ModuleCard } from '../components/core'
+import { ModuleCard, ESTACIONES_CONFIG, ESTACIONES_ORDEN } from '../components/core'
 import { Icon } from '../components/Icons'
 import { getDashboardStats } from '../api'
 import { UtilizacionChart } from '../components/charts/DashboardCharts'
 
+// Las cuatro estaciones van primero y en orden de cadena: el hub debe leerse
+// como el recorrido real de una OP por el taller.
+const ESTACION_ICONS = {
+  impresora: <Icon.Printer />,
+  laminadora: <Icon.Layers />,
+  barnizadora: <Icon.Drop />,
+  troqueladora: <Icon.Blade />,
+}
+
+const ESTACION_MODULES = ESTACIONES_ORDEN.map((id, i) => {
+  const cfg = ESTACIONES_CONFIG[id]
+  return {
+    key: id,
+    label: `${i + 1}. ${cfg.label}`,
+    desc: cfg.desc,
+    action: 'Entrar',
+    path: cfg.ruta,
+    color: cfg.color,
+    soft: cfg.soft,
+    icon: ESTACION_ICONS[id],
+  }
+})
+
 const MODULES = [
+  ...ESTACION_MODULES,
   {
     key: 'troqueles',
     label: 'Troqueles',
@@ -20,11 +44,11 @@ const MODULES = [
   {
     key: 'guillotina',
     label: 'Guillotina',
-    desc: 'Registra lo cortado en guillotina: descripción y costo cobrado. La fecha y hora se registran automáticamente.',
+    desc: 'Corte inicial, cadena y corte final de las OPs, más el registro libre de cortes sueltos — todo en un solo lugar.',
     action: 'Entrar',
     path: '/produccion/guillotina',
-    color: '#3A5B8C',
-    soft: '#DEE6F3',
+    color: '#6B5B95',
+    soft: '#EAE6F2',
     icon: <Icon.Blade />,
   },
   {
@@ -49,23 +73,25 @@ export default function ProduccionHub() {
     getDashboardStats().then(s => setUtilizacion(s.utilizacion_maquinas)).catch(() => {})
   }, [])
 
-  const modules = isAdmin
-    ? [...MODULES, {
-        key: 'ordenes',
-        label: 'Órdenes (CRUD)',
-        desc: 'Crea, edita y elimina órdenes de producción.',
-        action: 'Ver órdenes',
-        path: '/ordenes',
-        color: '#A67012',
-        soft: '#FAEAC7',
-        icon: (
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-            <rect x="3" y="3" width="14" height="18" rx="2" stroke="currentColor" strokeWidth="1.5"/>
-            <path d="M7 8h8M7 12h8M7 16h5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-          </svg>
-        ),
-      }]
-    : MODULES
+  // Las órdenes son de todos: el Operador levanta las suyas (sin precios) y el
+  // Admin además las liquida y las borra.
+  const modules = [...MODULES, {
+    key: 'ordenes',
+    label: 'Órdenes de producción',
+    desc: isAdmin
+      ? 'Crea, edita y elimina órdenes de producción.'
+      : 'Crea una orden de producción con los datos del trabajo. Los precios los pone el administrador.',
+    action: isAdmin ? 'Ver órdenes' : 'Crear OP',
+    path: '/ordenes',
+    color: '#A67012',
+    soft: '#FAEAC7',
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+        <rect x="3" y="3" width="14" height="18" rx="2" stroke="currentColor" strokeWidth="1.5"/>
+        <path d="M7 8h8M7 12h8M7 16h5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+      </svg>
+    ),
+  }]
 
   return (
     <div className="app">

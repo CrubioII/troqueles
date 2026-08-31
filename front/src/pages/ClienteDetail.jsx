@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Icon } from '../components/Icons'
-import { fmtCOP, fmtNum, STATUS_DEFS, REMISION_STATUS_DEFS } from '../components/core'
+import { fmtCOP, fmtNum, STATUS_DEFS, REMISION_STATUS_DEFS, SaveStatus } from '../components/core'
+import { useAutosave } from '../hooks/useAutosave'
 import { getClientePerfil, updateCliente } from '../api'
 
 const ACTIVIDAD_LABEL = {
@@ -91,7 +92,6 @@ export default function ClienteDetail() {
   const [error, setError] = useState(null)
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState({ nombre: '', email: '', telefono: '', nit: '' })
-  const [saving, setSaving] = useState(false)
 
   const load = () => {
     setLoading(true)
@@ -106,16 +106,11 @@ export default function ClienteDetail() {
 
   useEffect(() => { load() }, [id])
 
-  const saveContacto = () => {
-    setSaving(true)
-    updateCliente(id, form)
-      .then(updated => {
-        setData(prev => ({ ...prev, cliente: { ...prev.cliente, ...updated } }))
-        setEditing(false)
-      })
-      .catch(e => setError(e.message))
-      .finally(() => setSaving(false))
-  }
+  const { status: saveStatus, retry: retrySave } = useAutosave(
+    form,
+    (v) => updateCliente(id, v).then(updated => setData(prev => ({ ...prev, cliente: { ...prev.cliente, ...updated } }))),
+    { enabled: false, isValid: (v) => !!v.nombre.trim() }
+  )
 
   if (loading) {
     return (
@@ -193,14 +188,10 @@ export default function ClienteDetail() {
                 <span className="label">NIT</span>
                 <input className="input" value={form.nit} onChange={e => setForm(f => ({ ...f, nit: e.target.value }))} />
               </label>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-                <button className="btn accent" disabled={saving || !form.nombre.trim()} onClick={saveContacto}>
-                  {saving ? 'Guardando…' : 'Guardar'}
-                </button>
-                <button className="btn" disabled={saving} onClick={() => {
-                  setEditing(false)
-                  setForm({ nombre: cliente.nombre || '', email: cliente.email || '', telefono: cliente.telefono || '', nit: cliente.nit || '' })
-                }}>Cancelar</button>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                <button className="btn" onClick={retrySave} disabled={saveStatus === 'saving'}>Guardar</button>
+                <button className="btn" onClick={() => setEditing(false)}>Cerrar</button>
+                <SaveStatus status={saveStatus} onRetry={retrySave} />
               </div>
             </div>
           ) : (
