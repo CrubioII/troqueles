@@ -8,3 +8,5 @@ gunicorn>=21.2
 psycopg2-binary>=2.9
 django-storages[azure]>=1.14
 whitenoise>=6.6
+pypdf>=4.0
+requests>=2.31

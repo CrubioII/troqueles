@@ -1,10 +1,9 @@
-import unicodedata
 from collections import defaultdict
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from cotizaciones.models import Cliente
+from cotizaciones.models import Cliente, normalizar_nombre_cliente
 
 
 class Command(BaseCommand):
@@ -21,7 +20,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         grupos = defaultdict(list)
         for c in Cliente.objects.order_by("creado", "id"):
-            clave = unicodedata.normalize("NFC", c.nombre).strip().casefold()
+            clave = normalizar_nombre_cliente(c.nombre)
             grupos[clave].append(c)
 
         duplicados = {k: v for k, v in grupos.items() if len(v) > 1}

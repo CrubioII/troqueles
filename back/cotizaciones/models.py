@@ -1,11 +1,30 @@
+import re
+import unicodedata
+
 from django.conf import settings
 from django.db import models, transaction
+
+
+def normalizar_nombre_cliente(nombre):
+    """Clave de deduplicación de `Cliente.nombre`: NFC, minúsculas, sin tildes,
+    espacios colapsados. Aplicar NFC *antes* de quitar tildes es obligatorio —
+    un nombre guardado en NFD (p. ej. "gráficos" con la tilde como carácter
+    combinante suelto) y el mismo nombre en NFC deben producir la misma clave,
+    o la búsqueda de duplicados falla en silencio (bug real: "conceptos
+    gráficos" con count=0 por esta causa)."""
+    nfc = unicodedata.normalize("NFC", nombre or "").lower()
+    sin_tildes = "".join(
+        c for c in unicodedata.normalize("NFD", nfc) if unicodedata.category(c) != "Mn"
+    )
+    return re.sub(r"\s+", " ", sin_tildes).strip()
 
 
 class Cliente(models.Model):
     TIPO_CHOICES = [("final", "Cliente Final"), ("terciario", "Cliente Terciario")]
 
     nombre = models.CharField(max_length=200)
+    # Clave de deduplicación, poblada en save() — ver normalizar_nombre_cliente().
+    nombre_normalizado = models.CharField(max_length=200, unique=True, editable=False, blank=True, default="")
     email = models.EmailField(blank=True, default='')
     telefono = models.CharField(max_length=30, blank=True, default='')
     nit = models.CharField(max_length=30, blank=True, default='')
@@ -20,6 +39,10 @@ class Cliente(models.Model):
 
     class Meta:
         ordering = ["nombre"]
+
+    def save(self, *args, **kwargs):
+        self.nombre_normalizado = normalizar_nombre_cliente(self.nombre)
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.nombre
@@ -494,6 +517,10 @@ class TroquelModelo(models.Model):
     espejo = models.BooleanField(default=False)  # "NO hacer espejo" cuando False
     # Anotaciones técnicas (único cuadro libre, visible al Operador)
     instrucciones = models.TextField(blank=True, default="")
+    # Instrucción entre paréntesis extraída de la línea "Cliente: xxx (...)" del
+    # correo de origen (ver correos/reglas/clientes.py). Distinto de
+    # `instrucciones`: esto lo escribe el pipeline de correos, no el Admin.
+    nota_cliente = models.CharField(max_length=300, blank=True, default="")
     # CM lineales impresos en el modelo (alimentan cálculo, solo Admin)
     corte_cm = models.DecimalField(max_digits=12, decimal_places=3, default=0)
     score_cm = models.DecimalField(max_digits=12, decimal_places=3, default=0)

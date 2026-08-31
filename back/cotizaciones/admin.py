@@ -9,9 +9,10 @@ from .models import (
 @admin.register(Cliente)
 class ClienteAdmin(admin.ModelAdmin):
     list_display = ["nombre", "tipo", "ciudad", "creado"]
-    search_fields = ["nombre"]
+    search_fields = ["nombre", "nombre_normalizado"]
     list_filter = ["tipo"]
-    fields = ["nombre", "email", "telefono", "nit", "direccion", "ciudad", "tipo"]
+    fields = ["nombre", "nombre_normalizado", "email", "telefono", "nit", "direccion", "ciudad", "tipo"]
+    readonly_fields = ["nombre_normalizado"]
 
 
 @admin.register(Papel)
