@@ -25,6 +25,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fontconfig \
     # Utilidad de diagnóstico
     curl \
+    # Cron para el procesamiento diario de correos (procesar_correos)
+    cron \
     && rm -rf /var/lib/apt/lists/*
 
 # Actualizar la caché de fuentes
@@ -43,8 +45,9 @@ RUN mkdir -p /app/staticfiles /app/media
 # Recolectar archivos estáticos para WhiteNoise
 RUN SECRET_KEY=temp-secret-key-for-collectstatic python manage.py collectstatic --no-input
 
-# Dar permisos de ejecución al script de inicio y convertir finales de línea Windows a Unix (CRLF -> LF)
-RUN chmod +x /app/start.sh && sed -i 's/\r$//' /app/start.sh
+# Dar permisos de ejecución a los scripts de inicio/cron y convertir finales de línea Windows a Unix (CRLF -> LF)
+RUN chmod +x /app/start.sh /app/run_procesar_correos.sh \
+    && sed -i 's/\r$//' /app/start.sh /app/run_procesar_correos.sh /app/crontab
 
 # Exponer el puerto por defecto
 EXPOSE 8000

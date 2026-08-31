@@ -1,0 +1,6 @@
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Procesa el buzon produccion@troquelesink.com una vez al dia.
+# BATCH_DIAS_ATRAS (default 3) cubre reintentos si esta corrida se pierde
+# por un reinicio/redeploy del contenedor.
+0 10 * * * root /app/run_procesar_correos.sh >> /var/log/procesar_correos.log 2>&1
