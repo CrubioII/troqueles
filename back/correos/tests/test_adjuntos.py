@@ -1,6 +1,6 @@
 from django.test import SimpleTestCase
 
-from correos.reglas.adjuntos import Adjunto, es_archivo_orden, extension_valida, filtrar_validos
+from correos.reglas.adjuntos import Adjunto, es_archivo_orden, extension_valida, filtrar_validos, preferir_pdf
 
 
 class ExtensionValidaTests(SimpleTestCase):
@@ -30,6 +30,28 @@ class ExtensionValidaTests(SimpleTestCase):
         ]
         resultado = filtrar_validos(adjuntos)
         self.assertEqual([a.nombre for a in resultado], ["troquel.pdf", "modelo.cdr"])
+
+
+class PreferirPdfTests(SimpleTestCase):
+    def test_pdf_y_ai_se_queda_solo_con_el_pdf(self):
+        adjuntos = [Adjunto("modelo.ai", b"1"), Adjunto("modelo.pdf", b"2")]
+        resultado = preferir_pdf(adjuntos)
+        self.assertEqual([a.nombre for a in resultado], ["modelo.pdf"])
+
+    def test_pdf_y_cdr_se_queda_solo_con_el_pdf(self):
+        adjuntos = [Adjunto("modelo.cdr", b"1"), Adjunto("modelo.pdf", b"2")]
+        resultado = preferir_pdf(adjuntos)
+        self.assertEqual([a.nombre for a in resultado], ["modelo.pdf"])
+
+    def test_sin_pdf_no_cambia_nada(self):
+        adjuntos = [Adjunto("modelo.ai", b"1"), Adjunto("modelo.cdr", b"2")]
+        resultado = preferir_pdf(adjuntos)
+        self.assertEqual([a.nombre for a in resultado], ["modelo.ai", "modelo.cdr"])
+
+    def test_solo_pdf_no_cambia_nada(self):
+        adjuntos = [Adjunto("modelo.pdf", b"1")]
+        resultado = preferir_pdf(adjuntos)
+        self.assertEqual([a.nombre for a in resultado], ["modelo.pdf"])
 
 
 class EsArchivoOrdenTests(SimpleTestCase):

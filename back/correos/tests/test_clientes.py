@@ -98,8 +98,16 @@ class ReglasExclusivasTests(SimpleTestCase):
         r = resolver_cliente("otro@gmail.com", "Juan Carlos Arias", "")
         self.assertEqual(r.nombre, "Graficas Modernas")
 
-    def test_tabla_tiene_once_reglas(self):
-        self.assertEqual(len(REGLAS_EXCLUSIVAS), 11)
+    def test_printcoleditores_por_correo(self):
+        r = resolver_cliente("printcoleditores@gmail.com", "Santiago Londoño Paz", "")
+        self.assertEqual(r.nombre, "printcoleditores")
+
+    def test_printcoleditores_por_nombre_sin_tilde(self):
+        r = resolver_cliente("otro@gmail.com", "Santiago Londono Paz", "")
+        self.assertEqual(r.nombre, "printcoleditores")
+
+    def test_tabla_tiene_doce_reglas(self):
+        self.assertEqual(len(REGLAS_EXCLUSIVAS), 12)
 
 
 class AlexanderTests(SimpleTestCase):

@@ -31,6 +31,14 @@ def filtrar_validos(adjuntos):
     return [a for a in adjuntos if extension_valida(a.nombre)]
 
 
+def preferir_pdf(adjuntos):
+    """Si hay algún PDF entre los adjuntos válidos, descarta los .ai/.cdr
+    del mismo correo — subir .ai/.cdr solo aplica cuando no hay alternativa
+    en PDF (spec ampliada de 6.5, antes exclusiva de Impresos Richard)."""
+    pdfs = [a for a in adjuntos if os.path.splitext(a.nombre)[1].lower() == ".pdf"]
+    return pdfs if pdfs else adjuntos
+
+
 _PATRON_ORDEN_FINAL = re.compile(r"(?:^|[_\-\s]+)orden$")
 
 

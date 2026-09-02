@@ -16,7 +16,7 @@ from django.core.files.base import ContentFile
 from django.db import transaction
 from django.utils import timezone
 
-from cotizaciones.models import Cliente, OrdenProduccion, TroquelModelo, normalizar_nombre_cliente
+from cotizaciones.models import Cliente, OpProceso, OrdenProduccion, TroquelModelo, normalizar_nombre_cliente
 from correos import imap_client, telegram
 from correos.models import CorreoProcesado
 from correos.pdf_utils import (
@@ -25,7 +25,7 @@ from correos.pdf_utils import (
     referencia_pagina_richard,
     truncar_nombre_archivo,
 )
-from correos.reglas.adjuntos import es_archivo_orden, filtrar_validos
+from correos.reglas.adjuntos import es_archivo_orden, filtrar_validos, preferir_pdf
 from correos.reglas.clientes import resolver_cliente
 from correos.reglas.cotizacion import es_cotizacion
 from correos.reglas.cuerpo import cuerpo_visible, html_a_texto
@@ -151,6 +151,7 @@ def _crear_ordenes(cliente_nombre, nota_cliente, tareas, cuerpo_limpio):
             )
             troquel = TroquelModelo(orden=orden, nota_cliente=nota_cliente)
             troquel.archivo.save(tarea.nombre_archivo, ContentFile(tarea.contenido), save=True)
+            OpProceso.objects.create(orden=orden, proceso_id="troquel", active=True)
             ordenes.append(orden.numero)
             mensajes.append(telegram.msg_confirmacion(
                 orden.numero, cliente.nombre, fecha.isoformat(), tarea.referencia,
@@ -193,6 +194,7 @@ def procesar_correo(mensaje, message_id, dry_run=False):
 
         paso = "filtrar_adjuntos"
         adjuntos_validos = filtrar_validos(imap_client.extraer_adjuntos(mensaje))
+        adjuntos_validos = preferir_pdf(adjuntos_validos)
         if not adjuntos_validos:
             if not dry_run:
                 _registrar(message_id, asunto, remitente_completo, fecha_correo, "omitido_sin_adjuntos")

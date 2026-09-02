@@ -115,6 +115,11 @@ REGLAS_EXCLUSIVAS = (
         nombres=(r"juan\s+carlos\s+arias",),
         flag="filtra_orden",
     ),
+    ReglaCliente(
+        "printcoleditores",
+        correos=("printcoleditores@gmail.com",),
+        nombres=(r"santiago\s+londo[ñn]o\s+paz",),
+    ),
 )
 
 

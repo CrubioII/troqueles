@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from django.test import TestCase, override_settings
 
-from cotizaciones.models import Cliente, OrdenProduccion, TroquelModelo
+from cotizaciones.models import Cliente, OpProceso, OrdenProduccion, TroquelModelo
 from correos import pipeline
 from correos.models import CorreoProcesado
 
@@ -55,9 +55,25 @@ class ProcesarCorreoEstandarTests(TestCase):
         self.assertEqual(orden.cliente_id, cliente.id)
         self.assertTrue(TroquelModelo.objects.filter(orden=orden).exists())
 
+        proceso = OpProceso.objects.get(orden=orden, proceso_id="troquel")
+        self.assertTrue(proceso.active)
+        self.assertEqual(proceso.costo, 0)
+
         registro = CorreoProcesado.objects.get(message_id="<caso1@nuevaempresa.com.co>")
         self.assertEqual(registro.resultado, "ok")
         self.assertEqual(registro.ordenes, resultado.ordenes)
+
+    def test_pdf_y_ai_juntos_solo_usa_el_pdf(self):
+        msg = _mensaje(
+            "Alguien <info@nuevaempresa.com.co>", "Troquel nuevo", "cuerpo",
+            adjuntos=[("modelo.pdf", _pdf_valido(1)), ("modelo.ai", b"contenido ai")],
+            message_id="<caso3@x.com>",
+        )
+        resultado = pipeline.procesar_correo(msg, "<caso3@x.com>")
+        self.assertEqual(resultado.resultado, "ok")
+        self.assertEqual(len(resultado.ordenes), 1)
+        orden = OrdenProduccion.objects.get(numero=resultado.ordenes[0])
+        self.assertTrue(orden.troquel_modelo.archivo.name.endswith(".pdf"))
 
     def test_reusa_cliente_existente_por_nombre_normalizado(self):
         Cliente.objects.create(nombre="Nuevaempresa")
