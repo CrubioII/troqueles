@@ -19,6 +19,19 @@ function isExpired(token) {
   return Date.now() / 1000 > p.exp
 }
 
+// Rol de producción del Operador (ver back/cotizaciones/roles.py). El Admin
+// no depende de estos campos: todas las pantallas ya lo dejan pasar por
+// role === 'admin'.
+function userFromClaims(data) {
+  return {
+    username: data.username,
+    role: data.role,
+    estaciones: data.estaciones || [],
+    troqueles: !!data.troqueles,
+    remisionesGenerales: !!data.remisiones_generales,
+  }
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [ready, setReady] = useState(false)
@@ -35,7 +48,7 @@ export function AuthProvider({ children }) {
         // El token trae username/role como claims: restaurar la sesión sin red.
         const claims = decodePayload(token)
         if (claims?.username && claims?.role) {
-          setUser({ username: claims.username, role: claims.role })
+          setUser(userFromClaims(claims))
           setReady(true)
           return
         }
@@ -46,7 +59,7 @@ export function AuthProvider({ children }) {
           })
           if (res.ok) {
             const data = await res.json()
-            if (!cancelled) setUser({ username: data.username, role: data.role })
+            if (!cancelled) setUser(userFromClaims(data))
           } else {
             localStorage.removeItem('access')
             localStorage.removeItem('refresh')
@@ -76,7 +89,7 @@ export function AuthProvider({ children }) {
     const data = await res.json()
     localStorage.setItem('access', data.access)
     localStorage.setItem('refresh', data.refresh)
-    setUser({ username: data.username, role: data.role })
+    setUser(userFromClaims(data))
   }, [])
 
   const logout = useCallback(() => {

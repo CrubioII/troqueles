@@ -3,19 +3,30 @@ import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { Icon } from './Icons'
 import { CampanaNotificaciones } from './Notificaciones'
+import { puedeEstacion, puedeTroqueles, puedeRemisionesGenerales } from '../lib/accesoProduccion'
 
+// `estacion`/`troqueles`/`remisionesGenerales`: qué le exige este link al rol
+// de producción del Operador (ver back/cotizaciones/roles.py). Sin ninguno de
+// los tres, el link queda visible para cualquier autenticado.
 const PRODUCCION_SUBLINKS = [
   { label: 'Hub de producción', path: '/produccion', exact: true, icon: <Icon.Progress width="15" height="15" /> },
   // Cadena de producción, en su orden real
-  { label: 'Guillotina', path: '/produccion/guillotina', icon: <Icon.Blade width="15" height="15" /> },
-  { label: 'Impresora', path: '/produccion/impresora', icon: <Icon.Printer width="15" height="15" /> },
-  { label: 'Laminadora', path: '/produccion/laminadora', icon: <Icon.Layers width="15" height="15" /> },
-  { label: 'Barnizadora', path: '/produccion/barnizadora', icon: <Icon.Drop width="15" height="15" /> },
-  { label: 'Troqueladora', path: '/produccion/troqueladora', icon: <Icon.Blade width="15" height="15" /> },
-  { label: 'Troqueles', path: '/produccion/troqueles', icon: <Icon.Stamp width="15" height="15" /> },
-  { label: 'Producción general', path: '/produccion/general', icon: <Icon.Progress width="15" height="15" /> },
+  { label: 'Guillotina', path: '/produccion/guillotina', icon: <Icon.Blade width="15" height="15" />, estacion: 'guillotina' },
+  { label: 'Impresora', path: '/produccion/impresora', icon: <Icon.Printer width="15" height="15" />, estacion: 'impresora' },
+  { label: 'Laminadora', path: '/produccion/laminadora', icon: <Icon.Layers width="15" height="15" />, estacion: 'laminadora' },
+  { label: 'Barnizadora', path: '/produccion/barnizadora', icon: <Icon.Drop width="15" height="15" />, estacion: 'barnizadora' },
+  { label: 'Troqueladora', path: '/produccion/troqueladora', icon: <Icon.Blade width="15" height="15" />, estacion: 'troqueladora' },
+  { label: 'Troqueles', path: '/produccion/troqueles', icon: <Icon.Stamp width="15" height="15" />, troqueles: true },
+  { label: 'Producción general', path: '/produccion/general', icon: <Icon.Progress width="15" height="15" />, remisionesGenerales: true },
   { label: 'Órdenes (CRUD)', path: '/ordenes', icon: <Icon.Duplicate width="15" height="15" /> },
 ]
+
+function puedeLink(link, user) {
+  if (link.estacion) return puedeEstacion(user, link.estacion)
+  if (link.troqueles) return puedeTroqueles(user)
+  if (link.remisionesGenerales) return puedeRemisionesGenerales(user)
+  return true
+}
 
 const NAV_LINKS = [
   {
@@ -140,7 +151,7 @@ export default function Layout() {
   const location = useLocation()
   const isAdmin = user?.role === 'admin'
   const navLinks = NAV_LINKS.filter(l => isAdmin || !l.adminOnly)
-  const subLinks = PRODUCCION_SUBLINKS.filter(l => isAdmin || !l.adminOnly)
+  const subLinks = PRODUCCION_SUBLINKS.filter(l => (isAdmin || !l.adminOnly) && puedeLink(l, user))
   const [drawerOpen, setDrawerOpen] = useState(false)
 
   useEffect(() => { setDrawerOpen(false) }, [location.pathname])

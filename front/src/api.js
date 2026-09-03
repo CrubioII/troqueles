@@ -447,6 +447,15 @@ export const getRemisionesSolicitadas = () =>
 export const getRemisionablesOperador = () =>
   apiFetch(`${BASE}/ordenes/remisionables_operador/`).then(json)
 
+// No es un delete: solo saca la OP de la cola de remisionables del Operador;
+// sigue intacta y a cargo del Admin de ahí en adelante.
+export const descartarRemisionableOperador = (ordenId) =>
+  apiFetch(`${BASE}/ordenes/descartar_remisionable_operador/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ orden_id: ordenId }),
+  }).then(jsonConCodigo)
+
 // Historial de remisiones ya generadas por el Operador, sin dinero.
 export const getRemisionesGeneradasOperador = () =>
   apiFetch(`${BASE}/ordenes/remisiones_generadas_operador/`).then(json)
@@ -458,6 +467,11 @@ export const devolverRemisionOperador = (remisionId) =>
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ remision_id: remisionId }),
   }).then(jsonConCodigo)
+
+// OPs de la cadena (impresora/laminadora/barnizadora/troqueladora) ya completas
+// y pendientes de remisionar. No incluye troquel (ver getRemisionablesOperador).
+export const getRemisionablesProduccion = () =>
+  apiFetch(`${BASE}/ordenes/remisionables_produccion/`).then(json)
 
 // Crea/consolida una remisión del Operador a partir de varias OP del mismo cliente.
 // `observaciones`: nota general que se imprime al pie del documento (vacía no

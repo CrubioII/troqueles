@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
 import { fmtNum, ESTACIONES_CONFIG } from '../components/core'
 import { Icon } from '../components/Icons'
 import { RegistroProcesoForm, RegistroProcesoHistory } from '../components/RegistroProceso'
@@ -70,6 +71,8 @@ function DragHandle({ style, ...props }) {
  */
 export default function EstacionMaquina({ estacion, estaciones, embedded = false }) {
   const navigate = useNavigate()
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
   const ids = estaciones || [estacion]
   const idsKey = ids.join(',')
   const combinado = ids.length > 1
@@ -123,7 +126,8 @@ export default function EstacionMaquina({ estacion, estaciones, embedded = false
     return lista.filter(op => [op.numero, op.cliente_nombre, op.referencia].some(v => norm(v).includes(t)))
   }, [lista, busqueda])
 
-  // Reordenar la cola arrastrando. La prioridad vive por estación, así que una
+  // Reordenar la cola arrastrando (solo Admin — priorizar la cola no es
+  // decisión del Operador). La prioridad vive por estación, así que una
   // pantalla combinada (Guillotina) guarda la subsecuencia de cada una por
   // separado, conservando el orden relativo que quedó en la lista.
   const guardarOrden = (nueva) => {
@@ -141,7 +145,7 @@ export default function EstacionMaquina({ estacion, estaciones, embedded = false
 
   // Con búsqueda activa se ve solo un pedazo de la cola: reordenar ahí
   // renumeraría mal las OPs escondidas, así que el arrastre se apaga.
-  const drag = useDragOrder(filtradas, guardarOrden, { disabled: filtrando })
+  const drag = useDragOrder(filtradas, guardarOrden, { disabled: filtrando || !isAdmin })
 
   const histFiltrado = useMemo(() => {
     const t = norm(busquedaHist.trim())
@@ -223,11 +227,16 @@ export default function EstacionMaquina({ estacion, estaciones, embedded = false
                   />
                 }
               >
-                {(ordenError || filtradas.length > 0) && (
+                {isAdmin && (ordenError || filtradas.length > 0) && (
                   <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--line)', fontSize: 12, color: ordenError ? 'var(--danger, #c0392b)' : 'var(--ink-3)' }}>
                     {ordenError || (filtrando
                       ? 'Limpia la búsqueda para poder reordenar la cola.'
                       : 'Arrastra una fila por su manija para cambiar la prioridad: la de arriba se trabaja primero.')}
+                  </div>
+                )}
+                {!isAdmin && filtradas.length > 0 && (
+                  <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--line)', fontSize: 12, color: 'var(--ink-3)' }}>
+                    Orden de la cola: lo define el administrador.
                   </div>
                 )}
                 {loadingLista ? (
@@ -260,7 +269,7 @@ export default function EstacionMaquina({ estacion, estaciones, embedded = false
                               ...dr.style,
                             }} onClick={() => abrir(op)}>
                               <td style={{ padding: '10px 6px', width: 28, color: 'var(--ink-3)' }}>
-                                {!filtrando && <DragHandle {...drag.handleProps(op)} />}
+                                {isAdmin && !filtrando && <DragHandle {...drag.handleProps(op)} />}
                               </td>
                               <td style={{ padding: '10px 12px', color: 'var(--ink-3)', fontSize: 12 }}>{idx + 1}</td>
                               {combinado && (

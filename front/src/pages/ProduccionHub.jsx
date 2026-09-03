@@ -5,6 +5,16 @@ import { ModuleCard, ESTACIONES_CONFIG, ESTACIONES_ORDEN } from '../components/c
 import { Icon } from '../components/Icons'
 import { getDashboardStats } from '../api'
 import { UtilizacionChart } from '../components/charts/DashboardCharts'
+import { puedeEstacion, puedeTroqueles, puedeRemisionesGenerales } from '../lib/accesoProduccion'
+
+// Módulos cuyo acceso depende del rol de producción del Operador (ver
+// back/cotizaciones/roles.py). Lo que no aparece acá (p. ej. 'ordenes') queda
+// visible para cualquier autenticado.
+function puedeModulo(key, user) {
+  if (key === 'troqueles') return puedeTroqueles(user)
+  if (key === 'general') return puedeRemisionesGenerales(user)
+  return puedeEstacion(user, key)
+}
 
 // Las cuatro estaciones van primero y en orden de cadena: el hub debe leerse
 // como el recorrido real de una OP por el taller.
@@ -75,7 +85,7 @@ export default function ProduccionHub() {
 
   // Las órdenes son de todos: el Operador levanta las suyas (sin precios) y el
   // Admin además las liquida y las borra.
-  const modules = [...MODULES, {
+  const modules = [...MODULES.filter(mod => puedeModulo(mod.key, user)), {
     key: 'ordenes',
     label: 'Órdenes de producción',
     desc: isAdmin

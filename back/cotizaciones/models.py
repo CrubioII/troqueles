@@ -286,6 +286,9 @@ class OrdenProduccion(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
         related_name="remisiones_solicitadas",
     )
+    # El Operador la descarta de su propia cola de remisionables (no es un
+    # delete: la OP sigue intacta, queda a cargo del Admin de ahí en adelante).
+    remision_descartada_operador_en = models.DateTimeField(null=True, blank=True)
 
     creado = models.DateTimeField(auto_now_add=True)
     modificado = models.DateTimeField(auto_now=True)
@@ -780,4 +783,27 @@ class Notificacion(models.Model):
 
     def __str__(self):
         return f"{self.tipo} · {self.titulo[:40]}"
+
+
+class PerfilOperador(models.Model):
+    """Rol de producción del Operador: qué estaciones/módulos puede tocar.
+
+    Se asigna directamente en el admin de Django (inline en el usuario, igual
+    que is_staff) — no hay pantalla de gestión de usuarios en el front. El
+    Admin (is_staff) siempre tiene acceso completo; este perfil solo limita
+    al Operador. Ver cotizaciones/roles.py para el mapeo rol → estaciones.
+    """
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="perfil_operador",
+    )
+    es_general = models.BooleanField("Acceso general (producción + remisión)", default=False)
+    es_troquelador = models.BooleanField("Troquelador (módulo Troqueles)", default=False)
+    es_estaciones = models.BooleanField(
+        "Estaciones (Impresora, Laminadora, Barnizadora, Troqueladora)", default=False,
+    )
+    es_guillotina = models.BooleanField("Guillotina", default=False)
+
+    def __str__(self):
+        return f"Perfil de {self.user.username}"
 

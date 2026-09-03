@@ -1,9 +1,31 @@
+from django.conf import settings
 from django.contrib import admin
+from django.contrib.auth import get_user_model
+from django.contrib.auth.admin import UserAdmin
 from .models import (
     Cliente, Papel, Cotizacion, CotizacionProceso, OrdenProduccion, OpProceso,
     OrdenCambio, TroquelModelo, FormatoCuchillas, Remision, RemisionItem,
-    RegistroProceso, Notificacion,
+    RegistroProceso, Notificacion, PerfilOperador,
 )
+
+
+class PerfilOperadorInline(admin.StackedInline):
+    model = PerfilOperador
+    can_delete = False
+    verbose_name_plural = "Rol de producción (Operador)"
+
+
+class UsuarioConRolAdmin(UserAdmin):
+    """UserAdmin de siempre + el rol de producción del Operador en un inline,
+    para asignarlo en el mismo lugar que is_staff sin pantalla propia en el
+    front (ver cotizaciones/roles.py)."""
+    inlines = [*UserAdmin.inlines, PerfilOperadorInline]
+
+
+User = get_user_model()
+if settings.AUTH_USER_MODEL == "auth.User":
+    admin.site.unregister(User)
+    admin.site.register(User, UsuarioConRolAdmin)
 
 
 @admin.register(Cliente)

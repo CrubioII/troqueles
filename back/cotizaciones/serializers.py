@@ -860,7 +860,7 @@ class RemisionGeneradaOperadorSerializer(serializers.ModelSerializer):
     class Meta:
         model = Remision
         fields = ["id", "numero", "fecha", "estado", "generada_en",
-                  "cliente_nombre", "generada_por_username", "ops"]
+                  "cliente_nombre", "generada_por_username", "ops", "tiene_troquel"]
 
     def get_ops(self, obj):
         # La OP propia + las de sus remisiones consolidadas (mismo criterio que

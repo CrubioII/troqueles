@@ -19,6 +19,7 @@ import Guillotina from './pages/Guillotina'
 import ProduccionGeneral from './pages/ProduccionGeneral'
 import EstacionMaquina from './pages/EstacionMaquina'
 import Login from './pages/Login'
+import { puedeEstacion, puedeTroqueles, puedeRemisionesGenerales } from './lib/accesoProduccion'
 
 function ProtectedRoute({ children }) {
   const { user, ready } = useAuth()
@@ -33,6 +34,17 @@ function AdminRoute({ children }) {
   if (!ready) return null
   if (!user) return <Navigate to="/login" replace />
   if (user.role !== 'admin') return <Navigate to="/produccion" replace />
+  return children
+}
+
+// Estación/módulo del rol de producción del Operador (ver
+// back/cotizaciones/roles.py) — el backend igual lo exige, esto solo evita
+// que el Operador aterrice en una pantalla vacía por 403.
+function RolRoute({ children, check }) {
+  const { user, ready } = useAuth()
+  if (!ready) return null
+  if (!user) return <Navigate to="/login" replace />
+  if (!check(user)) return <Navigate to="/produccion" replace />
   return children
 }
 
@@ -55,16 +67,16 @@ function AppRoutes() {
         <Route path="/clientes/:id" element={<AdminRoute><ClienteDetail /></AdminRoute>} />
         <Route path="/produccion" element={<ProduccionHub />} />
         {/* Cadena de producción: una sola pantalla, cuatro estaciones */}
-        <Route path="/produccion/impresora" element={<EstacionMaquina estacion="impresora" />} />
-        <Route path="/produccion/laminadora" element={<EstacionMaquina estacion="laminadora" />} />
-        <Route path="/produccion/barnizadora" element={<EstacionMaquina estacion="barnizadora" />} />
-        <Route path="/produccion/troqueladora" element={<EstacionMaquina estacion="troqueladora" />} />
-        <Route path="/produccion/troqueles" element={<Troqueles />} />
+        <Route path="/produccion/impresora" element={<RolRoute check={u => puedeEstacion(u, 'impresora')}><EstacionMaquina estacion="impresora" /></RolRoute>} />
+        <Route path="/produccion/laminadora" element={<RolRoute check={u => puedeEstacion(u, 'laminadora')}><EstacionMaquina estacion="laminadora" /></RolRoute>} />
+        <Route path="/produccion/barnizadora" element={<RolRoute check={u => puedeEstacion(u, 'barnizadora')}><EstacionMaquina estacion="barnizadora" /></RolRoute>} />
+        <Route path="/produccion/troqueladora" element={<RolRoute check={u => puedeEstacion(u, 'troqueladora')}><EstacionMaquina estacion="troqueladora" /></RolRoute>} />
+        <Route path="/produccion/troqueles" element={<RolRoute check={puedeTroqueles}><Troqueles /></RolRoute>} />
         <Route path="/produccion/troqueles/:id" element={<AdminRoute><TroquelGestion /></AdminRoute>} />
         {/* Guillotina: página centralizada — cadena (corte inicial + corte final de
             las OPs) y registro libre (cortes sueltos sin OP), en un solo lugar. */}
-        <Route path="/produccion/guillotina" element={<Guillotina />} />
-        <Route path="/produccion/general" element={<ProduccionGeneral />} />
+        <Route path="/produccion/guillotina" element={<RolRoute check={u => puedeEstacion(u, 'guillotina')}><Guillotina /></RolRoute>} />
+        <Route path="/produccion/general" element={<RolRoute check={puedeRemisionesGenerales}><ProduccionGeneral /></RolRoute>} />
       </Route>
     </Routes>
   )

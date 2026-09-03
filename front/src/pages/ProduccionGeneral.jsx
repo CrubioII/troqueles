@@ -1,10 +1,17 @@
-import { useState, useEffect, useRef, Fragment } from 'react'
+import { useState, useEffect, useRef, useMemo, Fragment } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Icon } from '../components/Icons'
 import { fmtNum, ProgressBar, Checkbox, ESTACION_DE_PROCESO } from '../components/core'
-import { getOrdenes, getOrden, toggleProcesoCompletado } from '../api'
+import {
+  getOrdenes, getOrden, toggleProcesoCompletado,
+  getRemisionablesProduccion, consolidarRemisionOperador, pdfRemisionOperadorConsolidada,
+  getRemisionesGeneradasOperador, devolverRemisionOperador,
+} from '../api'
 import { useSyncPolling } from '../lib/useSyncPolling'
 import { useAuth } from '../context/AuthContext'
+
+const norm = (s) => (s || '').toString().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+const asList = (d) => Array.isArray(d) ? d : (d?.results || [])
 
 const PROCESO_LABELS = {
   corteInicial: 'Corte inicial',
@@ -135,6 +142,302 @@ function ExpandedDetail({ ordId, onProgresoChange, isAdmin }) {
   )
 }
 
+// Avisa antes de generar: si hace falta una observación general para toda la
+// remisión, este es el momento de escribirla — sale impresa en el documento.
+function ConfirmarRemisionModal({ cantidad, cliente, observaciones, onObservaciones, busy, error, onClose, onConfirm }) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 9999,
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+    }}>
+      <div style={{ background: 'var(--surface)', borderRadius: 12, maxWidth: 460, width: '100%', padding: 24, boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
+        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>
+          ⚠ Antes de generar la remisión
+        </div>
+        <div style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5, marginBottom: 14 }}>
+          Vas a generar una remisión de <strong>{cliente || 'este cliente'}</strong> con{' '}
+          <strong>{cantidad}</strong> {cantidad === 1 ? 'OP' : 'OPs'}. Si necesitas dejar una{' '}
+          <strong>observación general</strong> para toda la remisión, escríbela aquí:{' '}
+          <strong>aparecerá impresa en el documento generado</strong>.
+        </div>
+        <textarea
+          className="input"
+          style={{ width: '100%', minHeight: 70, resize: 'vertical', fontFamily: 'inherit', fontSize: 13 }}
+          placeholder="Observación general (opcional)…"
+          value={observaciones}
+          onChange={e => onObservaciones(e.target.value)}
+        />
+        {error && <div style={{ marginTop: 10, fontSize: 12, color: 'var(--danger, #c0392b)' }}>✗ {error}</div>}
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
+          <button className="btn sm" disabled={busy} onClick={onClose}>Cancelar</button>
+          <button className="btn sm primary" disabled={busy} onClick={onConfirm}>
+            {busy ? 'Generando…' : 'Generar remisión'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Remisiones de OPs de cadena (impresora/laminadora/barnizadora/troqueladora)
+// ya 100% completadas — no incluye troquel, que se gestiona en su propia
+// pantalla (Producción › Troqueles). Mismo patrón que allá: pendientes
+// agrupadas por cliente + historial de lo ya generado, sin valores.
+function RemisionesProduccion() {
+  const [remisionables, setRemisionables] = useState([])
+  const [loadingRem, setLoadingRem] = useState(true)
+  const [busquedaRem, setBusquedaRem] = useState('')
+  const [selRem, setSelRem] = useState([])
+  const [selCliente, setSelCliente] = useState(null)
+  const [genBusy, setGenBusy] = useState(false)
+  const [genError, setGenError] = useState(null)
+  const [genOk, setGenOk] = useState(null)
+  const [confirmGen, setConfirmGen] = useState(false)
+  const [obsRem, setObsRem] = useState('')
+
+  const [historial, setHistorial] = useState([])
+  const [loadingHist, setLoadingHist] = useState(true)
+  const [histBusy, setHistBusy] = useState(null)
+  const [histError, setHistError] = useState(null)
+
+  const loadRemisionables = (silent = false) => {
+    if (!silent) setLoadingRem(true)
+    getRemisionablesProduccion()
+      .then(d => setRemisionables(asList(d)))
+      .catch(() => setRemisionables([]))
+      .finally(() => setLoadingRem(false))
+  }
+
+  const loadHistorial = (silent = false) => {
+    if (!silent) setLoadingHist(true)
+    getRemisionesGeneradasOperador()
+      .then(d => setHistorial(asList(d).filter(r => !r.tiene_troquel)))
+      .catch(() => setHistorial([]))
+      .finally(() => setLoadingHist(false))
+  }
+
+  useEffect(() => { loadRemisionables(); loadHistorial() }, [])
+  // Silencioso: una OP de cadena pasa a "pendiente de remisión" al registrarse
+  // la última estación (crea la Remision sola, ver _maybe_crear_remision).
+  useSyncPolling({
+    remisiones: () => { loadRemisionables(true); loadHistorial(true) },
+    registros_proceso: () => loadRemisionables(true),
+  })
+
+  const remisionablesFiltradas = useMemo(() => {
+    const t = norm(busquedaRem.trim())
+    if (!t) return remisionables
+    return remisionables.filter(op => [op.numero, op.cliente_nombre, op.referencia].some(v => norm(v).includes(t)))
+  }, [remisionables, busquedaRem])
+
+  const gruposRem = useMemo(() => {
+    const map = new Map()
+    for (const op of remisionablesFiltradas) {
+      const key = op.cliente_id
+      if (!map.has(key)) map.set(key, { cliente_id: key, cliente_nombre: op.cliente_nombre, ops: [] })
+      map.get(key).ops.push(op)
+    }
+    return [...map.values()]
+  }, [remisionablesFiltradas])
+
+  const toggleRem = (op) => {
+    setGenError(null)
+    if (selCliente !== null && op.cliente_id !== selCliente) {
+      setSelCliente(op.cliente_id)
+      setSelRem([op.id])
+      return
+    }
+    setSelCliente(op.cliente_id)
+    setSelRem(prev => {
+      const next = prev.includes(op.id) ? prev.filter(x => x !== op.id) : [...prev, op.id]
+      if (next.length === 0) setSelCliente(null)
+      return next
+    })
+  }
+
+  const descargarPdfRemision = async (remisionId) => {
+    const r = await pdfRemisionOperadorConsolidada(remisionId)
+    if (!r.ok) {
+      const body = await r.json().catch(() => null)
+      throw new Error(body?.error || `HTTP ${r.status}`)
+    }
+    const nombre = (r.headers.get('Content-Disposition') || '').match(/filename="(.+?)"/)?.[1]
+    const blob = await r.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = nombre || 'Remision.pdf'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const generarRemision = async () => {
+    if (!selRem.length) return
+    setGenBusy(true)
+    setGenError(null)
+    setGenOk(null)
+    try {
+      const { remision_id, remision_numero } = await consolidarRemisionOperador(selRem, obsRem.trim())
+      await descargarPdfRemision(remision_id)
+      setSelRem([]); setSelCliente(null)
+      setConfirmGen(false); setObsRem('')
+      setGenOk(remision_numero)
+      loadRemisionables()
+      loadHistorial()
+    } catch (e) {
+      setGenError(e.message || 'No se pudo generar la remisión')
+    } finally {
+      setGenBusy(false)
+    }
+  }
+
+  const rehacerPdf = async (rem) => {
+    setHistBusy(rem.id)
+    setHistError(null)
+    try {
+      await descargarPdfRemision(rem.id)
+    } catch (e) {
+      setHistError(e?.message || 'No se pudo generar el PDF')
+    } finally {
+      setHistBusy(null)
+    }
+  }
+
+  const devolver = async (rem) => {
+    if (!window.confirm(`¿Devolver las OPs de ${rem.numero} a la cola de remisiones? Podrás volver a generarla.`)) return
+    setHistBusy(rem.id)
+    setHistError(null)
+    try {
+      await devolverRemisionOperador(rem.id)
+      loadHistorial()
+      loadRemisionables()
+    } catch (e) {
+      setHistError(e?.message || 'No se pudo devolver la remisión')
+    } finally {
+      setHistBusy(null)
+    }
+  }
+
+  return (
+    <>
+      <div className="section">
+        <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)', fontWeight: 700, fontSize: 13, display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+          <span>Remisiones — selecciona OPs de un cliente</span>
+          <button
+            className="btn sm primary"
+            disabled={genBusy || !selRem.length}
+            onClick={() => { setGenError(null); setGenOk(null); setConfirmGen(true) }}
+          >
+            {genBusy ? 'Generando…' : `Generar remisión${selRem.length ? ` (${selRem.length})` : ''}`}
+          </button>
+        </div>
+        <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', fontSize: 12, color: 'var(--ink-3)' }}>
+          Marca varias OPs del <strong>mismo cliente</strong> ya completas (todas sus estaciones) para reunirlas en una sola remisión de entrega. No incluye troquel — eso se gestiona en Producción › Troqueles.
+        </div>
+        <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)' }}>
+          <div style={{ position: 'relative', maxWidth: 420 }}>
+            <input
+              className="input"
+              placeholder="Buscar por número, cliente, referencia…"
+              value={busquedaRem}
+              onChange={e => setBusquedaRem(e.target.value)}
+              style={{ paddingLeft: 32 }}
+            />
+            <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-3)' }}>
+              <Icon.Search />
+            </span>
+          </div>
+          {genError && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--danger, #c0392b)' }}>✗ {genError}</div>}
+          {genOk && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--ok, #2e7d32)' }}>✓ Remisión <strong>{genOk}</strong> generada.</div>}
+        </div>
+        {loadingRem ? <Skeleton /> : gruposRem.length === 0 ? (
+          <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>
+            {busquedaRem.trim() ? `Sin resultados para «${busquedaRem.trim()}»` : 'No hay OPs de producción pendientes de remisión.'}
+          </div>
+        ) : (
+          gruposRem.map(g => {
+            const bloqueado = selCliente !== null && g.cliente_id !== selCliente
+            return (
+              <div key={g.cliente_id} style={{ opacity: bloqueado ? 0.5 : 1 }}>
+                <div style={{ padding: '8px 16px', background: 'var(--surface-2)', borderBottom: '1px solid var(--line)', fontWeight: 700, fontSize: 13 }}>
+                  {g.cliente_nombre || '—'}
+                </div>
+                <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+                  <tbody>
+                    {g.ops.map((op, idx) => {
+                      const checked = selRem.includes(op.id)
+                      return (
+                        <tr key={op.id}
+                          style={{ borderBottom: '1px solid var(--line)', background: idx % 2 ? 'var(--surface-2)' : 'var(--surface)', cursor: 'pointer' }}
+                          onClick={() => toggleRem(op)}>
+                          <td style={{ padding: '10px 12px', width: 36 }}>
+                            <input type="checkbox" checked={checked} onChange={() => toggleRem(op)} onClick={e => e.stopPropagation()} />
+                          </td>
+                          <td style={{ padding: '10px 12px', width: 90, fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 13 }}>{op.numero}</td>
+                          <td style={{ padding: '10px 12px', color: 'var(--ink-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{op.referencia}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )
+          })
+        )}
+      </div>
+
+      <div className="section" style={{ marginTop: 16 }}>
+        <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)', fontWeight: 700, fontSize: 13 }}>
+          Generadas recientemente
+        </div>
+        {histError && <div style={{ padding: '8px 16px', fontSize: 12, color: 'var(--danger, #c0392b)' }}>✗ {histError}</div>}
+        {loadingHist ? <Skeleton /> : historial.length === 0 ? (
+          <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Aún no has generado ninguna remisión de producción.</div>
+        ) : (
+          <div className="table-scroll">
+          <table style={{ width: '100%', minWidth: 640, borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ borderBottom: '2px solid var(--line)' }}>
+                {['Remisión', 'Fecha', 'Cliente', 'OPs', ''].map((h, i) => (
+                  <th key={i} style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--ink-3)', background: 'var(--surface-2)' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {historial.map((rem, idx) => (
+                <tr key={rem.id} style={{ borderBottom: '1px solid var(--line)', background: idx % 2 ? 'var(--surface-2)' : 'var(--surface)' }}>
+                  <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 13 }}>{rem.numero}</td>
+                  <td style={{ padding: '10px 12px', fontSize: 12, color: 'var(--ink-2)' }}>{rem.fecha}</td>
+                  <td style={{ padding: '10px 12px', fontWeight: 600 }}>{rem.cliente_nombre || '—'}</td>
+                  <td style={{ padding: '10px 12px', color: 'var(--ink-2)' }}>{rem.ops.map(o => o.numero).join(', ')}</td>
+                  <td style={{ padding: '10px 12px', display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                    <button className="btn sm" disabled={histBusy === rem.id} onClick={() => rehacerPdf(rem)}>PDF</button>
+                    <button className="btn sm" disabled={histBusy === rem.id} onClick={() => devolver(rem)}>Devolver</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          </div>
+        )}
+      </div>
+
+      {confirmGen && (
+        <ConfirmarRemisionModal
+          cantidad={selRem.length}
+          cliente={remisionables.find(op => op.cliente_id === selCliente)?.cliente_nombre}
+          observaciones={obsRem}
+          onObservaciones={setObsRem}
+          busy={genBusy}
+          error={genError}
+          onClose={() => { if (!genBusy) { setConfirmGen(false); setGenError(null) } }}
+          onConfirm={generarRemision}
+        />
+      )}
+    </>
+  )
+}
+
 export default function ProduccionGeneral() {
   const navigate = useNavigate()
   const { user } = useAuth()
@@ -151,6 +454,7 @@ export default function ProduccionGeneral() {
   const [expanded, setExpanded] = useState(null)
   const debounceRef = useRef(null)
   const paramsRef = useRef('')
+  const [tab, setTab] = useState('ordenes')
 
   const load = (params = '', initial = false) => {
     paramsRef.current = params
@@ -212,6 +516,13 @@ export default function ProduccionGeneral() {
       </div>
 
       <div style={{ maxWidth: 1200, margin: '0 auto', padding: 'clamp(12px, 4vw, 28px) clamp(12px, 4vw, 24px)', width: '100%' }}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+          <button className={`btn sm${tab === 'ordenes' ? ' primary' : ''}`} onClick={() => setTab('ordenes')}>Órdenes</button>
+          <button className={`btn sm${tab === 'remisiones' ? ' primary' : ''}`} onClick={() => setTab('remisiones')}>Remisiones</button>
+        </div>
+
+        {tab === 'remisiones' ? <RemisionesProduccion /> : (
+        <>
         <div style={{ display: 'flex', gap: 10, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
           <div style={{ position: 'relative', flex: 1, minWidth: 220 }}>
             <input
@@ -321,6 +632,8 @@ export default function ProduccionGeneral() {
           <div style={{ textAlign: 'center', marginTop: 12, fontSize: 11, color: 'var(--ink-3)' }}>
             {fmtNum(count)} orden{count !== 1 ? 'es' : ''}
           </div>
+        )}
+        </>
         )}
       </div>
     </div>

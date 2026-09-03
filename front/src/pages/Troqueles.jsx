@@ -12,7 +12,7 @@ import {
   getOrdenesTodas, deleteOrden, getFormatosCuchillas, getFormatosCuchillasTodos, getOrdenesPendientes,
   getOrdenProduccion, getTroquelModelo,
   updateFormatoCuchillas, cancelarEnvioFormato,
-  getRemisionablesOperador, consolidarRemisionOperador, pdfRemisionOperadorConsolidada,
+  getRemisionablesOperador, descartarRemisionableOperador, consolidarRemisionOperador, pdfRemisionOperadorConsolidada,
   getRemisionesGeneradasOperador, devolverRemisionOperador,
   getRemisionesSolicitadas, setProcesoPrioridades,
   getClientes, editarCamposOrden,
@@ -135,12 +135,12 @@ function AdminTroqueles() {
 
   useEffect(() => { loadSolicitudes() }, [])
   useSyncPolling({
-    ordenes: () => loadOrdenes(),
+    ordenes: () => loadOrdenes(true),
     remisiones_solicitadas: loadSolicitudes,
   })
 
-  const loadOrdenes = () => {
-    setLoading(true)
+  const loadOrdenes = (silent = false) => {
+    if (!silent) setLoading(true)
     return getOrdenesTodas('?proceso=troquel')
       .then(d => {
         const list = asList(d).sort(byCreado)
@@ -206,6 +206,31 @@ function AdminTroqueles() {
     reordenar(cola)
   }
 
+  // Cuenta de OPs por cliente en la cola completa (no la filtrada por búsqueda),
+  // para poder priorizar todas las de un cliente de un solo golpe.
+  const gruposCliente = useMemo(() => {
+    const map = new Map()
+    for (const o of ordenesEnCola) {
+      const key = o.cliente_nombre || '—'
+      map.set(key, (map.get(key) || 0) + 1)
+    }
+    return [...map.entries()]
+      .map(([nombre, count]) => ({ nombre, count }))
+      .sort((a, b) => b.count - a.count)
+  }, [ordenesEnCola])
+
+  // Manda todas las OPs de un cliente al frente de la cola, en bloque,
+  // conservando su orden relativo (FIFO/prioridad ya asignada entre ellas).
+  const priorizarCliente = (nombre) => {
+    const delCliente = ordenesEnCola.filter(o => (o.cliente_nombre || '—') === nombre)
+    const resto = ordenesEnCola.filter(o => (o.cliente_nombre || '—') !== nombre)
+    reordenar([...delCliente, ...resto])
+  }
+
+  // Descarta cualquier prioridad manual y vuelve a la cola por antigüedad
+  // (la más vieja primero).
+  const ordenarPorAntiguedad = () => reordenar([...ordenesEnCola].sort(byCreado))
+
   // Con búsqueda activa se ve solo un pedazo de la cola: reordenar ahí
   // renumeraría mal las OPs escondidas, así que el arrastre se apaga.
   const drag = useDragOrder(ordenesFiltradas, reordenar, { disabled: filtrando })
@@ -252,6 +277,24 @@ function AdminTroqueles() {
         {prioridadError && (
           <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', fontSize: 12, color: 'var(--danger, #c0392b)' }}>
             ✗ {prioridadError}
+          </div>
+        )}
+        {(gruposCliente.length > 1 || ordenesEnCola.length > 1) && (
+          <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+            {gruposCliente.length > 1 && (
+              <>
+                <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>Priorizar por cliente:</span>
+                {gruposCliente.map(g => (
+                  <button key={g.nombre} className="btn sm" onClick={() => priorizarCliente(g.nombre)}>
+                    {g.nombre} ({g.count})
+                  </button>
+                ))}
+                <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--line)', margin: '0 4px' }} />
+              </>
+            )}
+            <button className="btn sm" onClick={ordenarPorAntiguedad} title="Descarta el orden manual y vuelve a ordenar por fecha de subida">
+              Ordenar por antigüedad (más antigua primero)
+            </button>
           </div>
         )}
         {loading ? (
@@ -393,7 +436,7 @@ function OperadorOpDatos({ orden, onSaved }) {
     <div style={{ marginTop: 16, overflow: 'visible' }} className="section">
       <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)', fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 12 }}>
         <span><span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{orden.numero}</span> — Datos de la OP</span>
-        <span style={{ marginLeft: 'auto', fontWeight: 400, color: 'var(--ink-3)' }}>Cantidad: {orden.cantidad}</span>
+        <span style={{ marginLeft: 'auto', fontWeight: 400, color: 'var(--ink-3)' }} title="Unidades del producto en la OP — no es la cantidad de troqueles">Uds. OP: {orden.cantidad}</span>
       </div>
       <div style={{ padding: 16, display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-end' }}>
         <div style={{ flex: '1 1 220px', minWidth: 200 }}>
@@ -565,6 +608,24 @@ function OperadorTroqueles() {
     })
   }
 
+  // No borra nada: solo saca la OP de esta cola. Sigue intacta y a cargo del
+  // Admin de ahí en adelante.
+  const [descartandoRem, setDescartandoRem] = useState(null)
+  const descartarRem = async (op) => {
+    if (!window.confirm(`¿Descartar ${op.numero} de tu cola de remisiones? Quedará a cargo del administrador; ya no la verás aquí.`)) return
+    setDescartandoRem(op.id)
+    setGenError(null)
+    try {
+      await descartarRemisionableOperador(op.id)
+      setSelRem(prev => prev.filter(id => id !== op.id))
+      loadRemisionables()
+    } catch (e) {
+      setGenError(e?.message || 'No se pudo descartar')
+    } finally {
+      setDescartandoRem(null)
+    }
+  }
+
   // Descarga el PDF de una remisión ya creada (al generarla y al re-descargarla
   // desde el historial).
   const descargarPdfRemision = async (remisionId) => {
@@ -636,20 +697,6 @@ function OperadorTroqueles() {
     if (!t) return lista
     return lista.filter(op => [op.numero, op.cliente_nombre, op.referencia].some(v => norm(v).includes(t)))
   }, [lista, busqueda])
-
-  // El Operador prioriza su propia cola arrastrando: la posición se guarda como
-  // prioridad del proceso troquel (1 = primero), igual que la vista del Admin.
-  const [ordenError, setOrdenError] = useState(null)
-  const guardarOrden = (nueva) => {
-    const snapshot = lista
-    setLista(nueva)
-    setOrdenError(null)
-    setProcesoPrioridades('troquel', nueva.map(op => op.id)).catch(() => {
-      setLista(snapshot)
-      setOrdenError('No se pudo guardar el orden. Intenta de nuevo.')
-    })
-  }
-  const drag = useDragOrder(listaFiltrada, guardarOrden, { disabled: filtrandoLista })
 
   const historialFiltrado = useMemo(() => {
     const t = norm(busquedaHist.trim())
@@ -876,10 +923,8 @@ function OperadorTroqueles() {
             }
           >
             {!loadingLista && lista.length > 0 && (
-              <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', fontSize: 12, color: ordenError ? 'var(--danger, #c0392b)' : 'var(--ink-3)' }}>
-                {ordenError || (filtrandoLista
-                  ? 'Limpia la búsqueda para poder reordenar la cola.'
-                  : 'Arrastra una fila por su manija para cambiar la prioridad: la de arriba se trabaja primero.')}
+              <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', fontSize: 12, color: 'var(--ink-3)' }}>
+                Orden de la cola: lo define el administrador.
               </div>
             )}
             {loadingLista ? (
@@ -909,28 +954,23 @@ function OperadorTroqueles() {
               <table style={{ width: '100%', minWidth: 760, borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ borderBottom: '2px solid var(--line)' }}>
-                    {['', '#', 'OP #', 'Subida', 'Cliente', 'Referencia', 'Cantidad', ''].map((h, i) => (
+                    {['#', 'OP #', 'Subida', 'Cliente', 'Referencia', ''].map((h, i) => (
                       <th key={i} style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--ink-3)', background: 'var(--surface-2)' }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {drag.items.map((op, idx) => {
+                  {listaFiltrada.map((op, idx) => {
                     const sub = fmtSubida(op.creado)
-                    const dr = drag.rowProps(op)
                     return (
-                      <tr key={op.id} {...dr}
-                        style={{ borderBottom: '1px solid var(--line)', background: idx % 2 ? 'var(--surface-2)' : 'var(--surface)', cursor: 'pointer', ...dr.style }}
+                      <tr key={op.id}
+                        style={{ borderBottom: '1px solid var(--line)', background: idx % 2 ? 'var(--surface-2)' : 'var(--surface)', cursor: 'pointer' }}
                         onClick={() => !opening && abrir(op)}>
-                        <td style={{ padding: '12px 6px', width: 28 }}>
-                          {!filtrandoLista && <DragHandle {...drag.handleProps(op)} />}
-                        </td>
                         <td style={{ padding: '12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 13, color: 'var(--ink-3)', width: 40 }}>{idx + 1}</td>
                         <td style={{ padding: '12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 13 }}>{op.numero}</td>
                         <td style={{ padding: '12px', fontSize: 12, fontWeight: 600, color: sub.color }}>{sub.txt}</td>
                         <td style={{ padding: '12px', fontWeight: 600 }}>{op.cliente_nombre || '—'}</td>
                         <td style={{ padding: '12px', color: 'var(--ink-2)' }}>{op.referencia}</td>
-                        <td style={{ padding: '12px', fontFamily: 'JetBrains Mono, monospace', color: 'var(--ink-2)' }}>{op.cantidad}</td>
                         <td style={{ padding: '12px' }}>
                           <button className="btn sm primary" disabled={opening} onClick={e => { e.stopPropagation(); abrir(op) }}>Abrir</button>
                         </td>
@@ -1012,7 +1052,17 @@ function OperadorTroqueles() {
                               </td>
                               <td style={{ padding: '10px 12px', width: 90, fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 13 }}>{op.numero}</td>
                               <td style={{ padding: '10px 12px', color: 'var(--ink-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{op.referencia}</td>
-                              <td style={{ padding: '10px 12px', width: 70, fontFamily: 'JetBrains Mono, monospace', color: 'var(--ink-2)' }}>{op.cantidad}</td>
+                              <td style={{ padding: '10px 12px', width: 70, fontFamily: 'JetBrains Mono, monospace', color: 'var(--ink-2)' }} title="Unidades del producto en la OP — no es la cantidad de troqueles (siempre es 1 por tarea)">{op.cantidad} uds</td>
+                              <td style={{ padding: '10px 12px', width: 90, textAlign: 'right' }} onClick={e => e.stopPropagation()}>
+                                <button
+                                  className="btn sm"
+                                  disabled={descartandoRem === op.id}
+                                  onClick={() => descartarRem(op)}
+                                  title="Sacarla de tu cola de remisiones; queda a cargo del administrador"
+                                >
+                                  Descartar
+                                </button>
+                              </td>
                             </tr>
                           )
                         })}

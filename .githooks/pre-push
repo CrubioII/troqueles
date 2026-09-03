@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Bloquea el push a main si los tests generales del backend no pasan.
+#
+# Se activa una sola vez por clon con:
+#   git config core.hooksPath .githooks
+#
+# Solo corre en pushes que incluyan la rama main como destino; otras ramas
+# pasan sin correr tests (para no frenar el trabajo en curso en feature
+# branches). Lee los refs que git le pasa por stdin, formato estándar de un
+# hook pre-push: "<local ref> <local sha> <remote ref> <remote sha>".
+
+set -u
+
+push_a_main=false
+while read -r local_ref local_sha remote_ref remote_sha; do
+  if [ "$remote_ref" = "refs/heads/main" ]; then
+    push_a_main=true
+  fi
+done
+
+if [ "$push_a_main" != "true" ]; then
+  exit 0
+fi
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root/back" || exit 1
+
+if [ ! -x .venv/bin/python ]; then
+  echo "✗ No se encontró back/.venv/bin/python — no se pudo validar el push. Abortado." >&2
+  exit 1
+fi
+
+echo "→ Push a main: corriendo tests generales del backend antes de continuar…"
+if ! .venv/bin/python manage.py test; then
+  echo "" >&2
+  echo "✗ Los tests fallaron. Push a main cancelado." >&2
+  exit 1
+fi
+
+echo "✓ Tests OK. Continuando con el push a main."
+exit 0

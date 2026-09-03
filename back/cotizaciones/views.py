@@ -117,11 +117,32 @@ from .serializers import (
     _cantidad_esperada,
 )
 from . import chain
+from . import roles
 
 
 def _require_admin(request):
     if not request.user.is_staff:
         raise PermissionDenied("Solo administradores pueden realizar esta acción.")
+
+
+def _require_estacion(request, estacion_id):
+    if estacion_id not in roles.estaciones_permitidas(request.user):
+        raise PermissionDenied("No tienes acceso a esta estación.")
+
+
+def _require_troqueles(request):
+    if not roles.puede_troqueles(request.user):
+        raise PermissionDenied("No tienes acceso al módulo de Troqueles.")
+
+
+def _require_remisiones_generales(request):
+    if not roles.puede_remisiones_generales(request.user):
+        raise PermissionDenied("No tienes acceso a las remisiones de producción.")
+
+
+def _require_alguna_remision(request):
+    if not roles.puede_alguna_remision(request.user):
+        raise PermissionDenied("No tienes acceso a remisiones.")
 
 
 CAUCHO_LABELS = dict(FormatoCuchillas.CAUCHO_TIPO_CHOICES)
@@ -623,6 +644,9 @@ def _remision_operador_pdf_ctx(rem, admin=False, con_desperdicio=False):
     troqueles = []
     total_general = 0.0
     for op in _remision_operador_ops(rem):
+        if not op.procesos.filter(proceso_id="troquel", active=True).exists():
+            # OP de cadena sin troquel: su resultado va en `procesos`, no aquí.
+            continue
         formato = (
             op.formatos_cuchillas.exclude(estado="borrador").order_by("-fecha_hora").first()
             or op.formatos_cuchillas.order_by("-fecha_hora").first()
@@ -1222,9 +1246,36 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         # nueva o una tarea de troquel). El serializer le quita la plata al
         # leer y la ignora al escribir; `_solo_op_directa` le cierra las OPs
         # que nacieron de una cotización, que son del Admin.
-        if self.action in ("list", "retrieve", "produccion", "buscar", "produccion_pendientes", "enviar_remision", "remision_pdf", "cancelar_remision", "remisionables_operador", "consolidar_remision_operador", "remision_operador_pdf", "remisiones_generadas_operador", "devolver_remision_operador", "editar_campos", "set_proceso_prioridades", "set_estacion_prioridades", "create", "update", "partial_update", "next_numero"):
+        if self.action in ("list", "retrieve", "produccion", "buscar", "produccion_pendientes", "enviar_remision", "remision_pdf", "cancelar_remision", "remisionables_operador", "remisionables_produccion", "consolidar_remision_operador", "remision_operador_pdf", "remisiones_generadas_operador", "devolver_remision_operador", "descartar_remisionable_operador", "remisiones_solicitadas", "editar_campos", "create", "update", "partial_update", "next_numero"):
+            self._require_rol_produccion(request)
             return
         _require_admin(request)
+
+    # Acciones del Operador que además de "autenticado" exigen un rol de
+    # producción concreto (ver cotizaciones/roles.py). `produccion_pendientes`
+    # se valida a sí misma más abajo porque su chequeo depende de query params
+    # (?estacion= vs ?proceso=troquel).
+    _ACCIONES_TROQUELES = {
+        "remisionables_operador", "descartar_remisionable_operador",
+    }
+    _ACCIONES_REMISIONES_GENERALES = {"remisionables_produccion"}
+    _ACCIONES_ALGUNA_REMISION = {
+        "consolidar_remision_operador", "remision_operador_pdf",
+        "remisiones_generadas_operador", "devolver_remision_operador",
+        "enviar_remision", "remision_pdf", "cancelar_remision",
+        "remisiones_solicitadas",
+    }
+
+    def _require_rol_produccion(self, request):
+        if request.user.is_staff:
+            return
+        accion = self.action
+        if accion in self._ACCIONES_TROQUELES:
+            _require_troqueles(request)
+        elif accion in self._ACCIONES_REMISIONES_GENERALES:
+            _require_remisiones_generales(request)
+        elif accion in self._ACCIONES_ALGUNA_REMISION:
+            _require_alguna_remision(request)
 
     def _solo_op_directa(self, request):
         """Le cierra al Operador las OPs derivadas de una cotización.
@@ -1422,8 +1473,9 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
     def _guardar_prioridades(self, request, proceso_ids, que):
         """Numera 1..N la prioridad de `proceso_ids` según el orden de orden_ids.
 
-        Sin _require_admin a propósito: la cola la prioriza quien la trabaja
-        (Admin u Operador), arrastrando las filas en su pantalla.
+        Admin-only: priorizar la cola es decisión suya, no de quien la trabaja
+        (bloqueado en `initial` — set_proceso_prioridades/set_estacion_prioridades
+        ya no están en la whitelist del Operador).
         """
         orden_ids = request.data.get("orden_ids")
         if not isinstance(orden_ids, list):
@@ -1551,6 +1603,7 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
             # Admin: la OP entra sola cuando le llega el turno.
             if estacion_id not in chain.ESTACION_POR_ID:
                 return Response({"error": "Estación desconocida."}, status=400)
+            _require_estacion(request, estacion_id)
             est = chain.ESTACION_POR_ID[estacion_id]
             bloqueantes = OpProceso.objects.filter(
                 orden=OuterRef("pk"), active=True, completado=False,
@@ -1587,6 +1640,8 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
             )
 
         if proceso_id:
+            if proceso_id == "troquel":
+                _require_troqueles(request)
             # Todas estas condiciones van en un solo filter() para que apliquen a
             # la MISMA fila de proceso (no a filas distintas de la misma OP).
             proc_cond = {
@@ -1615,6 +1670,10 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
             return Response(
                 OrdenOperadorSerializer(qs, many=True, context={"request": request}).data
             )
+        # Sin filtro: "todo lo pendiente en el taller" — solo el rol general
+        # (o el Admin) lo ve completo, sin recortar por estación.
+        if not request.user.is_staff and not roles.puede_remisiones_generales(request.user):
+            raise PermissionDenied("No tienes acceso a esta vista.")
         qs = qs.order_by(F("fecha_entrega").asc(nulls_last=True), "creado")
         data = OrdenOperadorSerializer(qs, many=True, context={"request": request}).data
         return Response(data)
@@ -1771,7 +1830,9 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         valores). El front agrupa por cliente y filtra en memoria.
 
         Lo que el Operador ya generó sale de esta cola y vive en
-        `remisiones_generadas_operador`, desde donde puede devolverse.
+        `remisiones_generadas_operador`, desde donde puede devolverse. Lo que
+        el Operador descartó (`descartar_remisionable_operador`) también sale
+        de aquí: la OP sigue intacta, queda a cargo del Admin.
         """
         qs = (
             OrdenProduccion.objects
@@ -1780,10 +1841,35 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
             # que remisionar, y uno devuelto tiene que corregirse y reenviarse
             # antes de volver a entrar en una remisión.
             .filter(formatos_cuchillas__estado__in=["pendiente", "aprobado"])
+            .filter(remision_descartada_operador_en__isnull=True)
             .filter(
                 Q(remision__isnull=True)
                 | Q(remision__estado="pendiente", remision__generada_en__isnull=True)
             )
+            .select_related("cliente", "remision")
+            .distinct()
+            .order_by("cliente__nombre", F("fecha_entrega").asc(nulls_last=True), "creado")
+        )
+        data = RemisionableOperadorSerializer(qs, many=True, context={"request": request}).data
+        return Response(data)
+
+    @action(detail=False, methods=["get"], url_path="remisionables_produccion")
+    def remisionables_produccion(self, request):
+        """GET /api/ordenes/remisionables_produccion/ — Operador o Admin.
+
+        OPs de la cadena (impresora/laminadora/barnizadora/troqueladora) que ya
+        completaron todas sus estaciones activas y por eso tienen una remisión
+        pendiente de generar (creada sola al llegar al 100%, ver
+        `_maybe_crear_remision`). No incluye troquel: esas viven en
+        `remisionables_operador` / la pantalla de Troqueles. Vista sanitizada
+        (sin valores). El front agrupa por cliente.
+        """
+        qs = (
+            OrdenProduccion.objects
+            .filter(remision_descartada_operador_en__isnull=True)
+            .filter(procesos__proceso_id__in=chain.CHAIN_PROCESOS, procesos__active=True)
+            .exclude(procesos__proceso_id="troquel", procesos__active=True)
+            .filter(remision__estado="pendiente", remision__generada_en__isnull=True)
             .select_related("cliente", "remision")
             .distinct()
             .order_by("cliente__nombre", F("fecha_entrega").asc(nulls_last=True), "creado")
@@ -1818,10 +1904,12 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         if len(cliente_ids) > 1:
             return Response({"error": "Todas las OP deben ser del mismo cliente."}, status=400)
 
-        # Cada OP debe tener el formato de cuchillas enviado (ni borrador ni devuelto).
+        # Solo a las OP con troquel les exige el formato de cuchillas enviado
+        # (ni borrador ni devuelto); las de cadena pura ya llegan aquí completas.
         sin_formato = [
             op.numero for op in ops
-            if not op.formatos_cuchillas.filter(estado__in=["pendiente", "aprobado"]).exists()
+            if op.procesos.filter(proceso_id="troquel", active=True).exists()
+            and not op.formatos_cuchillas.filter(estado__in=["pendiente", "aprobado"]).exists()
         ]
         if sin_formato:
             return Response({
@@ -1919,6 +2007,24 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         _desconsolidar_remision(rem)
         return Response({"ok": True})
 
+    @action(detail=False, methods=["post"], url_path="descartar_remisionable_operador")
+    def descartar_remisionable_operador(self, request):
+        """POST /api/ordenes/descartar_remisionable_operador/ — Operador o Admin.
+
+        Body { "orden_id": int }. No es un delete: la OP sigue intacta y con su
+        formato de cuchillas aprobado, solo sale de `remisionables_operador`
+        (la cola del Operador para armar remisiones) de ahí en adelante queda
+        a cargo del Admin, que la sigue viendo igual en su propia gestión.
+        """
+        orden_id = request.data.get("orden_id")
+        orden = OrdenProduccion.objects.filter(pk=orden_id).first()
+        if orden is None:
+            return Response({"error": "OP no encontrada."}, status=404)
+        if orden.remision_descartada_operador_en is None:
+            orden.remision_descartada_operador_en = timezone.now()
+            orden.save(update_fields=["remision_descartada_operador_en"])
+        return Response({"ok": True})
+
     @action(detail=False, methods=["get"], url_path="remisiones_solicitadas")
     def remisiones_solicitadas(self, request):
         """GET /api/ordenes/remisiones_solicitadas/ — solo Admin (via initial).
@@ -1977,7 +2083,14 @@ class RegistroMaquinaViewSet(viewsets.ModelViewSet):
         return qs
 
     def perform_create(self, serializer):
-        serializer.save(operador=self.request.user)
+        user = self.request.user
+        maquina = serializer.validated_data.get("maquina")
+        if not user.is_staff:
+            if maquina == "guillotina" and "guillotina" not in roles.estaciones_permitidas(user):
+                raise PermissionDenied("No tienes acceso a Guillotina.")
+            if maquina == "troquel" and not roles.puede_troqueles(user):
+                raise PermissionDenied("No tienes acceso al módulo de Troqueles.")
+        serializer.save(operador=user)
 
     def update(self, request, *args, **kwargs):
         _require_admin(request)
@@ -2213,6 +2326,8 @@ class TroquelModeloViewSet(viewsets.ModelViewSet):
         super().initial(request, *args, **kwargs)
         if self.action != "create":
             _require_admin(request)
+        else:
+            _require_troqueles(request)
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -2246,6 +2361,8 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
         return qs
 
     def perform_create(self, serializer):
+        if not self.request.user.is_staff:
+            _require_troqueles(self.request)
         # Un solo formato por OP: el Operador registra una vez y queda bloqueado.
         # Solo el Admin puede crear/editar adicionales.
         orden = serializer.validated_data.get("orden")
@@ -2391,6 +2508,8 @@ class RegistroProcesoViewSet(viewsets.ModelViewSet):
             qs = qs.filter(orden_id=orden_id)
         estacion = self.request.query_params.get("estacion")
         if estacion:
+            if not self.request.user.is_staff and estacion not in roles.estaciones_permitidas(self.request.user):
+                raise PermissionDenied("No tienes acceso a esta estación.")
             qs = qs.filter(estacion=estacion)
         if self.request.query_params.get("mias"):
             qs = qs.filter(operador=self.request.user)
@@ -2410,6 +2529,7 @@ class RegistroProcesoViewSet(viewsets.ModelViewSet):
                 {"error": f"El proceso '{proceso_id}' no pertenece a esta estación."},
                 status=400,
             )
+        _require_estacion(request, estacion_id)
 
         proceso = op.procesos.filter(proceso_id=proceso_id, active=True, completado=False).first()
         if proceso is None:
