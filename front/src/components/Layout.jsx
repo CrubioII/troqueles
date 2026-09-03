@@ -18,7 +18,7 @@ const PRODUCCION_SUBLINKS = [
   { label: 'Troqueladora', path: '/produccion/troqueladora', icon: <Icon.Blade width="15" height="15" />, estacion: 'troqueladora' },
   { label: 'Troqueles', path: '/produccion/troqueles', icon: <Icon.Stamp width="15" height="15" />, troqueles: true },
   { label: 'Producción general', path: '/produccion/general', icon: <Icon.Progress width="15" height="15" />, remisionesGenerales: true },
-  { label: 'Órdenes (CRUD)', path: '/ordenes', icon: <Icon.Duplicate width="15" height="15" /> },
+  { label: 'Órdenes (CRUD)', path: '/ordenes', icon: <Icon.Duplicate width="15" height="15" />, remisionesGenerales: true },
 ]
 
 function puedeLink(link, user) {

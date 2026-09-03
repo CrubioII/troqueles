@@ -83,25 +83,28 @@ export default function ProduccionHub() {
     getDashboardStats().then(s => setUtilizacion(s.utilizacion_maquinas)).catch(() => {})
   }, [])
 
-  // Las órdenes son de todos: el Operador levanta las suyas (sin precios) y el
-  // Admin además las liquida y las borra.
-  const modules = [...MODULES.filter(mod => puedeModulo(mod.key, user)), {
-    key: 'ordenes',
-    label: 'Órdenes de producción',
-    desc: isAdmin
-      ? 'Crea, edita y elimina órdenes de producción.'
-      : 'Crea una orden de producción con los datos del trabajo. Los precios los pone el administrador.',
-    action: isAdmin ? 'Ver órdenes' : 'Crear OP',
-    path: '/ordenes',
-    color: '#A67012',
-    soft: '#FAEAC7',
-    icon: (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-        <rect x="3" y="3" width="14" height="18" rx="2" stroke="currentColor" strokeWidth="1.5"/>
-        <path d="M7 8h8M7 12h8M7 16h5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-      </svg>
-    ),
-  }]
+  // Órdenes (CRUD): solo General (o Admin) — Guillotina/Estaciones/Troquelador
+  // no la ven ni pueden entrar (ver back/cotizaciones/roles.py).
+  const modules = MODULES.filter(mod => puedeModulo(mod.key, user))
+  if (puedeRemisionesGenerales(user)) {
+    modules.push({
+      key: 'ordenes',
+      label: 'Órdenes de producción',
+      desc: isAdmin
+        ? 'Crea, edita y elimina órdenes de producción.'
+        : 'Crea una orden de producción con los datos del trabajo. Los precios los pone el administrador.',
+      action: isAdmin ? 'Ver órdenes' : 'Crear OP',
+      path: '/ordenes',
+      color: '#A67012',
+      soft: '#FAEAC7',
+      icon: (
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+          <rect x="3" y="3" width="14" height="18" rx="2" stroke="currentColor" strokeWidth="1.5"/>
+          <path d="M7 8h8M7 12h8M7 16h5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+        </svg>
+      ),
+    })
+  }
 
   return (
     <div className="app">

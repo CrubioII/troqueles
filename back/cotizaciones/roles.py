@@ -8,9 +8,10 @@ tiene uno solo, pero nada impide combinarlos):
   es_general      → todas las estaciones de la cadena + Guillotina + módulo
                      Troqueles + remisiones (de cadena y de troquel).
   es_troquelador  → solo el módulo Troqueles (fabricación de molde, formato
-                     de cuchillas) y su propia cola de remisiones — NO incluye
-                     la estación 'troqueladora' de la cadena (esa es la
-                     máquina que trocela, no quien fabrica el molde).
+                     de cuchillas) — NO incluye la cola/consolidación de
+                     remisiones de troquel (eso es de General) ni la estación
+                     'troqueladora' de la cadena (esa es la máquina que
+                     trocela, no quien fabrica el molde).
   es_estaciones   → Impresora, Laminadora, Barnizadora, Troqueladora.
   es_guillotina   → Guillotina (corte inicial + corte final).
 """
@@ -47,7 +48,9 @@ def estaciones_permitidas(user):
 
 
 def puede_troqueles(user):
-    """Acceso al módulo Troqueles (molde + formato de cuchillas + su cola de remisiones)."""
+    """Acceso al módulo Troqueles (molde + formato de cuchillas). La cola/
+    consolidación de remisiones de troquel es aparte, ver `puede_remisiones_generales`.
+    """
     if user.is_staff:
         return True
     perfil = _perfil(user)

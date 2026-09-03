@@ -57,10 +57,11 @@ function AppRoutes() {
         <Route path="/cotizaciones" element={<AdminRoute><CotizacionList /></AdminRoute>} />
         <Route path="/cotizaciones/:id" element={<AdminRoute><CotizacionEdit /></AdminRoute>} />
         <Route path="/documentos/:id" element={<AdminRoute><DocumentoClienteEdit /></AdminRoute>} />
-        {/* El Operador crea y edita sus OPs directas: la pantalla le oculta
-            lo monetario y el backend le cierra las OPs que vienen de una COT. */}
-        <Route path="/ordenes" element={<OrdenList />} />
-        <Route path="/ordenes/:id" element={<OrdenEdit />} />
+        {/* Solo General (o Admin): crea y edita OPs directas. La pantalla le
+            oculta lo monetario al Operador y el backend le cierra las OPs
+            que vienen de una COT. Guillotina/Estaciones/Troquelador no entran. */}
+        <Route path="/ordenes" element={<RolRoute check={puedeRemisionesGenerales}><OrdenList /></RolRoute>} />
+        <Route path="/ordenes/:id" element={<RolRoute check={puedeRemisionesGenerales}><OrdenEdit /></RolRoute>} />
         <Route path="/remisiones" element={<AdminRoute><Remisiones /></AdminRoute>} />
         <Route path="/remisiones/:id" element={<AdminRoute><RemisionEdit /></AdminRoute>} />
         <Route path="/clientes" element={<AdminRoute><ClienteList /></AdminRoute>} />

@@ -109,14 +109,26 @@ class RolesProduccionTestCase(TestCase):
             resp = cliente_api.post("/api/formatos-cuchillas/", {"orden": op_id}, format="json")
             self.assertEqual(resp.status_code, 403)
 
-    def test_remisionables_operador_solo_troqueles(self):
-        for cliente_api in (self.c_guillotina, self.c_estaciones):
+    def test_remisionables_operador_solo_general(self):
+        # La cola/consolidación de remisiones de troquel es de General: el
+        # Troquelador fabrica molde y llena el formato, no remisiona.
+        for cliente_api in (self.c_guillotina, self.c_estaciones, self.c_troquelador):
             resp = cliente_api.get("/api/ordenes/remisionables_operador/")
             self.assertEqual(resp.status_code, 403)
-        # general y troquelador sí pueden (aunque la lista venga vacía)
-        for cliente_api in (self.c_general, self.c_troquelador):
-            resp = cliente_api.get("/api/ordenes/remisionables_operador/")
-            self.assertEqual(resp.status_code, 200)
+        resp = self.c_general.get("/api/ordenes/remisionables_operador/")
+        self.assertEqual(resp.status_code, 200)
+
+    def test_troquelador_bloqueado_de_remisiones_de_troquel(self):
+        for cliente_api in (self.c_troquelador, self.c_guillotina, self.c_estaciones):
+            self.assertEqual(
+                cliente_api.post("/api/ordenes/consolidar_remision_operador/", {"orden_ids": []}, format="json").status_code,
+                403,
+            )
+            self.assertEqual(cliente_api.get("/api/ordenes/remisiones_generadas_operador/").status_code, 403)
+            self.assertEqual(
+                cliente_api.post("/api/ordenes/devolver_remision_operador/", {"remision_id": 0}, format="json").status_code,
+                403,
+            )
 
     def test_remisionables_produccion_solo_general(self):
         for cliente_api in (self.c_guillotina, self.c_estaciones, self.c_troquelador):
@@ -124,6 +136,21 @@ class RolesProduccionTestCase(TestCase):
             self.assertEqual(resp.status_code, 403)
         resp = self.c_general.get("/api/ordenes/remisionables_produccion/")
         self.assertEqual(resp.status_code, 200)
+
+    def test_ordenes_crud_solo_general_y_troquelador(self):
+        op_id = self._crear_op("TEST-SEG-003")
+        for cliente_api in (self.c_guillotina, self.c_estaciones):
+            self.assertEqual(cliente_api.get("/api/ordenes/").status_code, 403)
+            self.assertEqual(cliente_api.get(f"/api/ordenes/{op_id}/").status_code, 403)
+            self.assertEqual(cliente_api.get("/api/ordenes/next_numero/").status_code, 403)
+            resp = cliente_api.post("/api/ordenes/", {
+                "fecha": "2026-09-03", "cliente": self.cliente.id,
+                "referencia": "TEST-SEG-003-B", "cantidad": 1000, "procesos": [],
+            }, format="json")
+            self.assertEqual(resp.status_code, 403)
+        for cliente_api in (self.c_general, self.c_troquelador):
+            self.assertEqual(cliente_api.get("/api/ordenes/").status_code, 200)
+            self.assertEqual(cliente_api.get(f"/api/ordenes/{op_id}/").status_code, 200)
 
     def test_troqueladora_bloqueada_sin_troquel_modelo(self):
         op_id = self._crear_op("TEST-SEG-003")

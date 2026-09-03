@@ -1239,13 +1239,13 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
-        # list/retrieve: lectura para el Operador (Producción General le muestra
-        # progreso de solo lectura); los campos monetarios se ocultan en el
-        # serializer para quien no sea staff. Escritura sigue admin-only.
-        # create/update: el Operador levanta sus propias OPs directas (una OP
-        # nueva o una tarea de troquel). El serializer le quita la plata al
-        # leer y la ignora al escribir; `_solo_op_directa` le cierra las OPs
-        # que nacieron de una cotización, que son del Admin.
+        # list/retrieve/create/update/next_numero: reservado a General y
+        # Troquelador (`_ACCIONES_ORDENES_DIRECTAS` abajo) — Guillotina y
+        # Estaciones no tienen nada que hacer en la pantalla de Órdenes (CRUD)
+        # ni en el modal de "+ Nueva tarea de troquel". Los campos monetarios
+        # se ocultan en el serializer para quien no sea staff; `_solo_op_directa`
+        # le cierra al no-staff las OPs que nacieron de una cotización, que son
+        # del Admin.
         if self.action in ("list", "retrieve", "produccion", "buscar", "produccion_pendientes", "enviar_remision", "remision_pdf", "cancelar_remision", "remisionables_operador", "remisionables_produccion", "consolidar_remision_operador", "remision_operador_pdf", "remisiones_generadas_operador", "devolver_remision_operador", "descartar_remisionable_operador", "remisiones_solicitadas", "editar_campos", "create", "update", "partial_update", "next_numero"):
             self._require_rol_produccion(request)
             return
@@ -1255,26 +1255,33 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
     # producción concreto (ver cotizaciones/roles.py). `produccion_pendientes`
     # se valida a sí misma más abajo porque su chequeo depende de query params
     # (?estacion= vs ?proceso=troquel).
-    _ACCIONES_TROQUELES = {
+    #
+    # La cola/consolidación de remisiones de troquel es de General (no del
+    # Troquelador: él solo fabrica molde y llena el formato de cuchillas).
+    _ACCIONES_REMISIONES_GENERALES = {
+        "remisionables_produccion",
         "remisionables_operador", "descartar_remisionable_operador",
-    }
-    _ACCIONES_REMISIONES_GENERALES = {"remisionables_produccion"}
-    _ACCIONES_ALGUNA_REMISION = {
         "consolidar_remision_operador", "remision_operador_pdf",
         "remisiones_generadas_operador", "devolver_remision_operador",
+    }
+    _ACCIONES_ALGUNA_REMISION = {
         "enviar_remision", "remision_pdf", "cancelar_remision",
         "remisiones_solicitadas",
+    }
+    # CRUD de la OP en sí (pantalla "Órdenes (CRUD)" y el modal de "+ Nueva
+    # tarea de troquel" en Troqueles.jsx): General y Troquelador, no Guillotina
+    # ni Estaciones — igual que `_ACCIONES_ALGUNA_REMISION`, mismo chequeo.
+    _ACCIONES_ORDENES_DIRECTAS = {
+        "list", "retrieve", "create", "update", "partial_update", "next_numero",
     }
 
     def _require_rol_produccion(self, request):
         if request.user.is_staff:
             return
         accion = self.action
-        if accion in self._ACCIONES_TROQUELES:
-            _require_troqueles(request)
-        elif accion in self._ACCIONES_REMISIONES_GENERALES:
+        if accion in self._ACCIONES_REMISIONES_GENERALES:
             _require_remisiones_generales(request)
-        elif accion in self._ACCIONES_ALGUNA_REMISION:
+        elif accion in self._ACCIONES_ALGUNA_REMISION or accion in self._ACCIONES_ORDENES_DIRECTAS:
             _require_alguna_remision(request)
 
     def _solo_op_directa(self, request):

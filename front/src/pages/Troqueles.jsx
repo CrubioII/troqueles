@@ -19,6 +19,7 @@ import {
 } from '../api'
 import { useSyncPolling } from '../lib/useSyncPolling'
 import { useDragOrder } from '../hooks/useDragOrder'
+import { esTroqueladorSinRemisiones } from '../lib/accesoProduccion'
 
 const asList = (data) => (Array.isArray(data) ? data : (data?.results || []))
 
@@ -492,6 +493,11 @@ function OperadorOpDatos({ orden, onSaved }) {
 
 function OperadorTroqueles() {
   const { user } = useAuth()
+  // El Troquelador puro no remisiona: solo fabrica molde y llena el formato
+  // de cuchillas. La cola/consolidación de remisiones de troquel es de
+  // General (ver back/cotizaciones/roles.py) — se le oculta la sección
+  // "Remisiones" y, dentro de Historial, la sub-pestaña "Remisiones".
+  const sinRemisiones = esTroqueladorSinRemisiones(user)
   const [tab, setTab] = useState('pendientes')
   const [showNueva, setShowNueva] = useState(false)   // modal Nueva tarea de troquel
   const [lista, setLista] = useState([])
@@ -571,6 +577,14 @@ function OperadorTroqueles() {
   }
 
   useEffect(() => { if (tab === 'remisiones') loadRemisionables() }, [tab])
+
+  // El Troquelador puro no tiene la sección/sub-pestaña de remisiones: si
+  // llega ahí (deep-link, estado viejo), lo devuelve a lo que sí puede ver.
+  useEffect(() => {
+    if (!sinRemisiones) return
+    if (tab === 'remisiones') setTab('pendientes')
+    if (histTab === 'remisiones') setHistTab('formatos')
+  }, [sinRemisiones, tab, histTab])
 
   // Tiempo real: refrescar la lista de pendientes solo cuando se está viendo
   useSyncPolling({ ordenes: () => loadLista(true) }, { enabled: !orden && tab === 'pendientes' })
@@ -768,7 +782,9 @@ function OperadorTroqueles() {
       <>
         <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
           <button className={`btn sm${tab === 'pendientes' ? ' primary' : ''}`} onClick={() => { setTab('pendientes'); setEditHist(null) }}>Pendientes</button>
-          <button className={`btn sm${tab === 'remisiones' ? ' primary' : ''}`} onClick={() => { setTab('remisiones'); setEditHist(null) }}>Remisiones</button>
+          {!sinRemisiones && (
+            <button className={`btn sm${tab === 'remisiones' ? ' primary' : ''}`} onClick={() => { setTab('remisiones'); setEditHist(null) }}>Remisiones</button>
+          )}
           <button className={`btn sm${tab === 'historial' ? ' primary' : ''}`} onClick={() => setTab('historial')}>Historial</button>
         </div>
 
@@ -791,14 +807,14 @@ function OperadorTroqueles() {
           </>
         )}
 
-        {tab === 'historial' && !editHist && (
+        {tab === 'historial' && !editHist && !sinRemisiones && (
           <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
             <button className={`btn sm${histTab === 'formatos' ? ' primary' : ''}`} onClick={() => setHistTab('formatos')}>Formatos</button>
             <button className={`btn sm${histTab === 'remisiones' ? ' primary' : ''}`} onClick={() => setHistTab('remisiones')}>Remisiones</button>
           </div>
         )}
 
-        {tab === 'historial' && !editHist && histTab === 'remisiones' && (
+        {tab === 'historial' && !editHist && !sinRemisiones && histTab === 'remisiones' && (
           <Section title="Remisiones generadas">
             <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', fontSize: 12, color: 'var(--ink-3)' }}>
               Cada remisión que generas sale de la cola y queda aquí. Puedes volver a descargar su PDF, o devolverla para rehacerla mientras el administrador no la haya liquidado.
@@ -986,7 +1002,7 @@ function OperadorTroqueles() {
           </Section>
         )}
 
-        {tab === 'remisiones' && (
+        {tab === 'remisiones' && !sinRemisiones && (
           <Section
             title="Remisiones — selecciona troqueles de un cliente"
             actions={

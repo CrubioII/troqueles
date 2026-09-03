@@ -16,3 +16,10 @@ export function puedeRemisionesGenerales(user) {
   if (!user) return false
   return user.role === 'admin' || !!user.remisionesGenerales
 }
+
+// Troquelador puro (sin es_general): tiene módulo Troqueles pero no la cola
+// de remisiones de troquel, que es de General (ver back/cotizaciones/roles.py).
+export function esTroqueladorSinRemisiones(user) {
+  if (!user || user.role === 'admin') return false
+  return !!user.troqueles && !user.remisionesGenerales
+}
