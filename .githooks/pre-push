@@ -1,7 +1,16 @@
 #!/usr/bin/env bash
-# Bloquea el push a main si los tests generales del backend no pasan.
+# Corre los tests generales del backend antes de un push a main, para
+# enterarse localmente ANTES de esperar a que corra CI.
 #
-# Se activa una sola vez por clon con:
+# Importante: esto es solo feedback rápido en esta máquina. core.hooksPath es
+# config local de cada clon — git no la activa solo al clonar ni al hacer
+# pull, así que este hook NO bloquea a otro colaborador que pushee sin
+# haberlo configurado. El gate real e inevitable (corre en GitHub, sin
+# depender de ningún setup local) es el job `test` en
+# .github/workflows/deploy-backend.yml: el deploy a Azure no se dispara si
+# esos tests no pasan, sin importar desde qué máquina se hizo el push.
+#
+# Activar este hook una vez por clon (opcional, solo acelera el feedback):
 #   git config core.hooksPath .githooks
 #
 # Solo corre en pushes que incluyan la rama main como destino; otras ramas
