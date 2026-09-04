@@ -10,12 +10,17 @@ Puntos críticos que este módulo existe para no equivocar:
 - El keyword `procesado` es cosmético: si el STORE falla, se registra un
   warning y se continúa. La corrección real vive en CorreoProcesado
   (correos/models.py), no en el estado del servidor IMAP.
+- IDLE (RFC 2177) se implementa a mano sobre `imaplib`: Python 3.11 no trae
+  `IMAP4.idle()`. Spacemail no ofrece webhooks, así que esta es la única vía
+  de "empuje" real — ver `esperar_novedad`.
 """
 import email
 import hashlib
 import imaplib
 import logging
 import re
+import select
+import time
 from datetime import datetime, timedelta
 from email.header import decode_header
 from email.utils import parseaddr, parsedate_to_datetime
@@ -27,6 +32,8 @@ from correos.reglas.adjuntos import Adjunto
 logger = logging.getLogger(__name__)
 
 _PATRON_ESPACIO_ADJUNTO = re.compile(r"\s+")
+_PATRON_UID_RESPUESTA = re.compile(rb"UID\s+(\d+)")
+_PATRON_NOVEDAD = re.compile(rb"^\*\s+\d+\s+(EXISTS|RECENT)", re.IGNORECASE)
 
 
 class ImapError(Exception):
@@ -50,6 +57,99 @@ def acepta_keywords_personalizados(conn):
     return any(b"\\*" in linea for linea in flags)
 
 
+def soporta_idle(conn):
+    """True si el servidor anuncia IDLE en su CAPABILITY."""
+    capacidades = getattr(conn, "capabilities", ()) or ()
+    normalizadas = {
+        (c.decode("ascii", "ignore") if isinstance(c, bytes) else str(c)).upper()
+        for c in capacidades
+    }
+    return "IDLE" in normalizadas
+
+
+def _hay_datos(sock, timeout):
+    # `pending()` solo existe en sockets SSL: son datos ya descifrados que
+    # select() no ve.
+    pending = getattr(sock, "pending", None)
+    if pending and pending() > 0:
+        return True
+    listos, _, _ = select.select([sock], [], [], max(timeout, 0))
+    return bool(listos)
+
+
+def esperar_novedad(conn, timeout_segundos):
+    """Bloquea en IDLE hasta que el servidor avise de un mensaje nuevo.
+
+    True  = el servidor mandó EXISTS/RECENT (llegó algo).
+    False = se venció `timeout_segundos` sin novedad.
+    ImapError = la sesión se cayó (el llamador debe reconectar).
+
+    Python 3.11 no trae `imaplib.IMAP4.idle()`, así que se usa la API interna
+    de imaplib (`_new_tag`, `tagged_commands`, `_get_tagged_response`). Está
+    contenido a esta función a propósito: es el único punto del proyecto que
+    depende de ella. El tag hay que registrarlo a mano en `tagged_commands`
+    porque normalmente lo hace `_command()`, que aquí se está saltando, y sin
+    ese registro `_get_tagged_response` revienta con KeyError.
+
+    Se espera con select() sobre el socket en vez de ponerle timeout: un
+    timeout a mitad de lectura deja el BufferedReader de imaplib en un estado
+    del que no se puede seguir leyendo, y después del timeout todavía hay que
+    mandar DONE y leer la respuesta etiquetada.
+
+    El DONE del `finally` es obligatorio: sin él la conexión queda en un
+    estado en el que el servidor rechaza cualquier otro comando.
+    """
+    sock = conn.socket()
+    tag = conn._new_tag()
+    conn.tagged_commands[tag] = None
+    conn.send(b"%s IDLE\r\n" % tag)
+
+    hay_novedad = False
+    try:
+        # Antes de la confirmación (`+ idling`) el servidor puede colar
+        # respuestas sin etiqueta, incluido el aviso que se está esperando.
+        while True:
+            linea = conn.readline()
+            if not linea:
+                raise ImapError("El servidor cerró la conexión al iniciar IDLE")
+            if linea.startswith(b"+"):
+                break
+            if not linea.startswith(b"*"):
+                raise ImapError(f"El servidor no aceptó IDLE: {linea!r}")
+            if _PATRON_NOVEDAD.match(linea):
+                hay_novedad = True
+    except Exception:
+        conn.tagged_commands.pop(tag, None)
+        raise
+
+    # Si el aviso ya llegó durante el saludo no hay nada que esperar: se cierra
+    # el IDLE de una vez.
+    fin = time.monotonic() + (0 if hay_novedad else timeout_segundos)
+    try:
+        while True:
+            restante = fin - time.monotonic()
+            if restante <= 0 or not _hay_datos(sock, restante):
+                break
+            linea = conn.readline()
+            if not linea:
+                raise ImapError("El servidor cerró la conexión durante IDLE")
+            if linea.startswith(b"*") and b"BYE" in linea.upper():
+                raise ImapError(f"El servidor terminó la sesión durante IDLE: {linea!r}")
+            if _PATRON_NOVEDAD.match(linea):
+                hay_novedad = True
+                break
+    finally:
+        try:
+            conn.send(b"DONE\r\n")
+            conn._get_tagged_response(tag)
+        except Exception:
+            logger.warning("No se pudo cerrar el IDLE limpiamente", exc_info=True)
+        finally:
+            conn.tagged_commands.pop(tag, None)
+
+    return hay_novedad
+
+
 def buscar_uids_recientes(conn, dias_atras):
     desde = (datetime.now() - timedelta(days=dias_atras)).strftime("%d-%b-%Y")
     status, data = conn.uid("SEARCH", None, f"(SINCE {desde})")
@@ -58,6 +158,42 @@ def buscar_uids_recientes(conn, dias_atras):
     if not data or not data[0]:
         return []
     return data[0].split()
+
+
+def message_ids_por_uid(conn, uids):
+    """{uid: message_id} pidiendo SOLO la cabecera Message-ID de cada correo.
+
+    Existe para no descargar cuerpos que ya se procesaron: con el listener
+    IDLE el lote corre cada vez que llega un correo, y descargar con
+    BODY.PEEK[] todos los mensajes de la ventana de BATCH_DIAS_ATRAS (con sus
+    adjuntos) en cada disparo sería absurdo.
+
+    Un uid puede faltar en el resultado o traer "" — eso significa "no sé",
+    y quien llame DEBE tratarlo como pendiente y descargarlo completo. Este
+    prefiltro solo puede ahorrar trabajo ya hecho, nunca decidir por sí solo
+    que un correo está procesado (el id sintético de los correos sin
+    Message-ID depende del tamaño real del cuerpo — ver
+    `message_id_o_sintetico`).
+    """
+    if not uids:
+        return {}
+
+    lista = b",".join(uid if isinstance(uid, bytes) else str(uid).encode() for uid in uids)
+    status, data = conn.uid("FETCH", lista, "(UID BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])")
+    if status != "OK" or not data:
+        raise ImapError(f"No se pudieron leer las cabeceras: {status}")
+
+    ids = {}
+    for item in data:
+        if not isinstance(item, tuple) or len(item) < 2:
+            continue  # el b')' de cierre que imaplib intercala
+        prefijo, cabeceras = item[0], item[1]
+        coincidencia = _PATRON_UID_RESPUESTA.search(prefijo or b"")
+        if not coincidencia:
+            continue
+        mensaje = email.message_from_bytes(cabeceras or b"")
+        ids[coincidencia.group(1)] = extraer_message_id(mensaje)
+    return ids
 
 
 def descargar_correo(conn, uid):

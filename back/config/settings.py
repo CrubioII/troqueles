@@ -200,3 +200,12 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 BATCH_DIAS_ATRAS = int(os.environ.get("BATCH_DIAS_ATRAS", 3))
 BATCH_DRY_RUN = os.environ.get("BATCH_DRY_RUN", "false").lower() == "true"
+
+# --- Listener IMAP IDLE (correos/management/commands/escuchar_correos.py) ---
+# 14 minutos y no los 29 que permite el RFC 2177: routers y firewalls cortan
+# conexiones ociosas mucho antes de la media hora.
+IMAP_IDLE_TIMEOUT = int(os.environ.get("IMAP_IDLE_TIMEOUT", 840))
+# Margen tras el aviso del servidor para que una entrega multiparte termine
+# de asentarse en el buzón antes de leerla.
+IMAP_IDLE_GRACIA = int(os.environ.get("IMAP_IDLE_GRACIA", 5))
+LISTENER_BACKOFF_MAX = int(os.environ.get("LISTENER_BACKOFF_MAX", 300))

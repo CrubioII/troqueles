@@ -46,8 +46,8 @@ RUN mkdir -p /app/staticfiles /app/media
 RUN SECRET_KEY=temp-secret-key-for-collectstatic python manage.py collectstatic --no-input
 
 # Dar permisos de ejecución a los scripts de inicio/cron y convertir finales de línea Windows a Unix (CRLF -> LF)
-RUN chmod +x /app/start.sh /app/run_procesar_correos.sh \
-    && sed -i 's/\r$//' /app/start.sh /app/run_procesar_correos.sh /app/crontab
+RUN chmod +x /app/start.sh /app/run_procesar_correos.sh /app/run_escuchar_correos.sh \
+    && sed -i 's/\r$//' /app/start.sh /app/run_procesar_correos.sh /app/run_escuchar_correos.sh /app/crontab
 
 # Exponer el puerto por defecto
 EXPOSE 8000

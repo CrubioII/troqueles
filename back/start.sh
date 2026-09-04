@@ -15,11 +15,17 @@ with open('/app/.env.cron', 'w') as f:
 "
 chmod 600 /app/.env.cron
 
-# Registrar y arrancar el cron job de procesamiento de correos
+# Registrar y arrancar los cron jobs de respaldo del procesamiento de correos
 cp /app/crontab /etc/cron.d/procesar-correos
 chmod 0644 /etc/cron.d/procesar-correos
 touch /var/log/procesar_correos.log
 cron
+
+# Listener IMAP IDLE: procesa cada correo a los segundos de llegar, sin
+# esperar al cron. Va en segundo plano; gunicorn sigue siendo el proceso
+# principal del contenedor.
+touch /var/log/escuchar_correos.log
+/app/run_escuchar_correos.sh >> /var/log/escuchar_correos.log 2>&1 &
 
 # Iniciar el servidor web de producción Gunicorn
 gunicorn config.wsgi:application --bind 0.0.0.0:${PORT:-8000} --workers 3 --threads 4 --worker-class gthread --timeout 120

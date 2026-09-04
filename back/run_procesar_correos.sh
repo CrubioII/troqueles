@@ -4,4 +4,4 @@
 # el contenedor.
 . /app/.env.cron
 cd /app
-exec python manage.py procesar_correos
+exec python manage.py procesar_correos "$@"

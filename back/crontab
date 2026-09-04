@@ -1,6 +1,13 @@
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-# Procesa el buzon produccion@troquelesink.com una vez al dia.
-# BATCH_DIAS_ATRAS (default 3) cubre reintentos si esta corrida se pierde
-# por un reinicio/redeploy del contenedor.
+# El procesamiento en vivo lo hace el listener IDLE (run_escuchar_correos.sh,
+# arrancado por start.sh): un correo entra a la cola a los segundos de llegar.
+# Estas dos corridas son el respaldo.
+
+# Red de seguridad cada media hora por si el listener esta caido o el servidor
+# no mando la notificacion. Sin resumen: llenaria el chat de "revisados: 0".
+# El advisory lock de correos/locking.py hace inofensivo el solape.
+*/30 * * * * root /app/run_procesar_correos.sh --no-resumen >> /var/log/procesar_correos.log 2>&1
+
+# Corrida diaria con el resumen de Telegram (10:00 UTC = 5:00 a.m. Bogota).
 0 10 * * * root /app/run_procesar_correos.sh >> /var/log/procesar_correos.log 2>&1
