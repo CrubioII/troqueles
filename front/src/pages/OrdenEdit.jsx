@@ -1,5 +1,5 @@
-import { useState, useMemo, useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useState, useMemo, useEffect, useRef } from 'react'
+import { useParams } from 'react-router-dom'
 import { Icon } from '../components/Icons'
 import { fmtCOP, fmtNum, CONDICIONES_PAGO_OP, TIPOS_FACTURACION, Section, SaveStatus } from '../components/core'
 import { SectionGenerales, SectionPapel, SectionCortes, SectionProcesos, SectionCondicionesOP } from '../components/sections'
@@ -12,6 +12,7 @@ import {
   pdfOpAdmin, pdfOpProduccion,
 } from '../api'
 import { useAuth } from '../context/AuthContext'
+import { useGuardedNavigate, useUnsavedGuard } from '../context/UnsavedChangesContext'
 import { buildDefaultProcesos, buildBlankState, docToState, stateToDoc, seedProcesosFromApi, computeCalc } from '../lib/opQuoteShared'
 
 // Resumen estático para OP creada desde cotización (datos bloqueados)
@@ -72,7 +73,7 @@ function OrdenResumenLocked({ d, calc, papelCatalog, showMoney = true }) {
 
 export default function OrdenEdit() {
   const { id } = useParams()
-  const navigate = useNavigate()
+  const navigate = useGuardedNavigate()
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
   const isNew = id === 'nuevo'
@@ -82,6 +83,9 @@ export default function OrdenEdit() {
   const [papelCatalog, setPapelCatalog] = useState([])
   const [open, setOpen] = useState({ s1: true, s2: true, s3: true, s5: true })
   const [loading, setLoading] = useState(!isNew)
+  // La OP nueva no muestra spinner (loading queda en false), pero igual siembra
+  // estado al llegar el catálogo de papel: esto marca el fin de ese arranque.
+  const [bootstrapped, setBootstrapped] = useState(false)
   const [saveError, setSaveError] = useState(null)
 
   const locked = !!d.cotizacionId
@@ -117,7 +121,7 @@ export default function OrdenEdit() {
         }
       })
       .catch(console.error)
-      .finally(() => setLoading(false))
+      .finally(() => { setLoading(false); setBootstrapped(true) })
 
     if (isNew) {
       // Número estimado en tiempo real; el definitivo lo asigna el guardado
@@ -189,18 +193,44 @@ export default function OrdenEdit() {
     }
   }
 
-  const { status: saveStatus, retry: retrySave } = useAutosave(
+  // Una OP desde cotización solo la puede tocar el admin (abono/fecha); una OP
+  // directa exige al menos cliente y referencia para poder persistirse.
+  const puedeGuardar = (isAdmin || !locked)
+    && (locked || (!!d.cliente.trim() && !!d.referencia.trim()))
+
+  const { status: saveStatus, retry: retrySave, dirty, markPristine } = useAutosave(
     useMemo(() => {
       const { id, numero, ...dComparable } = d
       return { d: dComparable, procesos }
     }, [d, procesos]),
     () => save(),
-    {
-      enabled: false,
-      isValid: () => (isAdmin || !locked)
-        && (locked || (!!d.cliente.trim() && !!d.referencia.trim())),
-    }
+    { enabled: false, isValid: () => puedeGuardar }
   )
+
+  // La carga inicial (orden, catálogo de papel, tipo de cliente por defecto)
+  // también mueve el estado: esa siembra es la línea base, no una edición.
+  const baselineRef = useRef(false)
+  useEffect(() => {
+    if (!bootstrapped || baselineRef.current) return
+    baselineRef.current = true
+    markPristine()
+  }, [bootstrapped, markPristine])
+
+  // Salir con la orden a medio llenar la pierde: este guard intercepta la
+  // navegación (menú, "Volver", cerrar sesión) y ofrece guardar antes.
+  useUnsavedGuard({
+    active: bootstrapped,
+    dirty,
+    canSave: puedeGuardar,
+    save: async () => { await save(); markPristine() },
+    hint: 'Para guardar la orden necesitas al menos el cliente y la referencia.',
+    texts: {
+      title: d.id ? 'Tienes cambios sin guardar' : 'La orden aún no se ha guardado',
+      message: !d.id
+        ? 'Todavía no has guardado esta orden. Si sales ahora, los datos que ingresaste se pierden y no queda ningún registro.'
+        : 'Los cambios que hiciste en esta orden aún no se han guardado. Si sales ahora, la orden queda como estaba antes.',
+    },
+  })
 
   // ============ PDFs ============
   const papelReferencia = (() => {

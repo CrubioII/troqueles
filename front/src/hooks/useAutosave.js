@@ -9,6 +9,9 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 export function useAutosave(value, saveFn, options = {}) {
   const { delay = 1200, isValid, enabled = true } = options
   const [status, setStatus] = useState('idle')
+  // `dirty` se expone para las pantallas de guardado manual (enabled: false),
+  // que necesitan saber si hay cambios sin persistir antes de dejar salir.
+  const [dirty, setDirty] = useState(false)
 
   const valueRef = useRef(value)
   valueRef.current = value
@@ -26,7 +29,10 @@ export function useAutosave(value, saveFn, options = {}) {
 
   const attemptSave = useCallback(() => {
     const snapshot = JSON.stringify(valueRef.current)
-    if (snapshot === savedSnapshotRef.current) return inFlightRef.current || Promise.resolve()
+    if (snapshot === savedSnapshotRef.current) {
+      setDirty(false)
+      return inFlightRef.current || Promise.resolve()
+    }
     if (isValidRef.current && !isValidRef.current(valueRef.current)) return Promise.resolve()
     if (inFlightRef.current) {
       retryQueuedRef.current = true
@@ -38,6 +44,8 @@ export function useAutosave(value, saveFn, options = {}) {
       try {
         await saveFnRef.current(valueRef.current)
         savedSnapshotRef.current = snapshot
+        // Lo que haya cambiado mientras el save estaba en vuelo sigue pendiente
+        setDirty(JSON.stringify(valueRef.current) !== snapshot)
         setStatus('saved')
         fadeTimerRef.current = setTimeout(() => setStatus('idle'), 2500)
       } catch (e) {
@@ -60,6 +68,7 @@ export function useAutosave(value, saveFn, options = {}) {
       savedSnapshotRef.current = JSON.stringify(value)
       return
     }
+    setDirty(JSON.stringify(value) !== savedSnapshotRef.current)
     if (!enabled) return
     clearTimeout(timerRef.current)
     timerRef.current = setTimeout(attemptSave, delay)
@@ -77,5 +86,13 @@ export function useAutosave(value, saveFn, options = {}) {
 
   const retry = useCallback(() => { attemptSave() }, [attemptSave])
 
-  return { status, flush, retry }
+  // Toma el valor actual como la línea base "sin cambios". Lo usan las
+  // pantallas que terminan de cargar/sembrar defaults después del montaje,
+  // para que esos valores no cuenten como edición del usuario.
+  const markPristine = useCallback(() => {
+    savedSnapshotRef.current = JSON.stringify(valueRef.current)
+    setDirty(false)
+  }, [])
+
+  return { status, flush, retry, dirty, markPristine }
 }

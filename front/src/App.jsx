@@ -1,6 +1,7 @@
 import React from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
+import { UnsavedChangesProvider } from './context/UnsavedChangesContext'
 import Layout from './components/Layout'
 import Dashboard from './pages/Dashboard'
 import CotizacionList from './pages/CotizacionList'
@@ -86,7 +87,9 @@ function AppRoutes() {
 export default function App() {
   return (
     <AuthProvider>
-      <AppRoutes />
+      <UnsavedChangesProvider>
+        <AppRoutes />
+      </UnsavedChangesProvider>
     </AuthProvider>
   )
 }

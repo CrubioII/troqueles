@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Outlet, useNavigate, useLocation } from 'react-router-dom'
+import { Outlet, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useGuardedAction, useGuardedNavigate } from '../context/UnsavedChangesContext'
 import { Icon } from './Icons'
 import { CampanaNotificaciones } from './Notificaciones'
 import { puedeEstacion, puedeTroqueles, puedeRemisionesGenerales } from '../lib/accesoProduccion'
@@ -90,7 +91,7 @@ const NAV_LINKS = [
 ]
 
 function NavButton({ link, currentPath }) {
-  const navigate = useNavigate()
+  const navigate = useGuardedNavigate()
   const active = link.exact ? currentPath === link.path : currentPath.startsWith(link.path)
 
   return (
@@ -117,7 +118,7 @@ function NavButton({ link, currentPath }) {
 }
 
 function MobileNavButton({ link, currentPath }) {
-  const navigate = useNavigate()
+  const navigate = useGuardedNavigate()
   const active = link.exact ? currentPath === link.path : currentPath.startsWith(link.path)
 
   return (
@@ -132,7 +133,7 @@ function MobileNavButton({ link, currentPath }) {
 }
 
 function DrawerLink({ link, currentPath, onNavigate, sub }) {
-  const navigate = useNavigate()
+  const navigate = useGuardedNavigate()
   const active = link.exact ? currentPath === link.path : currentPath.startsWith(link.path)
 
   return (
@@ -148,6 +149,9 @@ function DrawerLink({ link, currentPath, onNavigate, sub }) {
 
 export default function Layout() {
   const { user, logout } = useAuth()
+  const guardedAction = useGuardedAction()
+  // Cerrar sesión también saca al usuario de un formulario a medio llenar
+  const salir = () => guardedAction(logout)
   const location = useLocation()
   const isAdmin = user?.role === 'admin'
   const navLinks = NAV_LINKS.filter(l => isAdmin || !l.adminOnly)
@@ -230,7 +234,7 @@ export default function Layout() {
             </div>
           </div>
           <button
-            onClick={logout}
+            onClick={salir}
             style={{
               width: '100%', padding: '6px 10px',
               background: 'transparent', border: '1px solid var(--line)',
@@ -283,7 +287,7 @@ export default function Layout() {
               {user?.username?.slice(0, 2).toUpperCase()}
             </div>
             <button
-              onClick={logout}
+              onClick={salir}
               style={{
                 padding: 6, background: 'transparent', border: 'none',
                 color: 'var(--ink-3)', cursor: 'pointer',
@@ -366,7 +370,7 @@ export default function Layout() {
               </div>
             </div>
           </div>
-          <button className="app-drawer-logout" onClick={logout}>
+          <button className="app-drawer-logout" onClick={salir}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
               <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>

@@ -8,3 +8,6 @@ back/media/
 
 # Notas locales de sesión (no versionar)
 .claude/deployExplanation.md
+
+# macOS
+.DS_Store
