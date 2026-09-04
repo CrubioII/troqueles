@@ -203,11 +203,9 @@ export default function Layout() {
 
         {/* User + logout */}
         <div style={{ padding: '12px', borderTop: '1px solid var(--line)' }}>
-          {isAdmin && (
-            <div style={{ marginBottom: 8 }}>
-              <CampanaNotificaciones />
-            </div>
-          )}
+          <div style={{ marginBottom: 8 }}>
+            <CampanaNotificaciones />
+          </div>
           <div style={{
             display: 'flex', alignItems: 'center', gap: 8,
             padding: '8px 10px',
@@ -275,7 +273,7 @@ export default function Layout() {
             <div style={{ fontWeight: 700, fontSize: 13 }}>Troqueles INK</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {isAdmin && <CampanaNotificaciones compact />}
+            <CampanaNotificaciones compact />
             <div style={{
               width: 24, height: 24, borderRadius: '50%',
               background: 'var(--accent)', color: 'white',

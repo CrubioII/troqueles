@@ -353,6 +353,61 @@ export default function EstacionMaquina({ estacion, estaciones, embedded = false
   )
 }
 
+// Etiqueta legible de un lado (tiro/retiro) del laminado según lo que
+// eligió el Admin/Operador General al crear la OP (OpProceso.extras).
+function ladoLaminadoLabel(activo, tipo, subtipo, otros) {
+  if (!activo) return 'No'
+  if (tipo === 'Metalizado') {
+    const sub = subtipo || 'Plateado'
+    return `Metalizado — ${sub === 'Otros' ? (otros || 'Otros') : sub}`
+  }
+  return tipo || '—'
+}
+
+// Lo que se planeó para Laminadora (tamaño + tipo por lado): viene de
+// OpProceso.extras, ya sin plata (ver OrdenEstacionSerializer.get_estacion_procesos).
+function PlanLaminado({ orden }) {
+  const lam = (orden.estacion_procesos || []).find(p => p.proceso_id === 'laminado')
+  const extras = lam?.extras || {}
+  return (
+    <div style={{
+      margin: '0 16px 16px', padding: '10px 14px', borderRadius: 8, fontSize: 13,
+      background: 'var(--surface-2)', color: 'var(--ink-2)',
+    }}>
+      <div style={{ fontWeight: 700, marginBottom: 6, color: 'var(--ink-1)' }}>Plan de laminado</div>
+      {orden.tamano && <div>Tamaño: <strong>{orden.tamano}</strong></div>}
+      <div>Tiro: <strong>{ladoLaminadoLabel(extras.tiroActive, extras.tiroTipoLaminado, extras.tiroTipoMetalizado, extras.tiroMetalizadoOtros)}</strong></div>
+      <div>Retiro: <strong>{ladoLaminadoLabel(extras.retiroActive, extras.retiroTipoLaminado, extras.retiroTipoMetalizado, extras.retiroMetalizadoOtros)}</strong></div>
+    </div>
+  )
+}
+
+// Etiqueta legible de un lado (tiro/retiro) de impresión según lo que eligió
+// el Admin/Operador General al crear la OP (OpProceso.extras).
+function ladoImpresionLabel(activo, tipo, colores) {
+  if (!activo) return 'No'
+  const base = tipo || '—'
+  return colores ? `${base} — ${colores}` : base
+}
+
+// Lo que se planeó para Impresora (tamaño + tiro/retiro con tipo y colores):
+// viene de OpProceso.extras, ya sin plata.
+function PlanImpresion({ orden }) {
+  const imp = (orden.estacion_procesos || []).find(p => p.proceso_id === 'impresion')
+  const extras = imp?.extras || {}
+  return (
+    <div style={{
+      margin: '0 16px 16px', padding: '10px 14px', borderRadius: 8, fontSize: 13,
+      background: 'var(--surface-2)', color: 'var(--ink-2)',
+    }}>
+      <div style={{ fontWeight: 700, marginBottom: 6, color: 'var(--ink-1)' }}>Plan de impresión</div>
+      {orden.tamano && <div>Tamaño: <strong>{orden.tamano}</strong></div>}
+      <div>Tiro: <strong>{ladoImpresionLabel(extras.tiroActive, extras.tiroTipo, extras.tiroColores)}</strong></div>
+      <div>Retiro: <strong>{ladoImpresionLabel(extras.retiroActive, extras.retiroTipo, extras.retiroColores)}</strong></div>
+    </div>
+  )
+}
+
 // ────────── Detalle: cabecera de la OP + formulario + registros previos ──────────
 
 function DetalleOP({ estacion, orden, onCreated, onCambio }) {
@@ -390,6 +445,9 @@ function DetalleOP({ estacion, orden, onCreated, onCambio }) {
             </div>
           ))}
         </div>
+        {estacion === 'impresora' && <PlanImpresion orden={orden} />}
+        {estacion === 'laminadora' && <PlanLaminado orden={orden} />}
+
         {previo && (
           <div style={{
             margin: '0 16px 16px', padding: '10px 14px', borderRadius: 8, fontSize: 13,
@@ -403,7 +461,7 @@ function DetalleOP({ estacion, orden, onCreated, onCambio }) {
         )}
       </Section>
 
-      {estacion === 'troqueladora' && !orden.troquel_modelo ? (
+      {estacion === 'troqueladora' && !orden.troquel_modelo && orden.procesos?.some(p => p.proceso_id === 'troquel') ? (
         <Section title="Registrar producción">
           <div style={{
             margin: 16, padding: '10px 14px', borderRadius: 8, fontSize: 13,

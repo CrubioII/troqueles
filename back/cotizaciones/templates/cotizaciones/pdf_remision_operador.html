@@ -228,8 +228,13 @@
       <span class="meta-val">{{ rem.fecha }}</span>
     </div>
     <div class="meta-cell">
+      {% if troqueles %}
       <span class="meta-lbl">Troqueles</span>
       <span class="meta-val">{{ troqueles|length }}</span>
+      {% else %}
+      <span class="meta-lbl">Cantidad entregada</span>
+      <span class="meta-val">{{ cantidad_entregada }}</span>
+      {% endif %}
     </div>
   </div>
 
@@ -274,7 +279,10 @@
   </div>
   {% endfor %}
 
-  <!-- Producción: cantidad real por estación de la cadena, sin sobrante -->
+  <!-- Producción: especificación por proceso de la cadena -->
+  {% if procesos and troqueles %}
+  <div class="troquel-qty" style="padding:10px 18px 0; text-align:right;"><strong>Cantidad entregada:</strong> {{ cantidad_entregada }}</div>
+  {% endif %}
   {% for p in procesos %}
   <div class="troquel">
     <div class="troquel-head">
@@ -287,18 +295,16 @@
       <thead>
         <tr>
           <th>Proceso</th>
-          <th>Estación</th>
-          <th>Operador</th>
-          <th class="col-cant">Cantidad realizada</th>
+          <th>Detalle</th>
         </tr>
       </thead>
       <tbody>
         {% for it in p.items %}
         <tr>
           <td>{{ it.proceso_label }}</td>
-          <td class="col-detalle">{{ it.estacion_label }}</td>
-          <td class="col-detalle">{{ it.operador_username|default:"—" }}</td>
-          <td class="col-cant">{{ it.cantidad_realizada }}</td>
+          <td class="col-detalle">
+            {% for line in it.detalle %}<div>{{ line }}</div>{% endfor %}
+          </td>
         </tr>
         {% endfor %}
       </tbody>

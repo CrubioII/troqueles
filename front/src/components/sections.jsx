@@ -12,7 +12,7 @@ import { CHARGE_MODES, applyChargeMode } from '../lib/opQuoteShared'
 // =========================================================
 // Section 1 — Datos Generales
 // =========================================================
-export function SectionGenerales({ d, set, showEstado = true, numeroLabel = 'N° cotización', showFechaEntrega = false }) {
+export function SectionGenerales({ d, set, showEstado = true, numeroLabel = 'N° cotización', showFechaEntrega = false, showClientDetails = true }) {
   const [suggestions, setSuggestions] = useState([])
   const [showSugg, setShowSugg] = useState(false)
   const searchRef = useRef(null)
@@ -87,47 +87,59 @@ export function SectionGenerales({ d, set, showEstado = true, numeroLabel = 'N°
           </div>
         )}
       </div>
-      <div className="field col-span-2">
-        <label className="field-label">Tipo de cliente</label>
-        <div className="seg">
-          <button className={d.tipoCliente === 'final' ? 'active' : ''} onClick={() => set({ tipoCliente: 'final' })}>Cliente Final</button>
-          <button className={d.tipoCliente === 'terciario' ? 'active' : ''} onClick={() => set({ tipoCliente: 'terciario' })}>Cliente Terciario</button>
+      {showClientDetails && (
+        <div className="field col-span-2">
+          <label className="field-label">Tipo de cliente</label>
+          <div className="seg">
+            <button className={d.tipoCliente === 'final' ? 'active' : ''} onClick={() => set({ tipoCliente: 'final' })}>Cliente Final</button>
+            <button className={d.tipoCliente === 'terciario' ? 'active' : ''} onClick={() => set({ tipoCliente: 'terciario' })}>Cliente Terciario</button>
+          </div>
         </div>
-      </div>
+      )}
 
-      <div className="field col-span-2">
-        <label className="field-label">Correo del cliente</label>
-        <input
-          className="input"
-          type="email"
-          placeholder="correo@empresa.com"
-          value={d.clienteEmail || ''}
-          onChange={e => set({ clienteEmail: e.target.value })}
-        />
-      </div>
-      <div className="field col-span-2">
-        <label className="field-label">Teléfono</label>
-        <input
-          className="input"
-          type="tel"
-          placeholder="Ej. 3001234567"
-          value={d.clienteTelefono || ''}
-          onChange={e => set({ clienteTelefono: e.target.value })}
-        />
-      </div>
-      <div className="field col-span-2">
-        <label className="field-label">NIT / Cédula</label>
-        <input
-          className="input"
-          placeholder="Ej. 900.123.456-7"
-          value={d.clienteNit || ''}
-          onChange={e => set({ clienteNit: e.target.value })}
-        />
-      </div>
+      {showClientDetails && (
+        <div className="field col-span-2">
+          <label className="field-label">Correo del cliente</label>
+          <input
+            className="input"
+            type="email"
+            placeholder="correo@empresa.com"
+            value={d.clienteEmail || ''}
+            onChange={e => set({ clienteEmail: e.target.value })}
+          />
+        </div>
+      )}
+      {showClientDetails && (
+        <div className="field col-span-2">
+          <label className="field-label">Teléfono</label>
+          <input
+            className="input"
+            type="tel"
+            placeholder="Ej. 3001234567"
+            value={d.clienteTelefono || ''}
+            onChange={e => set({ clienteTelefono: e.target.value })}
+          />
+        </div>
+      )}
+      {showClientDetails && (
+        <div className="field col-span-2">
+          <label className="field-label">NIT / Cédula</label>
+          <input
+            className="input"
+            placeholder="Ej. 900.123.456-7"
+            value={d.clienteNit || ''}
+            onChange={e => set({ clienteNit: e.target.value })}
+          />
+        </div>
+      )}
 
       <div className="field col-span-2">
         <label className="field-label">Referencia / descripción del producto <span className="req">*</span></label>
         <input className="input" placeholder="Ej. Caja plegadiza para fragancia 100ml" value={d.referencia} onChange={e => set({ referencia: e.target.value })} />
+      </div>
+      <div className="field col-span-2">
+        <label className="field-label">Tamaño</label>
+        <input className="input" placeholder="Ej. 14cm x 25cm" value={d.tamano || ''} onChange={e => set({ tamano: e.target.value })} />
       </div>
       <div className="field col-span-1">
         <label className="field-label">Cantidad solicitada <span className="req">*</span></label>
@@ -162,6 +174,38 @@ export function SectionGenerales({ d, set, showEstado = true, numeroLabel = 'N°
 // llegue en esos campos si quien guarda no es Admin (ver OP_CAMPOS_DINERO).
 // El Operador sí puede registrar un papel que no está en el catálogo — solo
 // el nombre, sin precio; el Admin le pone precio después.
+export function SectionCortes({ d, set, showMoney = true }) {
+  return (
+    <div className="papel-block">
+      <div className="papel-block-title">Cortes</div>
+      <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginBottom: 8 }}>
+        Si están activos, la OP pasa por Guillotina: corte inicial antes de Impresora y corte final después de Troqueladora.
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {[
+          { key: 'corteInicial', label: 'Corte inicial', activeKey: 'corteInicialActive', precioKey: 'corteInicialPrecio' },
+          { key: 'corteFinal',   label: 'Corte final',   activeKey: 'corteFinalActive',   precioKey: 'corteFinalPrecio' },
+        ].map(({ label, activeKey, precioKey }) => (
+          <div key={activeKey} className={'proc-row' + (d[activeKey] ? ' active' : '')} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <Checkbox checked={!!d[activeKey]} onChange={() => set({ [activeKey]: !d[activeKey] })} />
+            <div className="proc-name" style={{ flex: 1 }}>{label}</div>
+            {showMoney && (
+              <div className="proc-cost">
+                <MoneyInput
+                  className="admin-editable"
+                  style={{ fontWeight: d[activeKey] ? 600 : 400 }}
+                  value={d[precioKey] || 0}
+                  onChange={(v) => set({ [precioKey]: v })}
+                />
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export function SectionPapel({ d, set, calc, papelCatalog, showMoney = true }) {
   return (
     <div className="papel-layout">
@@ -278,33 +322,7 @@ export function SectionPapel({ d, set, calc, papelCatalog, showMoney = true }) {
         </div>
       </div>
 
-      <div className="papel-block">
-        <div className="papel-block-title">Cortes</div>
-        <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginBottom: 8 }}>
-          Si están activos, la OP pasa por Guillotina: corte inicial antes de Impresora y corte final después de Troqueladora.
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {[
-            { key: 'corteInicial', label: 'Corte inicial', activeKey: 'corteInicialActive', precioKey: 'corteInicialPrecio' },
-            { key: 'corteFinal',   label: 'Corte final',   activeKey: 'corteFinalActive',   precioKey: 'corteFinalPrecio' },
-          ].map(({ label, activeKey, precioKey }) => (
-            <div key={activeKey} className={'proc-row' + (d[activeKey] ? ' active' : '')} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <Checkbox checked={!!d[activeKey]} onChange={() => set({ [activeKey]: !d[activeKey] })} />
-              <div className="proc-name" style={{ flex: 1 }}>{label}</div>
-              {showMoney && (
-                <div className="proc-cost">
-                  <MoneyInput
-                    className="admin-editable"
-                    style={{ fontWeight: d[activeKey] ? 600 : 400 }}
-                    value={d[precioKey] || 0}
-                    onChange={(v) => set({ [precioKey]: v })}
-                  />
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
+      <SectionCortes d={d} set={set} showMoney={showMoney} />
 
       <div className="papel-diagram">
         <div className="sheet-diagram-card">

@@ -1,11 +1,6 @@
-import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { ModuleCard } from '../components/core'
-import { getDashboardStats } from '../api'
-import {
-  IngresosChart, TopClientesChart, OpsAtrasadasChart,
-} from '../components/charts/DashboardCharts'
 
 const MODULES = [
   {
@@ -79,11 +74,6 @@ const MODULES = [
 export default function Dashboard() {
   const navigate = useNavigate()
   const { user } = useAuth()
-  const [stats, setStats] = useState(null)
-
-  useEffect(() => {
-    getDashboardStats().then(setStats).catch(() => setStats(null))
-  }, [])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
@@ -123,20 +113,6 @@ export default function Dashboard() {
           />
         ))}
       </div>
-
-      {/* Gráficos financieros */}
-      {stats?.financiero && (
-        <div style={{
-          padding: 'clamp(24px, 4vw, 40px) clamp(20px, 4vw, 40px)',
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))',
-          gap: 16,
-        }}>
-          <IngresosChart data={stats.financiero.ingresos_por_periodo} />
-          <TopClientesChart data={stats.financiero.top_clientes} />
-          <OpsAtrasadasChart data={stats.financiero.ops_atrasadas} />
-        </div>
-      )}
     </div>
   )
 }

@@ -1,17 +1,25 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Icon } from '../components/Icons'
-import { fmtNum, ProgressBar, Checkbox, ESTACION_DE_PROCESO } from '../components/core'
+import { fmtNum, ProgressBar, Checkbox, ESTACION_DE_PROCESO, REMISION_STATUS_DEFS } from '../components/core'
 import {
   getOrdenes, getOrden, toggleProcesoCompletado,
   getRemisionablesProduccion, consolidarRemisionOperador, pdfRemisionOperadorConsolidada,
-  getRemisionesGeneradasOperador, devolverRemisionOperador,
+  getRemisionesGeneradasOperador, devolverRemisionOperador, descartarRemisionableOperador,
 } from '../api'
 import { useSyncPolling } from '../lib/useSyncPolling'
 import { useAuth } from '../context/AuthContext'
 
 const norm = (s) => (s || '').toString().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
 const asList = (d) => Array.isArray(d) ? d : (d?.results || [])
+
+// Fecha (o fecha+hora ISO) en formato corto local
+function fmtFechaCorta(s) {
+  if (!s) return '—'
+  const d = new Date(s.length <= 10 ? s + 'T00:00:00' : s)
+  if (isNaN(d)) return '—'
+  return d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })
+}
 
 const PROCESO_LABELS = {
   corteInicial: 'Corte inicial',
@@ -184,6 +192,7 @@ function ConfirmarRemisionModal({ cantidad, cliente, observaciones, onObservacio
 // pantalla (Producción › Troqueles). Mismo patrón que allá: pendientes
 // agrupadas por cliente + historial de lo ya generado, sin valores.
 function RemisionesProduccion() {
+  const [subTab, setSubTab] = useState('remisiones') // 'remisiones' | 'historial'
   const [remisionables, setRemisionables] = useState([])
   const [loadingRem, setLoadingRem] = useState(true)
   const [busquedaRem, setBusquedaRem] = useState('')
@@ -199,6 +208,8 @@ function RemisionesProduccion() {
   const [loadingHist, setLoadingHist] = useState(true)
   const [histBusy, setHistBusy] = useState(null)
   const [histError, setHistError] = useState(null)
+  const [busquedaHist, setBusquedaHist] = useState('')
+  const [descartandoRem, setDescartandoRem] = useState(null)
 
   const loadRemisionables = (silent = false) => {
     if (!silent) setLoadingRem(true)
@@ -216,11 +227,16 @@ function RemisionesProduccion() {
       .finally(() => setLoadingHist(false))
   }
 
-  useEffect(() => { loadRemisionables(); loadHistorial() }, [])
+  useEffect(() => { loadRemisionables() }, [])
+  // Historial se carga bajo demanda, solo al entrar a su pestaña (mismo patrón
+  // que Producción › Troqueles).
+  useEffect(() => {
+    if (subTab === 'historial') loadHistorial()
+  }, [subTab])
   // Silencioso: una OP de cadena pasa a "pendiente de remisión" al registrarse
   // la última estación (crea la Remision sola, ver _maybe_crear_remision).
   useSyncPolling({
-    remisiones: () => { loadRemisionables(true); loadHistorial(true) },
+    remisiones: () => { loadRemisionables(true); if (subTab === 'historial') loadHistorial(true) },
     registros_proceso: () => loadRemisionables(true),
   })
 
@@ -240,6 +256,15 @@ function RemisionesProduccion() {
     return [...map.values()]
   }, [remisionablesFiltradas])
 
+  const histFiltrado = useMemo(() => {
+    const t = norm(busquedaHist.trim())
+    if (!t) return historial
+    return historial.filter(r => [
+      r.numero, r.cliente_nombre,
+      ...(r.ops || []).flatMap(op => [op.numero, op.referencia]),
+    ].some(v => norm(v).includes(t)))
+  }, [historial, busquedaHist])
+
   const toggleRem = (op) => {
     setGenError(null)
     if (selCliente !== null && op.cliente_id !== selCliente) {
@@ -253,6 +278,23 @@ function RemisionesProduccion() {
       if (next.length === 0) setSelCliente(null)
       return next
     })
+  }
+
+  // No borra nada: solo saca la OP de esta cola. Sigue intacta y a cargo del
+  // Admin de ahí en adelante (mismo endpoint que usa Troqueles).
+  const descartarRem = async (op) => {
+    if (!window.confirm(`¿Descartar ${op.numero} de tu cola de remisiones? Quedará a cargo del administrador; ya no la verás aquí.`)) return
+    setDescartandoRem(op.id)
+    setGenError(null)
+    try {
+      await descartarRemisionableOperador(op.id)
+      setSelRem(prev => prev.filter(id => id !== op.id))
+      loadRemisionables()
+    } catch (e) {
+      setGenError(e?.message || 'No se pudo descartar')
+    } finally {
+      setDescartandoRem(null)
+    }
   }
 
   const descargarPdfRemision = async (remisionId) => {
@@ -320,6 +362,12 @@ function RemisionesProduccion() {
 
   return (
     <>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        <button className={`btn sm${subTab === 'remisiones' ? ' primary' : ''}`} onClick={() => setSubTab('remisiones')}>Remisiones</button>
+        <button className={`btn sm${subTab === 'historial' ? ' primary' : ''}`} onClick={() => setSubTab('historial')}>Historial</button>
+      </div>
+
+      {subTab === 'remisiones' && (
       <div className="section">
         <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)', fontWeight: 700, fontSize: 13, display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
           <span>Remisiones — selecciona OPs de un cliente</span>
@@ -332,7 +380,7 @@ function RemisionesProduccion() {
           </button>
         </div>
         <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', fontSize: 12, color: 'var(--ink-3)' }}>
-          Marca varias OPs del <strong>mismo cliente</strong> ya completas (todas sus estaciones) para reunirlas en una sola remisión de entrega. No incluye troquel — eso se gestiona en Producción › Troqueles.
+          Marca varias OPs del <strong>mismo cliente</strong> ya completas (todas sus estaciones) para reunirlas en una sola remisión de entrega. Incluye OPs con troquel si además tienen procesos de cadena; el troquel puro (sin cadena) se gestiona en Producción › Troqueles.
         </div>
         <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)' }}>
           <div style={{ position: 'relative', maxWidth: 420 }}>
@@ -375,6 +423,16 @@ function RemisionesProduccion() {
                           </td>
                           <td style={{ padding: '10px 12px', width: 90, fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 13 }}>{op.numero}</td>
                           <td style={{ padding: '10px 12px', color: 'var(--ink-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{op.referencia}</td>
+                          <td style={{ padding: '10px 12px', width: 90, textAlign: 'right' }} onClick={e => e.stopPropagation()}>
+                            <button
+                              className="btn sm"
+                              disabled={descartandoRem === op.id}
+                              onClick={() => descartarRem(op)}
+                              title="Sacarla de tu cola de remisiones; queda a cargo del administrador"
+                            >
+                              Descartar
+                            </button>
+                          </td>
                         </tr>
                       )
                     })}
@@ -385,42 +443,76 @@ function RemisionesProduccion() {
           })
         )}
       </div>
+      )}
 
-      <div className="section" style={{ marginTop: 16 }}>
+      {subTab === 'historial' && (
+      <div className="section">
         <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)', fontWeight: 700, fontSize: 13 }}>
-          Generadas recientemente
+          Historial — remisiones generadas
         </div>
-        {histError && <div style={{ padding: '8px 16px', fontSize: 12, color: 'var(--danger, #c0392b)' }}>✗ {histError}</div>}
+        <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', fontSize: 12, color: 'var(--ink-3)' }}>
+          Cada remisión que generas sale de la cola y queda aquí. Puedes volver a descargar su PDF, o devolverla para rehacerla mientras el administrador no la haya liquidado.
+        </div>
+        {historial.length > 0 && (
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)' }}>
+            <div style={{ position: 'relative', maxWidth: 420 }}>
+              <input
+                className="input"
+                placeholder="Buscar por remisión, cliente, OP, referencia…"
+                value={busquedaHist}
+                onChange={e => setBusquedaHist(e.target.value)}
+                style={{ paddingLeft: 32 }}
+              />
+              <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-3)' }}>
+                <Icon.Search />
+              </span>
+            </div>
+            {histError && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--danger, #c0392b)' }}>✗ {histError}</div>}
+          </div>
+        )}
         {loadingHist ? <Skeleton /> : historial.length === 0 ? (
           <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Aún no has generado ninguna remisión de producción.</div>
+        ) : histFiltrado.length === 0 ? (
+          <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Sin resultados para «{busquedaHist.trim()}»</div>
         ) : (
           <div className="table-scroll">
-          <table style={{ width: '100%', minWidth: 640, borderCollapse: 'collapse' }}>
+          <table style={{ width: '100%', minWidth: 780, borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ borderBottom: '2px solid var(--line)' }}>
-                {['Remisión', 'Fecha', 'Cliente', 'OPs', ''].map((h, i) => (
+                {['Remisión', 'Fecha', 'Cliente', 'OPs', 'Generada por', 'Estado', ''].map((h, i) => (
                   <th key={i} style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--ink-3)', background: 'var(--surface-2)' }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {historial.map((rem, idx) => (
-                <tr key={rem.id} style={{ borderBottom: '1px solid var(--line)', background: idx % 2 ? 'var(--surface-2)' : 'var(--surface)' }}>
-                  <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 13 }}>{rem.numero}</td>
-                  <td style={{ padding: '10px 12px', fontSize: 12, color: 'var(--ink-2)' }}>{rem.fecha}</td>
-                  <td style={{ padding: '10px 12px', fontWeight: 600 }}>{rem.cliente_nombre || '—'}</td>
-                  <td style={{ padding: '10px 12px', color: 'var(--ink-2)' }}>{rem.ops.map(o => o.numero).join(', ')}</td>
-                  <td style={{ padding: '10px 12px', display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                    <button className="btn sm" disabled={histBusy === rem.id} onClick={() => rehacerPdf(rem)}>PDF</button>
-                    <button className="btn sm" disabled={histBusy === rem.id} onClick={() => devolver(rem)}>Devolver</button>
-                  </td>
-                </tr>
-              ))}
+              {histFiltrado.map((rem, idx) => {
+                const def = REMISION_STATUS_DEFS.find(s => s.id === rem.estado)
+                const busy = histBusy === rem.id
+                return (
+                  <tr key={rem.id} style={{ borderBottom: '1px solid var(--line)', background: idx % 2 ? 'var(--surface-2)' : 'var(--surface)' }}>
+                    <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 13 }}>{rem.numero}</td>
+                    <td style={{ padding: '10px 12px', fontSize: 12, color: 'var(--ink-2)' }}>{fmtFechaCorta(rem.generada_en || rem.fecha)}</td>
+                    <td style={{ padding: '10px 12px', fontWeight: 600 }}>{rem.cliente_nombre || '—'}</td>
+                    <td style={{ padding: '10px 12px', color: 'var(--ink-2)' }}>{(rem.ops || []).map(o => o.numero).join(', ')}</td>
+                    <td style={{ padding: '10px 12px', fontSize: 12, color: 'var(--ink-2)' }}>{rem.generada_por_username || '—'}</td>
+                    <td style={{ padding: '10px 12px' }}>
+                      {def && <span className={'badge ' + def.cls}><span className="dot"></span>{def.label}</span>}
+                    </td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      <button className="btn sm" disabled={busy} onClick={() => rehacerPdf(rem)}>PDF</button>
+                      {rem.estado === 'pendiente' && (
+                        <button className="btn sm" style={{ marginLeft: 6 }} disabled={busy} onClick={() => devolver(rem)}>Devolver</button>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
           </div>
         )}
       </div>
+      )}
 
       {confirmGen && (
         <ConfirmarRemisionModal

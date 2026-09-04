@@ -520,6 +520,14 @@ export const createRegistroProceso = (data) =>
 export const anularRegistroProceso = (id) =>
   apiFetch(`${BASE}/registros-proceso/${id}/anular/`, { method: 'POST' }).then(jsonConError)
 
+// Admin-only: fija el monto a cobrar por un registro puntual de la cadena.
+export const updateRegistroProceso = (id, data) =>
+  apiFetch(`${BASE}/registros-proceso/${id}/`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  }).then(jsonConError)
+
 // ─────────────── Notificaciones (solo Admin) ───────────────
 export const getNotificaciones = (params = '') =>
   apiFetch(`${BASE}/notificaciones/${params}`).then(json)
@@ -598,8 +606,3 @@ export const devolverFormatoCuchillas = (id, motivo = '') =>
 // El Operador cancela un formato enviado (→ borrador) para editarlo
 export const cancelarEnvioFormato = (id) =>
   apiFetch(`${BASE}/formatos-cuchillas/${id}/cancelar_envio/`, { method: 'POST' }).then(jsonConError)
-
-// ─────────────── Dashboard ───────────────
-
-export const getDashboardStats = () =>
-  apiFetch(`${BASE}/dashboard/stats/`).then(json)

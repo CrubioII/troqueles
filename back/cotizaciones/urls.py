@@ -6,7 +6,6 @@ from .views import (
     TroquelModeloViewSet, FormatoCuchillasViewSet,
     RemisionViewSet, RegistroProcesoViewSet, NotificacionViewSet,
 )
-from .dashboard_views import DashboardStatsView
 from .sync_views import SyncView
 
 router = DefaultRouter()
@@ -23,7 +22,6 @@ router.register("registros-proceso", RegistroProcesoViewSet, basename="registro-
 router.register("notificaciones", NotificacionViewSet, basename="notificacion")
 
 urlpatterns = [
-    path("dashboard/stats/", DashboardStatsView.as_view(), name="dashboard-stats"),
     path("sync/", SyncView.as_view(), name="sync"),
     path("", include(router.urls)),
 ]

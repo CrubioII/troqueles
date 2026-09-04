@@ -6,7 +6,7 @@ import { Icon } from '../components/Icons'
 import { useAutosave } from '../hooks/useAutosave'
 import {
   FormatosCuchillasHistory, FormatoCuchillasForm, ModeloViewer,
-  NuevaTareaTroquelModal,
+  NuevaTareaTroquelModal, EstadoFormatoBadge,
 } from '../components/Troquel'
 import {
   getOrdenesTodas, deleteOrden, getFormatosCuchillas, getFormatosCuchillasTodos, getOrdenesPendientes,
@@ -978,12 +978,23 @@ function OperadorTroqueles() {
                 <tbody>
                   {listaFiltrada.map((op, idx) => {
                     const sub = fmtSubida(op.creado)
+                    const devuelto = op.formato_estado === 'devuelto'
                     return (
                       <tr key={op.id}
-                        style={{ borderBottom: '1px solid var(--line)', background: idx % 2 ? 'var(--surface-2)' : 'var(--surface)', cursor: 'pointer' }}
+                        style={{
+                          borderBottom: '1px solid var(--line)',
+                          background: devuelto ? 'var(--danger-soft, #fdecea)' : (idx % 2 ? 'var(--surface-2)' : 'var(--surface)'),
+                          borderLeft: devuelto ? '3px solid var(--danger, #c0392b)' : '3px solid transparent',
+                          cursor: 'pointer',
+                        }}
                         onClick={() => !opening && abrir(op)}>
                         <td style={{ padding: '12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 13, color: 'var(--ink-3)', width: 40 }}>{idx + 1}</td>
-                        <td style={{ padding: '12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 13 }}>{op.numero}</td>
+                        <td style={{ padding: '12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 13 }}>
+                          <span title={devuelto ? op.formato_devolucion_motivo : undefined} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                            {op.numero}
+                            {devuelto && <EstadoFormatoBadge estado="devuelto" />}
+                          </span>
+                        </td>
                         <td style={{ padding: '12px', fontSize: 12, fontWeight: 600, color: sub.color }}>{sub.txt}</td>
                         <td style={{ padding: '12px', fontWeight: 600 }}>{op.cliente_nombre || '—'}</td>
                         <td style={{ padding: '12px', color: 'var(--ink-2)' }}>{op.referencia}</td>

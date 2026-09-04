@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import {
   fmtNum, NumField, ChipToggle,
-  ESTACIONES_CONFIG, TAMANOS_REGISTRO, TIPOS_LAMINADO_REGISTRO,
+  ESTACIONES_CONFIG, TAMANOS_REGISTRO, TIPOS_LAMINADO_REGISTRO, TIPOS_METALIZADO_REGISTRO,
 } from './core'
 import { createRegistroProceso, anularRegistroProceso } from '../api'
 
@@ -35,7 +35,7 @@ const EMPTY = {
   tamano: '', tamano_otro: '',
   tiro_active: false, tiro_colores_num: 0, tiro_colores_desc: '',
   retiro_active: false, retiro_colores_num: 0, retiro_colores_desc: '',
-  tipo_laminado: '',
+  tipo_laminado: '', tipo_metalizado: '', tipo_metalizado_otro: '',
   observaciones: '',
 }
 
@@ -107,6 +107,41 @@ export function RegistroProcesoForm({ estacion, orden, onCreated }) {
     if (!procesoId) { setError('Selecciona qué proceso estás registrando.'); return }
     const realizada = Number(form.cantidad_realizada || 0)
     if (!realizada) { setError('Indica la cantidad realizada.'); return }
+
+    if (cfg.campos.includes('tamano')) {
+      if (!form.tamano) { setError('Selecciona el tamaño del papel.'); return }
+      if (form.tamano === 'otro' && !form.tamano_otro.trim()) { setError('Describe el tamaño del papel.'); return }
+    }
+
+    // Tiro/retiro: el único par de campos opcional, pero no ambos vacíos —
+    // al menos uno tiene que quedar marcado (impresión o laminado, según la
+    // estación). Si queda marcado, sus subcampos (colores) sí son obligatorios.
+    if (cfg.campos.includes('colores') || cfg.campos.includes('lado')) {
+      if (!form.tiro_active && !form.retiro_active) {
+        setError('Indica tiro, retiro o ambos.')
+        return
+      }
+    }
+
+    if (cfg.campos.includes('colores')) {
+      for (const key of ['tiro', 'retiro']) {
+        if (!form[`${key}_active`]) continue
+        const nombre = key === 'tiro' ? 'tiro' : 'retiro'
+        if (!Number(form[`${key}_colores_num`])) { setError(`Indica el número de colores del ${nombre}.`); return }
+        if (!form[`${key}_colores_desc`].trim()) { setError(`Indica qué colores se usaron en el ${nombre}.`); return }
+      }
+    }
+
+    if (cfg.campos.includes('laminado')) {
+      if (!form.tipo_laminado) { setError('Selecciona el tipo de laminado.'); return }
+      if (form.tipo_laminado === 'metalizado') {
+        if (!form.tipo_metalizado) { setError('Selecciona el color del metalizado.'); return }
+        if (form.tipo_metalizado === 'otros' && !form.tipo_metalizado_otro.trim()) {
+          setError('Especifica el color del metalizado.'); return
+        }
+      }
+    }
+
     if (requerida && realizada < (requerida - margen)) {
       setConfirmando({ esperada: requerida, realizada })
       return
@@ -152,7 +187,7 @@ export function RegistroProcesoForm({ estacion, orden, onCreated }) {
       </FieldGroup>
 
       {cfg.campos.includes('tamano') && (
-        <FieldGroup title="Tamaño del papel">
+        <FieldGroup title="Tamaño del papel *">
           <Field label="Medida">
             <select className="input" value={form.tamano} onChange={e => set('tamano', e.target.value)}>
               <option value="">Seleccionar…</option>
@@ -173,7 +208,9 @@ export function RegistroProcesoForm({ estacion, orden, onCreated }) {
       )}
 
       {cfg.campos.includes('colores') && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>Marca tiro, retiro o ambos — no pueden quedar los dos sin marcar.</span>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
           {[
             { key: 'tiro', label: 'Tiro (frente)' },
             { key: 'retiro', label: 'Retiro (interior)' },
@@ -213,18 +250,66 @@ export function RegistroProcesoForm({ estacion, orden, onCreated }) {
               </FieldGroup>
             </div>
           ))}
+          </div>
         </div>
       )}
 
       {cfg.campos.includes('laminado') && (
-        <FieldGroup title="Laminado">
+        <FieldGroup title="Laminado *">
           <Field label="Tipo realizado">
             <select className="input" value={form.tipo_laminado} onChange={e => set('tipo_laminado', e.target.value)}>
               <option value="">Seleccionar…</option>
               {TIPOS_LAMINADO_REGISTRO.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
             </select>
           </Field>
+          {/* Mate/brillante no tienen color; solo metalizado, y es un tono, no
+              un número de tintas (eso es cosa de Impresora). */}
+          {form.tipo_laminado === 'metalizado' && (
+            <>
+              <Field label="Color">
+                <select className="input" value={form.tipo_metalizado} onChange={e => set('tipo_metalizado', e.target.value)}>
+                  <option value="">Seleccionar…</option>
+                  {TIPOS_METALIZADO_REGISTRO.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+                </select>
+              </Field>
+              {form.tipo_metalizado === 'otros' && (
+                <Field label="¿Cuál?">
+                  <input
+                    className="input"
+                    placeholder="Ej. Holográfico, Azul…"
+                    value={form.tipo_metalizado_otro}
+                    onChange={e => set('tipo_metalizado_otro', e.target.value)}
+                  />
+                </Field>
+              )}
+            </>
+          )}
         </FieldGroup>
+      )}
+
+      {cfg.campos.includes('lado') && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>Marca tiro, retiro o ambos — no pueden quedar los dos sin marcar.</span>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+          {[
+            { key: 'tiro', label: 'Tiro (frente)' },
+            { key: 'retiro', label: 'Retiro (interior)' },
+          ].map(({ key, label }) => (
+            <div key={key} style={{ flex: '1 1 280px', minWidth: 0 }}>
+              <FieldGroup title={label}>
+                <div style={{ display: 'flex', alignItems: 'flex-end', paddingBottom: 2 }}>
+                  <ChipToggle
+                    active={form[`${key}_active`]}
+                    onClick={() => set(`${key}_active`, !form[`${key}_active`])}
+                  >
+                    {form[`${key}_active`] ? '✓ Laminado' : 'No laminado'}
+                  </ChipToggle>
+                </div>
+              </FieldGroup>
+            </div>
+          ))}
+          </div>
+        </div>
       )}
 
       <Field label="Observaciones (opcional)" full>
@@ -280,10 +365,11 @@ export function RegistroProcesoForm({ estacion, orden, onCreated }) {
 //
 // `onAnulado`: si se pasa, aparece la columna de deshacer. Bajo bloqueo duro un
 // error de tecleo dejaría la OP atascada, así que el operador puede anular.
-export function RegistroProcesoHistory({ registros, loading, showOrden = true, onAnulado }) {
+export function RegistroProcesoHistory({ registros, loading, showOrden = true, onAnulado, showCosto = false, onCostoChange }) {
   const [anulando, setAnulando] = useState(null)
   const [confirmAnular, setConfirmAnular] = useState(null)
   const [error, setError] = useState(null)
+  const [montoDrafts, setMontoDrafts] = useState({})
 
   if (loading) {
     return <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Cargando…</div>
@@ -306,18 +392,43 @@ export function RegistroProcesoHistory({ registros, loading, showOrden = true, o
     }
   }
 
-  const headers = [
-    'Fecha / Hora',
-    ...(showOrden ? ['OP #', 'Cliente'] : []),
-    'Proceso', 'Cantidad', 'Tamaño', 'Detalle', 'Operador',
-    ...(onAnulado ? [''] : []),
-  ]
+  const guardarMonto = (id) => {
+    const raw = montoDrafts[id]
+    if (raw === undefined) return
+    const valor = raw === '' ? null : Number(raw)
+    if (raw !== '' && Number.isNaN(valor)) return
+    onCostoChange && onCostoChange(id, valor)
+  }
+
+  const headers = showCosto
+    ? ['Proceso', 'Operador', 'Fecha / Hora', 'Cantidad', 'Monto']
+    : [
+        'Fecha / Hora',
+        ...(showOrden ? ['OP #', 'Cliente'] : []),
+        'Proceso', 'Cantidad', 'Tamaño', 'Detalle', 'Operador',
+        ...(onAnulado ? [''] : []),
+      ]
 
   const detalle = (r) => {
     const partes = []
-    if (r.tiro_active) partes.push(`Tiro ${r.tiro_colores_num || '?'}c${r.tiro_colores_desc ? ` (${r.tiro_colores_desc})` : ''}`)
-    if (r.retiro_active) partes.push(`Retiro ${r.retiro_colores_num || '?'}c${r.retiro_colores_desc ? ` (${r.retiro_colores_desc})` : ''}`)
-    if (r.tipo_laminado) partes.push(TIPOS_LAMINADO_REGISTRO.find(t => t.id === r.tipo_laminado)?.label || r.tipo_laminado)
+    if (r.tipo_laminado) {
+      // Laminado: tiro/retiro es solo el lado, nunca lleva número de tintas
+      // (eso es cosa de Impresora, ver la rama de abajo).
+      if (r.tiro_active) partes.push('Tiro')
+      if (r.retiro_active) partes.push('Retiro')
+      const tipoLabel = TIPOS_LAMINADO_REGISTRO.find(t => t.id === r.tipo_laminado)?.label || r.tipo_laminado
+      if (r.tipo_laminado === 'metalizado' && r.tipo_metalizado) {
+        const colorLabel = r.tipo_metalizado === 'otros'
+          ? (r.tipo_metalizado_otro || 'Otros')
+          : (TIPOS_METALIZADO_REGISTRO.find(t => t.id === r.tipo_metalizado)?.label || r.tipo_metalizado)
+        partes.push(`${tipoLabel} (${colorLabel})`)
+      } else {
+        partes.push(tipoLabel)
+      }
+    } else {
+      if (r.tiro_active) partes.push(`Tiro${r.tiro_colores_num ? ` ${r.tiro_colores_num}c` : ''}${r.tiro_colores_desc ? ` (${r.tiro_colores_desc})` : ''}`)
+      if (r.retiro_active) partes.push(`Retiro${r.retiro_colores_num ? ` ${r.retiro_colores_num}c` : ''}${r.retiro_colores_desc ? ` (${r.retiro_colores_desc})` : ''}`)
+    }
     if (r.observaciones) partes.push(r.observaciones)
     return partes.join(' · ') || '—'
   }
@@ -344,46 +455,82 @@ export function RegistroProcesoHistory({ registros, loading, showOrden = true, o
                 borderBottom: '1px solid var(--line)',
                 background: idx % 2 === 0 ? 'var(--surface)' : 'var(--surface-2)',
               }}>
-                <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontSize: 12, color: 'var(--ink-2)' }}>
-                  {fmtFecha(r.fecha_hora)}
-                </td>
-                {showOrden && (
+                {showCosto ? (
                   <>
-                    <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 12 }}>
-                      {r.orden_numero}
+                    <td style={{ padding: '10px 12px', color: 'var(--ink-2)' }}>{r.proceso_label}</td>
+                    <td style={{ padding: '10px 12px', color: 'var(--ink-2)', fontSize: 12 }}>{r.operador_username || '—'}</td>
+                    <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontSize: 12, color: 'var(--ink-2)' }}>
+                      {fmtFecha(r.fecha_hora)}
                     </td>
-                    <td style={{ padding: '10px 12px', fontWeight: 600 }}>{r.orden_cliente}</td>
+                    <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}>
+                      {fmtNum(r.cantidad_realizada)}
+                      {r.faltante && (
+                        <span title={`Esperadas: ${fmtNum(r.cantidad_esperada)}`} style={{
+                          marginLeft: 6, fontSize: 10, fontWeight: 700, padding: '1px 5px', borderRadius: 4,
+                          background: 'var(--danger-soft, #fdecea)', color: 'var(--danger, #c0392b)',
+                        }}>
+                          −{fmtNum(r.cantidad_esperada - r.cantidad_realizada)}
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ padding: '6px 12px' }}>
+                      <input
+                        className="input"
+                        type="number"
+                        step="0.01"
+                        placeholder="—"
+                        style={{ width: 110, fontSize: 12 }}
+                        value={montoDrafts[r.id] ?? (r.monto_cobrado ?? '')}
+                        onChange={e => setMontoDrafts(d => ({ ...d, [r.id]: e.target.value }))}
+                        onBlur={() => guardarMonto(r.id)}
+                        onKeyDown={e => { if (e.key === 'Enter') { e.currentTarget.blur() } }}
+                      />
+                    </td>
                   </>
-                )}
-                <td style={{ padding: '10px 12px', color: 'var(--ink-2)' }}>{r.proceso_label}</td>
-                <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}>
-                  {fmtNum(r.cantidad_realizada)}
-                  {r.faltante && (
-                    <span title={`Esperadas: ${fmtNum(r.cantidad_esperada)}`} style={{
-                      marginLeft: 6, fontSize: 10, fontWeight: 700, padding: '1px 5px', borderRadius: 4,
-                      background: 'var(--danger-soft, #fdecea)', color: 'var(--danger, #c0392b)',
-                    }}>
-                      −{fmtNum(r.cantidad_esperada - r.cantidad_realizada)}
-                    </span>
-                  )}
-                </td>
-                <td style={{ padding: '10px 12px', fontSize: 12, color: 'var(--ink-2)' }}>
-                  {r.tamano === 'otro' ? (r.tamano_otro || 'Otro') : (r.tamano_label || '—')}
-                </td>
-                <td style={{ padding: '10px 12px', fontSize: 12, color: 'var(--ink-2)' }}>{detalle(r)}</td>
-                <td style={{ padding: '10px 12px', color: 'var(--ink-2)', fontSize: 12 }}>{r.operador_username || '—'}</td>
-                {onAnulado && (
-                  <td style={{ padding: '10px 12px' }}>
-                    <button
-                      type="button"
-                      className={'btn' + (confirmAnular === r.id ? ' danger' : '')}
-                      style={{ fontSize: 11, padding: '4px 8px' }}
-                      disabled={anulando === r.id}
-                      onClick={() => (confirmAnular === r.id ? anular(r.id) : setConfirmAnular(r.id))}
-                    >
-                      {anulando === r.id ? '…' : (confirmAnular === r.id ? '¿Anular?' : 'Anular')}
-                    </button>
-                  </td>
+                ) : (
+                  <>
+                    <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontSize: 12, color: 'var(--ink-2)' }}>
+                      {fmtFecha(r.fecha_hora)}
+                    </td>
+                    {showOrden && (
+                      <>
+                        <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 12 }}>
+                          {r.orden_numero}
+                        </td>
+                        <td style={{ padding: '10px 12px', fontWeight: 600 }}>{r.orden_cliente}</td>
+                      </>
+                    )}
+                    <td style={{ padding: '10px 12px', color: 'var(--ink-2)' }}>{r.proceso_label}</td>
+                    <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}>
+                      {fmtNum(r.cantidad_realizada)}
+                      {r.faltante && (
+                        <span title={`Esperadas: ${fmtNum(r.cantidad_esperada)}`} style={{
+                          marginLeft: 6, fontSize: 10, fontWeight: 700, padding: '1px 5px', borderRadius: 4,
+                          background: 'var(--danger-soft, #fdecea)', color: 'var(--danger, #c0392b)',
+                        }}>
+                          −{fmtNum(r.cantidad_esperada - r.cantidad_realizada)}
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ padding: '10px 12px', fontSize: 12, color: 'var(--ink-2)' }}>
+                      {r.tamano === 'otro' ? (r.tamano_otro || 'Otro') : (r.tamano_label || '—')}
+                    </td>
+                    <td style={{ padding: '10px 12px', fontSize: 12, color: 'var(--ink-2)' }}>{detalle(r)}</td>
+                    <td style={{ padding: '10px 12px', color: 'var(--ink-2)', fontSize: 12 }}>{r.operador_username || '—'}</td>
+                    {onAnulado && (
+                      <td style={{ padding: '10px 12px' }}>
+                        <button
+                          type="button"
+                          className={'btn' + (confirmAnular === r.id ? ' danger' : '')}
+                          style={{ fontSize: 11, padding: '4px 8px' }}
+                          disabled={anulando === r.id}
+                          onClick={() => (confirmAnular === r.id ? anular(r.id) : setConfirmAnular(r.id))}
+                        >
+                          {anulando === r.id ? '…' : (confirmAnular === r.id ? '¿Anular?' : 'Anular')}
+                        </button>
+                      </td>
+                    )}
+                  </>
                 )}
               </tr>
             ))}

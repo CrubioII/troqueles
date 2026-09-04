@@ -10,7 +10,7 @@ from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from django.core.mail import EmailMessage
 from django.db import connection, transaction
-from django.db.models import Exists, F, Max, OuterRef, ProtectedError, Q, Subquery
+from django.db.models import Exists, F, Max, OuterRef, ProtectedError, Q, Subquery, Sum
 from django.http import HttpResponse
 from django.template.loader import render_to_string
 from django.conf import settings
@@ -383,7 +383,7 @@ def _aplicar_costo_troquel(op, total):
     """Escribe el total del troquel en el proceso de la OP y en el ítem de su
     remisión pendiente: lo que el Admin cotiza es lo que se cobra."""
     op.procesos.filter(proceso_id="troquel").update(costo=total)
-    _sync_remision_item_troquel(op, total)
+    _sync_remision_item_op(op)
 
 
 def _remision_visible_de_op(op):
@@ -397,13 +397,25 @@ def _remision_visible_de_op(op):
     return rem.id
 
 
-def _sync_remision_item_troquel(op, total):
-    """Refleja el total del troquel en el ítem que la OP aporta a su remisión.
+def _valor_registros_op(op):
+    """Suma de los montos que el Admin cobró por registro de la cadena de esta
+    OP (Impresora/Laminadora/Barnizadora/Troqueladora) — ver `monto_cobrado`
+    en RegistroProceso. No incluye el troquel: ese cobro vive aparte."""
+    return op.registros_proceso.aggregate(total=Sum("monto_cobrado"))["total"] or 0
 
-    Con la remisión ya creada antes de que existan precios, el ítem nace en 0 (o
-    con un valor viejo); esto lo pone al día cada vez que cambian los costos.
-    Solo toca remisiones pendientes: liquidadas y consolidadas son historia.
+
+def _sync_remision_item_op(op):
+    """Refleja en el ítem que la OP aporta a su remisión lo que de verdad se le
+    cobra: el troquel (si tiene) más lo que el Admin cargó por registro de la
+    cadena. Con la remisión ya creada antes de que existan precios, el ítem
+    nace en 0 (o con el valor de venta de la cotización); esto lo pone al día
+    cada vez que cambian los costos. Solo toca remisiones pendientes:
+    liquidadas y consolidadas son historia.
     """
+    troquel_proceso = op.procesos.filter(proceso_id="troquel", active=True).first()
+    troquel_costo = (troquel_proceso.costo or 0) if troquel_proceso else 0
+    total = troquel_costo + _valor_registros_op(op)
+
     rem = Remision.objects.filter(orden=op).first()
     if rem is None:
         return
@@ -599,26 +611,72 @@ def _sin_desperdicio(detalle):
     return _DESPERDICIO_RE.sub("", detalle or "").strip(" ·")
 
 
+_TAMANO_LABELS = dict(RegistroProceso.TAMANO_CHOICES)
+_TIPO_LAMINADO_LABELS = dict(RegistroProceso.TIPO_LAMINADO_CHOICES)
+_TIPO_METALIZADO_LABELS = dict(RegistroProceso.TIPO_METALIZADO_CHOICES)
+
+
+def _registro_detalle(registro):
+    """Especificación legible de lo que el Operador registró en esta estación,
+    como líneas separadas (no un string plano): tamaño, lado (Tiro/Retiro) con
+    sus tintas si las hay (Impresora), tipo de laminado (Laminadora). Mismo
+    criterio que el historial del front (RegistroProceso.jsx), reconstruido
+    acá porque el PDF no comparte JS."""
+    lineas = []
+    if registro.tamano:
+        if registro.tamano == "otro":
+            lineas.append(f"Tamaño: {registro.tamano_otro or 'Otro'}")
+        else:
+            lineas.append(f"Tamaño: {_TAMANO_LABELS.get(registro.tamano, registro.tamano)}")
+    if registro.tiro_active:
+        lineas.append("Tiro")
+        if registro.tiro_colores_num:
+            colores = f"{registro.tiro_colores_num} Colores"
+            if registro.tiro_colores_desc:
+                colores += f": {registro.tiro_colores_desc}"
+            lineas.append(colores)
+    if registro.retiro_active:
+        lineas.append("Retiro")
+        if registro.retiro_colores_num:
+            colores = f"{registro.retiro_colores_num} Colores"
+            if registro.retiro_colores_desc:
+                colores += f": {registro.retiro_colores_desc}"
+            lineas.append(colores)
+    if registro.tipo_laminado:
+        lineas.append(_TIPO_LAMINADO_LABELS.get(registro.tipo_laminado, registro.tipo_laminado))
+        # Mate/brillante no tienen color; metalizado sí — y es un tono, nunca
+        # un número de tintas (eso es cosa de Impresora).
+        if registro.tipo_laminado == "metalizado" and registro.tipo_metalizado:
+            if registro.tipo_metalizado == "otros":
+                lineas.append(registro.tipo_metalizado_otro or "Otros")
+            else:
+                lineas.append(_TIPO_METALIZADO_LABELS.get(registro.tipo_metalizado, registro.tipo_metalizado))
+    return lineas
+
+
 def _remision_procesos_ctx(op):
-    """Bloque de resultados reales por estación de esta OP: solo la cantidad
-    que salió de cada máquina, sin cantidad_esperada ni sobrante — es
-    exclusivo para la remisión de producción completa (no toca costos ni el
-    desglose de troquel, que sigue viniendo de FormatoCuchillas)."""
-    proceso_ids = list(
+    """Bloque de resultados reales por estación de esta OP: la especificación
+    que el Operador registró (tamaño, tiro/retiro y tintas, tipo de laminado)
+    por proceso, en el orden de la cadena — sin operador ni estación (uso
+    interno) y sin cantidad por proceso (la cantidad entregada al cliente es
+    una sola cifra para toda la remisión, la del último proceso de la cadena;
+    ver _remision_operador_pdf_ctx). Exclusivo para la remisión de producción
+    completa (no toca costos ni el desglose de troquel, que sigue viniendo de
+    FormatoCuchillas)."""
+    proceso_ids = sorted(
         op.procesos.filter(proceso_id__in=chain.CHAIN_PROCESOS, active=True)
-        .values_list("proceso_id", flat=True)
+        .values_list("proceso_id", flat=True),
+        key=lambda pid: chain.PROCESO_A_ESTACION[pid]["orden"],
     )
     items = []
     for proceso_id in proceso_ids:
         registro = op.registros_proceso.filter(proceso_id=proceso_id).order_by("-fecha_hora").first()
         if not registro:
             continue
-        estacion = chain.PROCESO_A_ESTACION.get(proceso_id)
         items.append({
             "proceso_label": chain.PROCESO_LABELS.get(proceso_id, proceso_id),
-            "estacion_label": estacion["label"] if estacion else "",
-            "cantidad_realizada": _fmt_num(registro.cantidad_realizada),
-            "operador_username": registro.operador.username if registro.operador_id else "",
+            "detalle": _registro_detalle(registro),
+            "cantidad_realizada": registro.cantidad_realizada,
             "fecha_hora": registro.fecha_hora,
         })
     if not items:
@@ -679,10 +737,16 @@ def _remision_operador_pdf_ctx(rem, admin=False, con_desperdicio=False):
             "formato_id": formato.id if formato else None,
             "op_numero": op.numero,
             "referencia": op.referencia,
-            "cantidad": _fmt_num(op.cantidad or 0),
+            # Una tarea de troquel entregada = 1, sin importar la cantidad de
+            # producto de la OP (eso es harina de otro costal: la cadena).
+            "cantidad": 1,
             "consumos": consumos,
             # Nota del Operador sobre este troquel: se imprime bajo su bloque.
             "observaciones": (formato.observaciones or "") if formato else "",
+            # Quién y cuándo llenó este formato de cuchillas — el Admin lo pide
+            # para saber a quién preguntarle si algo no cuadra.
+            "operador_username": (formato.operador.username if formato and formato.operador_id else ""),
+            "fecha_hora": formato.fecha_hora if formato else None,
         }
         if admin:
             troquel_total = _costos_items_total(raw_items)
@@ -692,10 +756,16 @@ def _remision_operador_pdf_ctx(rem, admin=False, con_desperdicio=False):
 
     procesos = [p for p in (_remision_procesos_ctx(op) for op in _remision_operador_ops(rem)) if p]
 
+    # Cantidad entregada de producción: una sola cifra para toda la remisión,
+    # sumando por OP lo que realmente salió del último proceso de su cadena
+    # (no lo esperado/planeado ni el detalle por estación intermedia).
+    cantidad_entregada = sum(p["items"][-1]["cantidad_realizada"] for p in procesos if p["items"])
+
     ctx = {
         "rem": rem,
         "troqueles": troqueles,
         "procesos": procesos,
+        "cantidad_entregada": _fmt_num(cantidad_entregada),
         "logo_uri": _logo_data_uri(),
     }
     if admin:
@@ -1602,7 +1672,7 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         """
         proceso_id = (request.query_params.get("proceso") or "").strip()
         estacion_id = (request.query_params.get("estacion") or "").strip()
-        qs = OrdenProduccion.objects.select_related("cliente").prefetch_related("procesos")
+        qs = OrdenProduccion.objects.select_related("cliente").prefetch_related("procesos", "formatos_cuchillas")
 
         if estacion_id:
             # Cola de una estación de la cadena (impresora → … → troqueladora).
@@ -1832,9 +1902,14 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
     def remisionables_operador(self, request):
         """GET /api/ordenes/remisionables_operador/ — Operador o Admin.
 
-        OPs de troquel cuya remisión aún está pendiente (o aún no existe) y por
-        tanto pueden entrar en una remisión del Operador. Vista sanitizada (sin
-        valores). El front agrupa por cliente y filtra en memoria.
+        OPs de troquel *puro* (troquel activo y ningún proceso de cadena
+        activo — la tarea nace de "+ Nueva tarea de troquel") cuya remisión
+        aún está pendiente (o aún no existe). Vista sanitizada (sin valores).
+        El front agrupa por cliente y filtra en memoria.
+
+        Una OP con troquel activo Y procesos de cadena (impresión, laminado…)
+        es un trabajo completo de producción: su remisión vive en
+        `remisionables_produccion`, no acá.
 
         Lo que el Operador ya generó sale de esta cola y vive en
         `remisiones_generadas_operador`, desde donde puede devolverse. Lo que
@@ -1844,6 +1919,7 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         qs = (
             OrdenProduccion.objects
             .filter(procesos__proceso_id="troquel", procesos__active=True)
+            .exclude(procesos__proceso_id__in=chain.CHAIN_PROCESOS, procesos__active=True)
             # Solo OP con el formato de cuchillas enviado: sin él no hay consumo
             # que remisionar, y uno devuelto tiene que corregirse y reenviarse
             # antes de volver a entrar en una remisión.
@@ -1864,18 +1940,21 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
     def remisionables_produccion(self, request):
         """GET /api/ordenes/remisionables_produccion/ — Operador o Admin.
 
-        OPs de la cadena (impresora/laminadora/barnizadora/troqueladora) que ya
-        completaron todas sus estaciones activas y por eso tienen una remisión
-        pendiente de generar (creada sola al llegar al 100%, ver
-        `_maybe_crear_remision`). No incluye troquel: esas viven en
-        `remisionables_operador` / la pantalla de Troqueles. Vista sanitizada
-        (sin valores). El front agrupa por cliente.
+        OPs con al menos un proceso de cadena (impresora/laminadora/
+        barnizadora/troqueladora) que ya completaron todas sus estaciones
+        activas y por eso tienen una remisión pendiente de generar (creada
+        sola al llegar al 100%, ver `_maybe_crear_remision`). Incluye las que
+        además tienen troquel activo (molde + producción completa: es un solo
+        trabajo, se remisiona junto — el desglose de cuchilla sale igual en el
+        PDF, ver `_remision_operador_pdf_ctx`). Solo excluye troquel *puro*
+        (sin cadena): esas viven en `remisionables_operador` / la pantalla de
+        Troqueles. Vista sanitizada (sin valores). El front agrupa por
+        cliente.
         """
         qs = (
             OrdenProduccion.objects
             .filter(remision_descartada_operador_en__isnull=True)
             .filter(procesos__proceso_id__in=chain.CHAIN_PROCESOS, procesos__active=True)
-            .exclude(procesos__proceso_id="troquel", procesos__active=True)
             .filter(remision__estado="pendiente", remision__generada_en__isnull=True)
             .select_related("cliente", "remision")
             .distinct()
@@ -2233,6 +2312,7 @@ class RemisionViewSet(viewsets.ModelViewSet):
             "troqueles": det["troqueles"],
             "total_general": det["total_general"],
             "procesos": det["procesos"],
+            "cantidad_entregada": det["cantidad_entregada"],
         })
 
     @action(detail=True, methods=["post"], url_path="liquidar")
@@ -2489,6 +2569,18 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
             if error:
                 return Response({"error": error}, status=409)
         _reabrir_troquel(formato, request.data.get("motivo"), revisor=request.user)
+        if formato.operador_id:
+            op = formato.orden
+            Notificacion.objects.create(
+                tipo="formato_devuelto",
+                titulo=f"Formato devuelto · {op.numero if op else ''}",
+                mensaje=(
+                    f"El formato de cuchillas de {op.referencia}" if op and op.referencia else "Tu formato de cuchillas"
+                ) + (f" fue devuelto: {formato.devolucion_motivo}" if formato.devolucion_motivo else " fue devuelto para corregir."),
+                orden=op,
+                destinatario=formato.operador,
+                creada_por=request.user,
+            )
         return Response({
             **self.get_serializer(formato).data,
             "remision_eliminada_id": rem_id,
@@ -2526,6 +2618,9 @@ class RegistroProcesoViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         datos = serializer.validated_data
+        if not request.user.is_staff:
+            # monto_cobrado lo fija el Admin después, nunca en el registro del Operador.
+            datos.pop("monto_cobrado", None)
         op = datos["orden"]
         estacion_id = datos["estacion"]
         proceso_id = datos["proceso_id"]
@@ -2560,7 +2655,12 @@ class RegistroProcesoViewSet(viewsets.ModelViewSet):
                 status=409,
             )
 
-        if estacion_id == "troqueladora" and getattr(op, "troquel_modelo", None) is None:
+        # Solo exige el molde si esta OP de verdad tiene tarea de troquel activa:
+        # una OP puede pasar por troqueladora (troquelado en la cadena) sin
+        # necesitar fabricar molde propio (p. ej. molde ya existente de un
+        # trabajo anterior), y ahí no debe bloquear.
+        tiene_troquel_activo = op.procesos.filter(proceso_id="troquel", active=True).exists()
+        if estacion_id == "troqueladora" and tiene_troquel_activo and getattr(op, "troquel_modelo", None) is None:
             return Response(
                 {
                     "code": "troquel_no_registrado",
@@ -2669,11 +2769,19 @@ class RegistroProcesoViewSet(viewsets.ModelViewSet):
 
     def update(self, request, *args, **kwargs):
         _require_admin(request)
-        return super().update(request, *args, **kwargs)
+        op = self.get_object().orden
+        response = super().update(request, *args, **kwargs)
+        if "monto_cobrado" in request.data:
+            _sync_remision_item_op(op)
+        return response
 
     def partial_update(self, request, *args, **kwargs):
         _require_admin(request)
-        return super().partial_update(request, *args, **kwargs)
+        op = self.get_object().orden
+        response = super().partial_update(request, *args, **kwargs)
+        if "monto_cobrado" in request.data:
+            _sync_remision_item_op(op)
+        return response
 
     def destroy(self, request, *args, **kwargs):
         _require_admin(request)
@@ -2681,21 +2789,24 @@ class RegistroProcesoViewSet(viewsets.ModelViewSet):
 
 
 class NotificacionViewSet(viewsets.ReadOnlyModelViewSet):
-    """Avisos para el Admin (por ahora, faltantes de cantidad en producción).
+    """Avisos del flujo de producción: broadcast para el Admin (faltantes de
+    cantidad) o dirigidos a un Operador puntual (p. ej. un formato devuelto).
 
-    Admin-only en todas sus acciones: al Operador no le corresponde ver el
-    tablero de alertas.
+    Cada quien ve solo lo suyo: el Admin, las broadcast (destinatario=None) más
+    las que le dirigieron a él directamente; el Operador, únicamente las que
+    tienen su usuario como destinatario.
     """
 
     queryset = Notificacion.objects.select_related("orden", "creada_por")
     serializer_class = NotificacionSerializer
 
-    def initial(self, request, *args, **kwargs):
-        super().initial(request, *args, **kwargs)
-        _require_admin(request)
-
     def get_queryset(self):
         qs = super().get_queryset()
+        user = self.request.user
+        if user.is_staff:
+            qs = qs.filter(Q(destinatario__isnull=True) | Q(destinatario=user))
+        else:
+            qs = qs.filter(destinatario=user)
         if self.request.query_params.get("no_leidas"):
             qs = qs.filter(leida_en__isnull=True)
         return qs
@@ -2711,7 +2822,7 @@ class NotificacionViewSet(viewsets.ReadOnlyModelViewSet):
 
     @action(detail=False, methods=["post"], url_path="marcar_todas_leidas")
     def marcar_todas_leidas(self, request):
-        n = Notificacion.objects.filter(leida_en__isnull=True).update(
+        n = self.get_queryset().filter(leida_en__isnull=True).update(
             leida_en=timezone.now(), leida_por=request.user
         )
         return Response({"ok": True, "total": n})
@@ -2719,5 +2830,5 @@ class NotificacionViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=["get"], url_path="resumen")
     def resumen(self, request):
         return Response(
-            {"no_leidas": Notificacion.objects.filter(leida_en__isnull=True).count()}
+            {"no_leidas": self.get_queryset().filter(leida_en__isnull=True).count()}
         )

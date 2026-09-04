@@ -95,7 +95,7 @@ export default function Remisiones() {
   const fmtFecha = (str) => {
     if (!str) return '—'
     const d = new Date(str)
-    return d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })
+    return d.toLocaleString('es-CO', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
   }
 
   return (
@@ -200,7 +200,7 @@ export default function Remisiones() {
               <table style={{ width: '100%', minWidth: 560, borderCollapse: 'collapse', fontSize: 13 }}>
                 <thead>
                   <tr style={{ background: 'var(--surface-2)', borderBottom: '1px solid var(--border)' }}>
-                    {['N°', 'Fecha', 'Cliente', 'OP', 'Estado', ''].map((h, i) => (
+                    {['N°', 'Enviada a Remisión', 'Cliente', 'OP', 'Estado', ''].map((h, i) => (
                       <th key={i} style={{
                         padding: '10px 16px', textAlign: i >= 3 ? 'center' : 'left',
                         fontWeight: 600, fontSize: 11, color: 'var(--ink-3)',
@@ -228,7 +228,7 @@ export default function Remisiones() {
                         </span>
                       </td>
                       <td style={{ padding: '12px 16px', whiteSpace: 'nowrap', color: 'var(--ink-3)', fontSize: 12 }}>
-                        {fmtFecha(rem.fecha)}
+                        {fmtFecha(rem.creado)}
                       </td>
                       <td style={{ padding: '12px 16px', fontWeight: 500, color: 'var(--ink)', maxWidth: 220 }}>
                         <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

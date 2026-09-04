@@ -53,6 +53,15 @@ export const TIPOS_LAMINADO_REGISTRO = [
   { id: 'metalizado', label: 'Metalizado' },
 ]
 
+// Mate/brillante no tienen color; metalizado sí — un tono, nunca un número de
+// tintas (eso es cosa de Impresora, ver tiro/retiro_colores_num).
+export const TIPOS_METALIZADO_REGISTRO = [
+  { id: 'plateado', label: 'Plateado' },
+  { id: 'dorado',   label: 'Dorado' },
+  { id: 'rosado',   label: 'Rosado' },
+  { id: 'otros',    label: 'Otros' },
+]
+
 // Solo presentación: el ORDEN de la cadena y el bloqueo los decide el backend
 // (back/cotizaciones/chain.py). Aquí solo vive cómo se pinta cada estación, qué
 // campos muestra su formulario y qué procesos cubre — `procesos` sirve para
@@ -73,7 +82,7 @@ export const ESTACIONES_CONFIG = {
   laminadora: {
     label: 'Laminadora', ruta: '/produccion/laminadora',
     desc: 'Segundo proceso: registra lo laminado, el tamaño del papel y el tipo de laminado.',
-    color: '#3A5B8C', soft: '#DEE6F3', campos: ['tamano', 'laminado'],
+    color: '#3A5B8C', soft: '#DEE6F3', campos: ['tamano', 'laminado', 'lado'],
     procesos: ['laminado'],
   },
   barnizadora: {

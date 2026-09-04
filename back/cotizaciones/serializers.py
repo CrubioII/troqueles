@@ -388,7 +388,7 @@ class OrdenSerializer(serializers.ModelSerializer):
             "id", "numero", "fecha", "fecha_entrega",
             "cotizacion", "cotizacion_numero",
             "cliente", "cliente_nombre", "cliente_email", "cliente_telefono", "cliente_nit",
-            "referencia", "cantidad", "sobrante", "tipo_cliente",
+            "referencia", "tamano", "cantidad", "sobrante", "tipo_cliente",
             "molde_ancho", "molde_alto",
             "pliego_tipo", "pliego_w", "pliego_h",
             "papel", "papel_manual_nombre", "precio_pliego", "costo_papel_override",
@@ -628,7 +628,7 @@ class FormatoCuchillasSerializer(serializers.ModelSerializer):
             "cuchilla_cm", "cuchilla_tipo", "cuchilla_puntos",
             "grafa_cm", "grafa_puntos", "grafa_altura",
             "ch_cm", "ch_medida", "sac_cm", "sac_medida", "sac_cantidad", "sacabocados", "perfo_cm", "perfo_medida",
-            "desperdicio_cm", "cauchos", "gan", "gan_legacy", "observaciones",
+            "desperdicio_cm", "madera_cm", "cauchos", "gan", "gan_legacy", "observaciones",
             "dos_puntos", "tres_puntos", "perfo", "ch", "sac", "desperdicio",  # legacy, solo lectura
             "tiempo_encalado_min", "tiempo_encuchillado_min", "tiempo_encauchado_min",
             "operador", "operador_username", "fecha_hora",
@@ -656,10 +656,27 @@ class OrdenOperadorSerializer(serializers.ModelSerializer):
     remision_enviada = serializers.SerializerMethodField()
     prioridad_troquel = serializers.SerializerMethodField()
     desde_cotizacion = serializers.SerializerMethodField()
+    formato_estado = serializers.SerializerMethodField()
+    formato_devolucion_motivo = serializers.SerializerMethodField()
 
     class Meta:
         model = OrdenProduccion
-        fields = ["id", "numero", "fecha_entrega", "creado", "cliente", "cliente_nombre", "referencia", "cantidad", "procesos", "troquel_modelo", "remision_enviada", "prioridad_troquel", "desde_cotizacion"]
+        fields = ["id", "numero", "fecha_entrega", "creado", "cliente", "cliente_nombre", "referencia", "tamano", "cantidad", "pliego_tipo", "pliego_w", "pliego_h", "procesos", "troquel_modelo", "remision_enviada", "prioridad_troquel", "desde_cotizacion", "formato_estado", "formato_devolucion_motivo"]
+
+    def _ultimo_formato(self, obj):
+        formatos = list(obj.formatos_cuchillas.all())
+        formatos = [f for f in formatos if f.estado != "borrador"]
+        if not formatos:
+            return None
+        return max(formatos, key=lambda f: f.fecha_hora)
+
+    def get_formato_estado(self, obj):
+        f = self._ultimo_formato(obj)
+        return f.estado if f else None
+
+    def get_formato_devolucion_motivo(self, obj):
+        f = self._ultimo_formato(obj)
+        return f.devolucion_motivo if f and f.estado == "devuelto" else ""
 
     def get_desde_cotizacion(self, obj):
         return obj.cotizacion_id is not None
@@ -715,8 +732,8 @@ class RegistroProcesoSerializer(serializers.ModelSerializer):
             "tamano", "tamano_label", "tamano_otro",
             "tiro_active", "tiro_colores_num", "tiro_colores_desc",
             "retiro_active", "retiro_colores_num", "retiro_colores_desc",
-            "tipo_laminado", "observaciones",
-            "operador", "operador_username", "fecha_hora",
+            "tipo_laminado", "tipo_metalizado", "tipo_metalizado_otro", "observaciones",
+            "operador", "operador_username", "fecha_hora", "monto_cobrado",
         ]
         read_only_fields = ["cantidad_esperada", "faltante", "operador", "fecha_hora"]
 
@@ -780,6 +797,7 @@ class OrdenEstacionSerializer(OrdenOperadorSerializer):
                 "proceso_id": p.proceso_id,
                 "label": chain.PROCESO_LABELS.get(p.proceso_id, p.proceso_id),
                 "completado": p.completado,
+                "extras": {k: v for k, v in (p.extras or {}).items() if k not in PROCESO_EXTRAS_DINERO},
             }
             for p in chain.procesos_de(obj, estacion)
         ]

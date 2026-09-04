@@ -4,7 +4,6 @@ import { fmtCOP, fmtNum, NumField, MoneyInput, SaveStatus } from './core'
 import { useAutosave } from '../hooks/useAutosave'
 import {
   getTroquelModelo, saveTroquelModelo, getTroquelCostos, saveTroquelCostos,
-  saveClientePreciosTroquel,
   getFormatosCuchillas, createFormatoCuchillas, updateFormatoCuchillas,
   getClientes, createCliente, createOrden, patchOrden,
 } from '../api'
@@ -298,6 +297,7 @@ const EMPTY_FORMATO = {
   sacabocados: [{ medida: '', cantidad: 0 }],
   gan: [{ tipo: '', cantidad: 0 }],
   desperdicio_cm: 0,
+  madera_cm: 0,
   tiempo_encalado_min: 0, tiempo_encuchillado_min: 0, tiempo_encauchado_min: 0,
 }
 
@@ -448,6 +448,9 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
           <span style={{ fontSize: 12, fontWeight: 700, alignSelf: 'flex-end', paddingBottom: 8, whiteSpace: 'nowrap' }}>
             Total {fmtNum((Number(form.cuchilla_cm) || 0) + (Number(form.desperdicio_cm) || 0), 2)} cm
           </span>
+        </FieldGroup>
+        <FieldGroup title="Madera">
+          <Field label="cm" w={110}><NumField placeholder="0" value={form.madera_cm} onChange={v => set('madera_cm', v)} /></Field>
         </FieldGroup>
         <FieldGroup title="Grafa">
           <Field label="cm" w={90}><NumField placeholder="0" value={form.grafa_cm} onChange={v => set('grafa_cm', v)} /></Field>
@@ -877,27 +880,31 @@ export function OrdenCambiosHistory({ cambios, loading }) {
 // cobrado del ítem, así que la pantalla que la muestra tiene que recargarse.
 // El ref expone `saveIfDirty()` para que un padre (p.ej. RemisionEdit) pueda
 // forzar el guardado de ediciones pendientes antes de generar un PDF o enviar.
+// Sin botón propio de guardado: el único "Guardar" de la pantalla es el de
+// abajo (bajo Observaciones), que guarda esto junto con todo lo demás.
 export const TroquelCostos = forwardRef(function TroquelCostos(
-  { ordenId, refreshKey, onDirtyChange, onSaved, clienteId, clienteNombre }, ref
+  { ordenId, refreshKey, onDirtyChange, onSaved }, ref
 ) {
   const [items, setItems] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [savingCliente, setSavingCliente] = useState(false)
-  const [okClienteMsg, setOkClienteMsg] = useState(false)
+  const savedSnapshotRef = useRef(null)
 
   useEffect(() => {
     setLoading(true)
     setError(null)
     getTroquelCostos(ordenId)
-      .then(data => setItems(data.items || []))
+      .then(data => {
+        const its = data.items || []
+        setItems(its)
+        savedSnapshotRef.current = JSON.stringify(its.map(({ key, cantidad, precio }) => ({ key, cantidad, precio })))
+      })
       .catch(() => setItems(null))
       .finally(() => setLoading(false))
   }, [ordenId, refreshKey])
 
   const setItem = (idx, k, v) => {
     setItems(list => list.map((it, i) => (i === idx ? { ...it, [k]: v } : it)))
-    setOkClienteMsg(false)
   }
 
   // Solo los campos editables entran al guardado — el `total` que devuelve
@@ -905,44 +912,24 @@ export const TroquelCostos = forwardRef(function TroquelCostos(
   // como modificado cuando `setItems(data.items)` lo refresca más abajo.
   const editableSnapshot = items ? items.map(({ key, cantidad, precio }) => ({ key, cantidad, precio })) : null
 
-  const { status: saveStatus, retry: retrySave, flush: flushSave } = useAutosave(
+  const { status: saveStatus, flush: flushSave, retry: retrySave } = useAutosave(
     editableSnapshot,
     async () => {
       const data = await saveTroquelCostos(ordenId, items.map(({ total, ...it }) => it))
-      setItems(data.items || [])
+      const its = data.items || []
+      setItems(its)
+      savedSnapshotRef.current = JSON.stringify(its.map(({ key, cantidad, precio }) => ({ key, cantidad, precio })))
       onSaved && onSaved(data)
     },
     { enabled: false }
   )
 
-  useEffect(() => { onDirtyChange && onDirtyChange(saveStatus === 'saving') }, [saveStatus])
+  // Dirty de verdad (hay ediciones sin persistir), no solo "está guardando":
+  // el padre lo usa para avisar antes de liquidar sin guardar.
+  const isDirty = savedSnapshotRef.current !== null && JSON.stringify(editableSnapshot) !== savedSnapshotRef.current
+  useEffect(() => { onDirtyChange && onDirtyChange(isDirty) }, [isDirty])
 
   useImperativeHandle(ref, () => ({ saveIfDirty: flushSave }), [flushSave])
-
-  // Guarda los precios unitarios como defaults del cliente y rellena los demás
-  // troqueles suyos que estén sin precio. Primero persiste los costos de esta OP
-  // para que su valor escrito a mano no se pierda al re-sembrar.
-  const guardarPreciosCliente = async () => {
-    if (!clienteId || !items) return
-    setSavingCliente(true); setError(null); setOkClienteMsg(false)
-    try {
-      await flushSave()
-      const precios = {}
-      for (const it of items) {
-        const precio = Number(it.precio) || 0
-        if (it.price_key && precio > 0) precios[it.price_key] = precio
-      }
-      await saveClientePreciosTroquel(clienteId, precios)
-      const data = await getTroquelCostos(ordenId)
-      setItems(data.items || [])
-      setOkClienteMsg(true)
-      onSaved && onSaved(data)
-    } catch {
-      setError('No se pudieron guardar los precios del cliente')
-    } finally {
-      setSavingCliente(false)
-    }
-  }
 
   if (loading) return <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Calculando…</div>
   if (!items) return <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Sin datos de costos.</div>
@@ -997,14 +984,7 @@ export const TroquelCostos = forwardRef(function TroquelCostos(
         </table>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10, padding: '10px 12px', borderTop: '1px solid var(--line)' }}>
-        {clienteId && (
-          <button className="btn" onClick={guardarPreciosCliente} disabled={saveStatus === 'saving' || savingCliente} title="Usa estos precios como predeterminados del cliente y rellena sus otros troqueles sin precio">
-            {savingCliente ? 'Guardando…' : `Guardar precios para ${clienteNombre || 'este cliente'}`}
-          </button>
-        )}
-        <button className="btn" onClick={retrySave} disabled={saveStatus === 'saving'}>Guardar</button>
         <SaveStatus status={saveStatus} onRetry={retrySave} />
-        {okClienteMsg && <span style={{ fontSize: 12, color: 'var(--ok, #2e9e5b)' }}>Precios del cliente guardados ✓</span>}
         {error && <span style={{ fontSize: 12, color: 'var(--danger, #c0392b)' }}>{error}</span>}
       </div>
     </div>

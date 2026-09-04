@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Icon } from '../components/Icons'
 import { fmtCOP, fmtNum, CONDICIONES_PAGO_OP, TIPOS_FACTURACION, Section, SaveStatus } from '../components/core'
-import { SectionGenerales, SectionPapel, SectionProcesos, SectionCondicionesOP } from '../components/sections'
+import { SectionGenerales, SectionPapel, SectionCortes, SectionProcesos, SectionCondicionesOP } from '../components/sections'
 import LiquidationPanel from '../components/LiquidationPanel'
 import { ModeloTroquelGestion } from '../components/Troquel'
 import { useAutosave } from '../hooks/useAutosave'
@@ -89,6 +89,12 @@ export default function OrdenEdit() {
   const set = (patch) => setData(prev => ({ ...prev, ...patch }))
   const setProc = (pid, patch) => setProcesos(prev => ({ ...prev, [pid]: { ...prev[pid], ...patch } }))
   const toggle = (k) => setOpen(o => ({ ...o, [k]: !o[k] }))
+
+  // El Operador General no elige tipo de cliente (el campo va oculto para él):
+  // toda OP directa que crea queda fija como Cliente Terciario.
+  useEffect(() => {
+    if (isNew && !isAdmin) set({ tipoCliente: 'terciario' })
+  }, [isNew, isAdmin])
 
   // Load papers + orden (if editing) + next number (if new)
   useEffect(() => {
@@ -323,20 +329,32 @@ export default function OrdenEdit() {
                   <span>· Cantidad:</span> <span className="v mono">{fmtNum(d.cantidad)}</span>
                 </>}
               >
-                <SectionGenerales d={d} set={set} showEstado={false} numeroLabel="N° OP" showFechaEntrega={true} />
+                <SectionGenerales d={d} set={set} showEstado={false} numeroLabel="N° OP" showFechaEntrega={isAdmin} showClientDetails={isAdmin} />
               </Section>
 
-              <Section
-                num="2" title="Calculadora de papel y pliegos"
-                desc="Cuántos pliegos necesitas comprar"
-                open={open.s2} onToggle={() => toggle('s2')}
-                summary={!open.s2 && <>
-                  <span>Pliegos:</span> <span className="v mono">{calc.pliegosNecesarios}</span>
-                  {isAdmin && <><span>· Costo papel:</span> <span className="v mono">{fmtCOP(calc.costoPapel)}</span></>}
-                </>}
-              >
-                <SectionPapel d={d} set={set} calc={calc} papelCatalog={papelCatalog} showMoney={isAdmin} />
-              </Section>
+              {isAdmin && (
+                <Section
+                  num="2" title="Calculadora de papel y pliegos"
+                  desc="Cuántos pliegos necesitas comprar"
+                  open={open.s2} onToggle={() => toggle('s2')}
+                  summary={!open.s2 && <>
+                    <span>Pliegos:</span> <span className="v mono">{calc.pliegosNecesarios}</span>
+                    {isAdmin && <><span>· Costo papel:</span> <span className="v mono">{fmtCOP(calc.costoPapel)}</span></>}
+                  </>}
+                >
+                  <SectionPapel d={d} set={set} calc={calc} papelCatalog={papelCatalog} showMoney={isAdmin} />
+                </Section>
+              )}
+
+              {!isAdmin && (
+                <Section
+                  num="2" title="Cortes"
+                  desc="¿Esta orden requiere corte inicial o corte final?"
+                  open={true}
+                >
+                  <SectionCortes d={d} set={set} showMoney={false} />
+                </Section>
+              )}
 
               <Section
                 num="3" title="Procesos de producción"

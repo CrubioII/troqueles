@@ -5,12 +5,18 @@ import { Icon } from '../components/Icons'
 import { fmtCOP, fmtNum, REMISION_STATUS_DEFS, SaveStatus } from '../components/core'
 import { useAutosave } from '../hooks/useAutosave'
 import { TroquelCostos } from '../components/Troquel'
-import { getRemision, updateRemision, liquidarRemision, pdfRemision, getRemisionDesglose, getRemisionesImportables, importarRemisiones, devolverFormatoCuchillas, deleteRemision } from '../api'
+import { RegistroProcesoHistory } from '../components/RegistroProceso'
+import { getRemision, updateRemision, liquidarRemision, pdfRemision, getRemisionDesglose, getRemisionesImportables, importarRemisiones, devolverFormatoCuchillas, deleteRemision, getRegistrosProceso, updateRegistroProceso } from '../api'
 import logo from '../assets/logo.png'
 
 // ─────────── Desglose por concepto del troquel ───────────
 // Los valores llegan ya formateados en COP desde el backend (mismos datos que
 // van al PDF adjunto y al cuerpo del correo).
+function fmtFechaHora(iso) {
+  if (!iso) return ''
+  return new Date(iso).toLocaleString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
 function DesgloseTroqueles({ desglose }) {
   if (!desglose || !desglose.troqueles?.length) return null
   return (
@@ -21,8 +27,13 @@ function DesgloseTroqueles({ desglose }) {
             <div>
               <strong style={{ fontSize: 13 }}>{t.referencia || 'Troquel'}</strong>{' '}
               <span className="mono" style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 700 }}>{t.op_numero}</span>
+              {t.operador_username && (
+                <div style={{ fontSize: 13, color: 'var(--ink-2)' }}>
+                  Registrado por <strong>{t.operador_username}</strong>{t.fecha_hora ? ` · ${fmtFechaHora(t.fecha_hora)}` : ''}
+                </div>
+              )}
             </div>
-            <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>Cantidad entregada: {t.cantidad}</span>
+            <span style={{ fontSize: 13, color: 'var(--ink-2)' }}>Cantidad entregada: {t.cantidad}</span>
           </div>
           {t.consumos?.length ? (
             <div className="table-scroll">
@@ -64,13 +75,23 @@ function DesgloseTroqueles({ desglose }) {
   )
 }
 
-// ─────────── Desglose de producción por estación (solo lectura) ───────────
-// Cantidad real que salió de cada máquina de la cadena — sin cantidad esperada
-// ni sobrante, solo lo que efectivamente se produjo.
+// ─────────── Desglose de producción por proceso (solo lectura) ───────────
+// Especificación técnica de lo que hizo cada proceso de la cadena — sin
+// estación ni operador (uso interno) y sin cantidad por proceso: lo que de
+// verdad importa es lo entregado al cliente, una sola cifra para toda la
+// remisión (el último proceso de la cadena de cada OP).
 function DesgloseProcesos({ desglose }) {
   if (!desglose || !desglose.procesos?.length) return null
   return (
     <>
+      {desglose.cantidad_entregada != null && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'baseline', gap: 10, marginBottom: 10 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--ink-3)' }}>
+            Cantidad entregada
+          </span>
+          <span className="mono" style={{ fontSize: 15, fontWeight: 800, color: 'var(--accent)' }}>{desglose.cantidad_entregada}</span>
+        </div>
+      )}
       {desglose.procesos.map((p, i) => (
         <div key={i} style={{ marginBottom: 16 }}>
           <div style={{ marginBottom: 6 }}>
@@ -78,20 +99,19 @@ function DesgloseProcesos({ desglose }) {
             <span className="mono" style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 700 }}>{p.op_numero}</span>
           </div>
           <div className="table-scroll">
-            <table className="cot-doc-table" style={{ minWidth: 480 }}>
+            <table className="cot-doc-table" style={{ minWidth: 360 }}>
               <thead>
                 <tr>
-                  <th>Proceso</th><th>Estación</th><th>Operador</th>
-                  <th className="num">Cantidad realizada</th>
+                  <th>Proceso</th><th>Detalle</th>
                 </tr>
               </thead>
               <tbody>
                 {p.items.map((it, j) => (
                   <tr key={j}>
                     <td>{it.proceso_label}</td>
-                    <td style={{ color: 'var(--ink-3)' }}>{it.estacion_label}</td>
-                    <td style={{ color: 'var(--ink-3)' }}>{it.operador_username || '—'}</td>
-                    <td className="num">{it.cantidad_realizada}</td>
+                    <td style={{ color: 'var(--ink-3)' }}>
+                      {it.detalle?.map((line, k) => <div key={k}>{line}</div>)}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -107,7 +127,7 @@ function DesgloseProcesos({ desglose }) {
 // Esta es la única pantalla donde se cotiza el troquel: el Operador registra el
 // consumo en su formato de cuchillas y aquí se le pone precio. Al guardar, el
 // backend recalcula el Vr. Total del ítem que esa OP aporta a la remisión.
-function PreciosTroqueles({ desglose, rem, onSaved, onDevolver, registerRef }) {
+function PreciosTroqueles({ desglose, onSaved, onDevolver, registerRef, onDirtyChange }) {
   return (
     <>
       {desglose.troqueles.map(t => (
@@ -116,7 +136,12 @@ function PreciosTroqueles({ desglose, rem, onSaved, onDevolver, registerRef }) {
             <div style={{ flex: 1, minWidth: 200 }}>
               <strong style={{ fontSize: 13 }}>{t.referencia || 'Troquel'}</strong>{' '}
               <span className="mono" style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 700 }}>{t.op_numero}</span>
-              <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>Cantidad entregada: {t.cantidad}</div>
+              <div style={{ fontSize: 13, color: 'var(--ink-2)' }}>Cantidad entregada: {t.cantidad}</div>
+              {t.operador_username && (
+                <div style={{ fontSize: 13, color: 'var(--ink-2)' }}>
+                  Registrado por <strong>{t.operador_username}</strong>{t.fecha_hora ? ` · ${fmtFechaHora(t.fecha_hora)}` : ''}
+                </div>
+              )}
             </div>
             {t.formato_id && (
               <button className="btn" style={{ fontSize: 12, color: 'var(--danger)' }} onClick={() => onDevolver(t)}>
@@ -133,9 +158,8 @@ function PreciosTroqueles({ desglose, rem, onSaved, onDevolver, registerRef }) {
             <TroquelCostos
               ref={el => registerRef(t.op_id, el)}
               ordenId={t.op_id}
-              clienteId={rem.cliente}
-              clienteNombre={rem.cliente_nombre}
               onSaved={onSaved}
+              onDirtyChange={d => onDirtyChange(t.op_id, d)}
             />
           ) : (
             <div style={{ padding: 16, fontSize: 12, color: 'var(--ink-3)', fontStyle: 'italic' }}>
@@ -194,6 +218,37 @@ function DevolverModal({ troquel, varios, busy, error, motivo, onMotivo, onClose
             </button>
           </div>
           {error && <span style={{ fontSize: 12, color: 'var(--danger)', width: '100%', textAlign: 'right' }}>✗ {error}</span>}
+        </div>
+      </div>
+    </div>,
+    document.body
+  )
+}
+
+// ─────────── Modal: avisa que hay cambios sin guardar antes de liquidar ───────────
+function UnsavedWarningModal({ busy, onVolver, onGuardarYLiquidar }) {
+  return createPortal(
+    <div className="cot-modal-backdrop" onClick={e => { if (e.target === e.currentTarget && !busy) onVolver() }}>
+      <div className="cot-modal" style={{ maxWidth: 420 }}>
+        <div className="cot-modal-header">
+          <div className="brand"><div className="biz">Cambios sin guardar</div></div>
+          <button className="btn cot-modal-close" style={{ padding: '4px 8px', fontSize: 13 }} onClick={onVolver} disabled={busy}>
+            <Icon.X /> Cerrar
+          </button>
+        </div>
+        <div className="cot-modal-body">
+          <div style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5 }}>
+            Esta remisión tiene cambios sin guardar (precios del troquel, ítems o datos de
+            entrega). Guárdalos antes de liquidar para que el total quede correcto.
+          </div>
+        </div>
+        <div className="cot-modal-actions">
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, width: '100%' }}>
+            <button className="btn" onClick={onVolver} disabled={busy}>Volver</button>
+            <button className="btn accent" onClick={onGuardarYLiquidar} disabled={busy}>
+              {busy ? 'Guardando…' : 'Guardar y liquidar'}
+            </button>
+          </div>
         </div>
       </div>
     </div>,
@@ -477,6 +532,10 @@ export default function RemisionEdit() {
   const [borrando, setBorrando] = useState(false)    // modal de eliminación abierto
   const [delBusy, setDelBusy] = useState(false)
   const [delError, setDelError] = useState(null)
+  const [registros, setRegistros] = useState([])
+  const [registrosLoading, setRegistrosLoading] = useState(true)
+  const [showUnsavedWarning, setShowUnsavedWarning] = useState(false)
+  const [guardandoTodo, setGuardandoTodo] = useState(false)
 
   // Refs a los TroquelCostos montados (uno por OP del desglose) para poder
   // forzar el guardado de ediciones pendientes antes de generar un PDF o enviar.
@@ -488,20 +547,36 @@ export default function RemisionEdit() {
   const saveAllTroquelCostos = () =>
     Promise.all(Object.values(troquelRefs.current).map(r => r?.saveIfDirty?.()))
 
+  // Dirty de los precios de troquel (uno por OP del desglose) — junto con el
+  // dirty del formulario principal, decide si hace falta avisar antes de liquidar.
+  const [troquelDirtyMap, setTroquelDirtyMap] = useState({})
+  const handleTroquelDirtyChange = (opId, dirty) =>
+    setTroquelDirtyMap(m => (m[opId] === dirty ? m : { ...m, [opId]: dirty }))
+  const troquelDirty = Object.values(troquelDirtyMap).some(Boolean)
+
   const editable = rem?.estado === 'pendiente'
   const liquidada = rem?.estado === 'liquidada'
   const consolidada = rem?.estado === 'consolidada'
   const total = items.reduce((s, it) => s + (Number(it.valor_total) || 0), 0)
   const totalCantidad = items.reduce((s, it) => s + (Number(it.cantidad) || 0), 0)
 
+  // Snapshot de lo último guardado del formulario principal — junto con el
+  // dirty de los precios de troquel, decide si hace falta avisar antes de
+  // liquidar (useAutosave no expone su propio "hay cambios sin guardar").
+  const mainSavedSnapshotRef = useRef(null)
+
   const hydrate = (data) => {
     setRem(data)
     // `op` viaja de vuelta al guardar: es lo que ata cada ítem a su OP y permite
     // que poner precios al troquel actualice el valor cobrado.
-    setItems((data.items || []).map(i => ({ descripcion: i.descripcion, cantidad: i.cantidad, valor_total: i.valor_total, op: i.op })))
+    const newItems = (data.items || []).map(i => ({ descripcion: i.descripcion, cantidad: i.cantidad, valor_total: i.valor_total, op: i.op }))
+    setItems(newItems)
     setDireccion(data.direccion || '')
     setCiudad(data.ciudad || '')
     setObservaciones(data.observaciones || '')
+    mainSavedSnapshotRef.current = JSON.stringify({
+      direccion: data.direccion || '', ciudad: data.ciudad || '', observaciones: data.observaciones || '', items: newItems,
+    })
   }
 
   useEffect(() => {
@@ -514,11 +589,35 @@ export default function RemisionEdit() {
     getRemisionDesglose(id).then(setDesglose).catch(() => setDesglose(null))
   }, [id])
 
+  // Historial de registros de la cadena (quién, cuándo, cuánto) para que el
+  // Admin pueda ver y cobrar cada uno — solo cuando ya sabemos la OP de origen.
+  useEffect(() => {
+    if (!rem?.orden) { setRegistrosLoading(false); return }
+    setRegistrosLoading(true)
+    getRegistrosProceso(`?orden=${rem.orden}`)
+      .then(data => setRegistros(Array.isArray(data) ? data : (data?.results || [])))
+      .catch(() => setRegistros([]))
+      .finally(() => setRegistrosLoading(false))
+  }, [rem?.orden])
+
   // Tras guardar precios del troquel el backend reescribe el ítem: recarga ambos.
   const recargarTrasPrecios = () => Promise.all([
     getRemision(id).then(hydrate).catch(() => {}),
     getRemisionDesglose(id).then(setDesglose).catch(() => {}),
   ])
+
+  const handleCostoChange = (registroId, monto) => {
+    setRegistros(rs => rs.map(r => r.id === registroId ? { ...r, monto_cobrado: monto } : r))
+    updateRegistroProceso(registroId, { monto_cobrado: monto })
+      // El backend suma los montos de la cadena al Vr. Total del ítem de la OP:
+      // recarga la remisión para que "Total a pagar" quede al día.
+      .then(recargarTrasPrecios)
+      .catch(() => {
+        getRegistrosProceso(`?orden=${rem.orden}`)
+          .then(data => setRegistros(Array.isArray(data) ? data : (data?.results || [])))
+          .catch(() => {})
+      })
+  }
 
   const payload = () => ({
     direccion, ciudad, observaciones,
@@ -536,6 +635,22 @@ export default function RemisionEdit() {
     async () => { const updated = await updateRemision(id, payload()); hydrate(updated) },
     { enabled: false }
   )
+
+  const mainDirty = mainSavedSnapshotRef.current !== null &&
+    JSON.stringify({ direccion, ciudad, observaciones, items }) !== mainSavedSnapshotRef.current
+  const hasUnsaved = mainDirty || troquelDirty
+
+  // El único "Guardar" de la pantalla: persiste precios de troquel e ítems/datos
+  // de entrega juntos, para que el total quede correcto con un solo click.
+  const guardarTodo = async () => {
+    setGuardandoTodo(true)
+    try {
+      await saveAllTroquelCostos()
+      await flushSave()
+    } finally {
+      setGuardandoTodo(false)
+    }
+  }
 
   const handleSend = async (email, extraEmails) => {
     // Persistir ediciones antes de liquidar (incluye costos de troquel sin guardar)
@@ -749,21 +864,27 @@ export default function RemisionEdit() {
             </div>
             <div className="table-scroll">
               {editable
-                ? <PreciosTroqueles desglose={desglose} rem={rem} onSaved={recargarTrasPrecios} onDevolver={t => { setMotivo(''); setDevError(null); setDevolviendo(t) }} registerRef={registerTroquelRef} />
+                ? <PreciosTroqueles desglose={desglose} onSaved={recargarTrasPrecios} onDevolver={t => { setMotivo(''); setDevError(null); setDevolviendo(t) }} registerRef={registerTroquelRef} onDirtyChange={handleTroquelDirtyChange} />
                 : <DesgloseTroqueles desglose={desglose} />}
             </div>
           </div>
         )}
 
-        {/* Producción por estación — solo lectura, siempre */}
-        {desglose?.procesos?.length > 0 && (
+        {/* Quién/cuándo/cuánto por registro de la cadena, con monto a cobrar */}
+        {(registrosLoading || registros.length > 0) && (
           <div className="section open" style={{ marginBottom: 16, padding: 18 }}>
-            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Producción por estación</div>
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Registros de la cadena</div>
             <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 12 }}>
-              Cantidad real registrada en cada máquina de la cadena, sin sobrante.
+              Quién y cuándo registró cada proceso, cuántas unidades hizo, y el monto a cobrar por ese registro.
             </div>
             <div className="table-scroll">
-              <DesgloseProcesos desglose={desglose} />
+              <RegistroProcesoHistory
+                registros={registros}
+                loading={registrosLoading}
+                showOrden={false}
+                showCosto
+                onCostoChange={handleCostoChange}
+              />
             </div>
           </div>
         )}
@@ -779,7 +900,9 @@ export default function RemisionEdit() {
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', justifyContent: 'flex-end' }}>
           {pdfError && <span style={{ fontSize: 12, color: 'var(--danger)' }}>{pdfError}</span>}
           {editable && (
-            <button className="btn" onClick={retrySave} disabled={saveStatus === 'saving'}>Guardar</button>
+            <button className="btn" onClick={guardarTodo} disabled={saveStatus === 'saving' || guardandoTodo}>
+              {guardandoTodo ? 'Guardando…' : 'Guardar'}
+            </button>
           )}
           {editable && <SaveStatus status={saveStatus} onRetry={retrySave} />}
           {!consolidada && (
@@ -799,7 +922,7 @@ export default function RemisionEdit() {
             <Icon.Print /> {dlPdf === 'admin' ? 'Generando…' : 'PDF admin (desglose)'}
           </button>
           {editable && (
-            <button className="btn accent" onClick={() => setShowModal(true)}>
+            <button className="btn accent" onClick={() => { if (hasUnsaved) setShowUnsavedWarning(true); else setShowModal(true) }}>
               <Icon.Send /> Liquidar y enviar
             </button>
           )}
@@ -808,6 +931,18 @@ export default function RemisionEdit() {
 
       {showModal && (
         <SendModal rem={rem} items={items} total={total} desglose={desglose} onClose={() => setShowModal(false)} onSend={handleSend} />
+      )}
+
+      {showUnsavedWarning && (
+        <UnsavedWarningModal
+          busy={guardandoTodo}
+          onVolver={() => setShowUnsavedWarning(false)}
+          onGuardarYLiquidar={async () => {
+            await guardarTodo()
+            setShowUnsavedWarning(false)
+            setShowModal(true)
+          }}
+        />
       )}
 
       {showImport && (

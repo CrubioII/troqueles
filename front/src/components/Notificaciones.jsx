@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Icon } from './Icons'
 import { getNotificaciones, leerNotificacion, marcarNotificacionesLeidas } from '../api'
 import { useSyncPolling } from '../lib/useSyncPolling'
+import { useAuth } from '../context/AuthContext'
 
 const asList = (data) => (Array.isArray(data) ? data : (data?.results || []))
 
@@ -28,6 +29,8 @@ function fmtRelativo(iso) {
  */
 export function CampanaNotificaciones({ compact = false }) {
   const navigate = useNavigate()
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
   const [items, setItems] = useState([])
   const [abierto, setAbierto] = useState(false)
   const [popup, setPopup] = useState(null)
@@ -86,6 +89,12 @@ export function CampanaNotificaciones({ compact = false }) {
     setPopup(p => (p && p.id === noti.id ? null : p))
     setAbierto(false)
     leerNotificacion(noti.id).catch(() => load())
+    if (!isAdmin) {
+      // El Operador no tiene acceso a /ordenes/:id — sus avisos (p. ej. un
+      // formato devuelto) lo mandan a la pantalla donde puede corregirlo.
+      if (noti.tipo === 'formato_devuelto') navigate('/produccion/troqueles')
+      return
+    }
     if (noti.orden) navigate(`/ordenes/${noti.orden}`)
   }
 
@@ -200,13 +209,13 @@ export function CampanaNotificaciones({ compact = false }) {
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 3 }}>⚠ {popup.titulo}</div>
             <div style={{ fontSize: 12, color: 'var(--ink-2)', lineHeight: 1.4 }}>{popup.mensaje}</div>
-            {popup.orden && (
+            {(isAdmin ? popup.orden : popup.tipo === 'formato_devuelto') && (
               <button
                 type="button"
                 onClick={() => abrirNoti(popup)}
                 style={{ background: 'none', border: 'none', padding: 0, marginTop: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600, color: 'var(--accent)' }}
               >
-                Ver {popup.orden_numero || 'la orden'} →
+                {isAdmin ? `Ver ${popup.orden_numero || 'la orden'} →` : 'Corregir formato →'}
               </button>
             )}
           </div>

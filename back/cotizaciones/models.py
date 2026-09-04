@@ -244,6 +244,7 @@ class OrdenProduccion(models.Model):
     )
     cliente = models.ForeignKey(Cliente, on_delete=models.PROTECT, related_name="ordenes")
     referencia = models.CharField(max_length=300)
+    tamano = models.CharField(max_length=200, blank=True, default="")
     cantidad = models.PositiveIntegerField()
     sobrante = models.PositiveIntegerField(default=0)
     tipo_cliente = models.CharField(max_length=20, choices=TIPO_CLIENTE_CHOICES, default="final")
@@ -447,6 +448,12 @@ class RegistroProceso(models.Model):
         ("brillante", "Brillante"),
         ("metalizado", "Metalizado"),
     ]
+    TIPO_METALIZADO_CHOICES = [
+        ("plateado", "Plateado"),
+        ("dorado", "Dorado"),
+        ("rosado", "Rosado"),
+        ("otros", "Otros"),
+    ]
 
     orden = models.ForeignKey(
         OrdenProduccion, on_delete=models.CASCADE, related_name="registros_proceso"
@@ -473,10 +480,15 @@ class RegistroProceso(models.Model):
     retiro_colores_num = models.PositiveSmallIntegerField(default=0)
     retiro_colores_desc = models.CharField(max_length=200, blank=True, default="")
 
-    # Laminadora
+    # Laminadora. Mate/brillante no tienen color; metalizado sí — nunca es un
+    # número de tintas, es un tono (plateado/dorado/rosado/otro a especificar).
     tipo_laminado = models.CharField(
         max_length=20, choices=TIPO_LAMINADO_CHOICES, blank=True, default=""
     )
+    tipo_metalizado = models.CharField(
+        max_length=20, choices=TIPO_METALIZADO_CHOICES, blank=True, default=""
+    )
+    tipo_metalizado_otro = models.CharField(max_length=120, blank=True, default="")
 
     observaciones = models.TextField(blank=True, default="")
     operador = models.ForeignKey(
@@ -484,6 +496,9 @@ class RegistroProceso(models.Model):
         related_name="registros_proceso",
     )
     fecha_hora = models.DateTimeField(auto_now_add=True)
+    # Monto que el Admin decide cobrar por este registro puntual (no por tipo
+    # de proceso en la OP). Editable solo por Admin, vía RegistroProcesoViewSet.
+    monto_cobrado = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
 
     class Meta:
         # Sin unique_together a propósito: es un log. Si el Admin des-marca un
@@ -603,6 +618,9 @@ class FormatoCuchillas(models.Model):
     perfo_medida = models.CharField(max_length=10, choices=PERFO_MEDIDA_CHOICES, blank=True, default="")
     # Desperdicio de cuchilla en cm (misma unidad que cuchilla_cm: total = cuchilla + desperdicio)
     desperdicio_cm = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    # Tamaño del bloque de madera donde se monta el troquel, en cm. Informativo,
+    # no entra en el cálculo de costos (ver _build_costos_seed en views.py).
+    madera_cm = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     # Filas de caucho: [{"tipo": "verde"|"profigumi"|"blucolan", "cm": <number>}, ...]
     cauchos = models.JSONField(default=list, blank=True)
     # Filas de gan: [{"tipo": "ojo_pescado"|"gancho"|"ventanera", "cantidad": <number>}, ...]
@@ -740,15 +758,18 @@ class RemisionItem(models.Model):
 
 
 class Notificacion(models.Model):
-    """Aviso para el Admin generado por el flujo de producción.
+    """Aviso generado por el flujo de producción, para el Admin o para un
+    Operador puntual.
 
     destinatario=None ⇒ broadcast a todos los admin: la lee cualquiera y queda
-    leída para todos (taller de uno o dos admin). El FK ya está para poder
-    dirigirlas más adelante sin migración.
+    leída para todos (taller de uno o dos admin). destinatario=<user> ⇒ dirigida
+    a esa persona (p. ej. el Operador al que le devolvieron un formato): solo
+    ella la ve.
     """
 
     TIPO_CHOICES = [
         ("cantidad_faltante", "Cantidad por debajo de lo esperado"),
+        ("formato_devuelto", "Formato de cuchillas devuelto"),
     ]
 
     tipo = models.CharField(max_length=30, choices=TIPO_CHOICES)
