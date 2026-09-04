@@ -628,7 +628,7 @@ class FormatoCuchillasSerializer(serializers.ModelSerializer):
             "cuchilla_cm", "cuchilla_tipo", "cuchilla_puntos",
             "grafa_cm", "grafa_puntos", "grafa_altura",
             "ch_cm", "ch_medida", "sac_cm", "sac_medida", "sac_cantidad", "sacabocados", "perfo_cm", "perfo_medida",
-            "desperdicio_cm", "madera_cm", "cauchos", "gan", "gan_legacy", "observaciones",
+            "desperdicio_cm", "madera", "cauchos", "gan", "gan_legacy", "observaciones",
             "dos_puntos", "tres_puntos", "perfo", "ch", "sac", "desperdicio",  # legacy, solo lectura
             "tiempo_encalado_min", "tiempo_encuchillado_min", "tiempo_encauchado_min",
             "operador", "operador_username", "fecha_hora",

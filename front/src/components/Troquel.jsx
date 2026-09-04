@@ -297,7 +297,7 @@ const EMPTY_FORMATO = {
   sacabocados: [{ medida: '', cantidad: 0 }],
   gan: [{ tipo: '', cantidad: 0 }],
   desperdicio_cm: 0,
-  madera_cm: 0,
+  madera: '',
   tiempo_encalado_min: 0, tiempo_encuchillado_min: 0, tiempo_encauchado_min: 0,
 }
 
@@ -450,7 +450,10 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
           </span>
         </FieldGroup>
         <FieldGroup title="Madera">
-          <Field label="cm" w={110}><NumField placeholder="0" value={form.madera_cm} onChange={v => set('madera_cm', v)} /></Field>
+          {/* Texto libre: medidas, tipo de bloque o cualquier nota; es informativo. */}
+          <Field label="Medida" w={160}>
+            <input className="input" placeholder="—" value={form.madera} onChange={e => set('madera', e.target.value)} />
+          </Field>
         </FieldGroup>
         <FieldGroup title="Grafa">
           <Field label="cm" w={90}><NumField placeholder="0" value={form.grafa_cm} onChange={v => set('grafa_cm', v)} /></Field>

@@ -618,9 +618,10 @@ class FormatoCuchillas(models.Model):
     perfo_medida = models.CharField(max_length=10, choices=PERFO_MEDIDA_CHOICES, blank=True, default="")
     # Desperdicio de cuchilla en cm (misma unidad que cuchilla_cm: total = cuchilla + desperdicio)
     desperdicio_cm = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    # Tamaño del bloque de madera donde se monta el troquel, en cm. Informativo,
-    # no entra en el cálculo de costos (ver _build_costos_seed en views.py).
-    madera_cm = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    # Descripción libre del bloque de madera donde se monta el troquel (medidas,
+    # tipo, nota…). Informativo: no entra en el cálculo de costos (ver
+    # _build_costos_seed en views.py), por eso se acepta cualquier texto.
+    madera = models.CharField(max_length=100, blank=True, default="")
     # Filas de caucho: [{"tipo": "verde"|"profigumi"|"blucolan", "cm": <number>}, ...]
     cauchos = models.JSONField(default=list, blank=True)
     # Filas de gan: [{"tipo": "ojo_pescado"|"gancho"|"ventanera", "cantidad": <number>}, ...]
