@@ -273,10 +273,17 @@ class RolesProduccionTestCase(TestCase):
         self.assertEqual(_orden_progreso(op)["porcentaje"], 100)
         self.assertTrue(Remision.objects.filter(orden=op).exists())
 
-        # 6. El general genera y descarga la remisión
-        resp = self.c_general.get("/api/ordenes/remisionables_operador/")
+        # 6. El general genera y descarga la remisión. Esta OP tiene cadena Y
+        # troquel: es un trabajo completo de producción, así que su remisión
+        # vive en remisionables_produccion. remisionables_operador es solo para
+        # troquel puro (la tarea que nace de "+ Nueva tarea de troquel").
+        resp = self.c_general.get("/api/ordenes/remisionables_produccion/")
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(any(o["id"] == op_id for o in resp.data))
+
+        resp = self.c_general.get("/api/ordenes/remisionables_operador/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(any(o["id"] == op_id for o in resp.data))
 
         resp = self.c_general.post("/api/ordenes/consolidar_remision_operador/", {
             "orden_ids": [op_id],
