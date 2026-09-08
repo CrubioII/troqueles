@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import {
   fmtNum, NumField, ChipToggle,
-  ESTACIONES_CONFIG, TAMANOS_REGISTRO, TIPOS_LAMINADO_REGISTRO, TIPOS_METALIZADO_REGISTRO,
+  ESTACIONES_CONFIG, TIPOS_LAMINADO_REGISTRO, TIPOS_METALIZADO_REGISTRO,
 } from './core'
 import { createRegistroProceso, anularRegistroProceso } from '../api'
 
@@ -32,7 +32,7 @@ function FieldGroup({ title, children }) {
 
 const EMPTY = {
   cantidad_realizada: 0,
-  tamano: '', tamano_otro: '',
+  tamano: '',
   tiro_active: false, tiro_colores_num: 0, tiro_colores_desc: '',
   retiro_active: false, retiro_colores_num: 0, retiro_colores_desc: '',
   tipo_laminado: '', tipo_metalizado: '', tipo_metalizado_otro: '',
@@ -108,10 +108,7 @@ export function RegistroProcesoForm({ estacion, orden, onCreated }) {
     const realizada = Number(form.cantidad_realizada || 0)
     if (!realizada) { setError('Indica la cantidad realizada.'); return }
 
-    if (cfg.campos.includes('tamano')) {
-      if (!form.tamano) { setError('Selecciona el tamaño del papel.'); return }
-      if (form.tamano === 'otro' && !form.tamano_otro.trim()) { setError('Describe el tamaño del papel.'); return }
-    }
+    // El tamaño del papel es texto libre y opcional: no se valida.
 
     // Tiro/retiro: el único par de campos opcional, pero no ambos vacíos —
     // al menos uno tiene que quedar marcado (impresión o laminado, según la
@@ -187,23 +184,15 @@ export function RegistroProcesoForm({ estacion, orden, onCreated }) {
       </FieldGroup>
 
       {cfg.campos.includes('tamano') && (
-        <FieldGroup title="Tamaño del papel *">
-          <Field label="Medida">
-            <select className="input" value={form.tamano} onChange={e => set('tamano', e.target.value)}>
-              <option value="">Seleccionar…</option>
-              {TAMANOS_REGISTRO.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
-            </select>
+        <FieldGroup title="Tamaño del papel (opcional)">
+          <Field label="Medida" full>
+            <input
+              className="input"
+              placeholder="Ej. 1/2 pliego, 35 × 50 cm…"
+              value={form.tamano}
+              onChange={e => set('tamano', e.target.value)}
+            />
           </Field>
-          {form.tamano === 'otro' && (
-            <Field label="¿Cuál?">
-              <input
-                className="input"
-                placeholder="Describe el tamaño"
-                value={form.tamano_otro}
-                onChange={e => set('tamano_otro', e.target.value)}
-              />
-            </Field>
-          )}
         </FieldGroup>
       )}
 
@@ -513,7 +502,7 @@ export function RegistroProcesoHistory({ registros, loading, showOrden = true, o
                       )}
                     </td>
                     <td style={{ padding: '10px 12px', fontSize: 12, color: 'var(--ink-2)' }}>
-                      {r.tamano === 'otro' ? (r.tamano_otro || 'Otro') : (r.tamano_label || '—')}
+                      {r.tamano_label || '—'}
                     </td>
                     <td style={{ padding: '10px 12px', fontSize: 12, color: 'var(--ink-2)' }}>{detalle(r)}</td>
                     <td style={{ padding: '10px 12px', color: 'var(--ink-2)', fontSize: 12 }}>{r.operador_username || '—'}</td>

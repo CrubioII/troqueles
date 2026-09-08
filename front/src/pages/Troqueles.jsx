@@ -524,9 +524,12 @@ function OperadorTroqueles() {
   const [busquedaHistRem, setBusquedaHistRem] = useState('')
   const [histRemBusy, setHistRemBusy] = useState(null)   // id de remisión en PDF/devolución
   const [histRemError, setHistRemError] = useState(null)
+  const [loadHistRemError, setLoadHistRemError] = useState(null)  // fallo al cargar el historial
   // Tab de remisiones del Operador (consolidar varias OP de un cliente en un PDF)
   const [remisionables, setRemisionables] = useState([])
   const [loadingRem, setLoadingRem] = useState(false)
+  const [loadRemError, setLoadRemError] = useState(null)  // fallo al cargar la cola
+  const [avisoCliente, setAvisoCliente] = useState(null)  // intento de mezclar clientes
   const [busquedaRem, setBusquedaRem] = useState('')
   const [selRem, setSelRem] = useState([])          // ids de OP seleccionadas
   const [selCliente, setSelCliente] = useState(null) // cliente_id de la selección
@@ -556,9 +559,10 @@ function OperadorTroqueles() {
 
   const loadHistRem = () => {
     setLoadingHistRem(true)
+    setLoadHistRemError(null)
     getRemisionesGeneradasOperador()
       .then(d => setHistRem(asList(d)))
-      .catch(() => setHistRem([]))
+      .catch(e => { setHistRem([]); setLoadHistRemError(e?.message || 'No se pudo cargar el historial') })
       .finally(() => setLoadingHistRem(false))
   }
 
@@ -568,11 +572,16 @@ function OperadorTroqueles() {
     else loadHistRem()
   }, [tab, histTab])
 
+  // Un fallo acá no puede verse igual que una cola vacía: mostrar "No hay
+  // troqueles pendientes de remisión" cuando en realidad el backend falló es
+  // lo que hace que un problema de permisos o de red se lea como "el troquel
+  // que envié no llegó".
   const loadRemisionables = () => {
     setLoadingRem(true)
+    setLoadRemError(null)
     getRemisionablesOperador()
       .then(d => setRemisionables(asList(d)))
-      .catch(() => setRemisionables([]))
+      .catch(e => { setRemisionables([]); setLoadRemError(e?.message || 'No se pudo cargar la cola de remisiones') })
       .finally(() => setLoadingRem(false))
   }
 
@@ -606,20 +615,30 @@ function OperadorTroqueles() {
     return [...map.values()]
   }, [remisionablesFiltradas])
 
-  // Al marcar una OP: si es de otro cliente, reinicia la selección a ese cliente.
+  // Una remisión es de un solo cliente. Al marcar una OP de otro cliente NO se
+  // reinicia la selección en silencio (así se perdían troqueles ya marcados sin
+  // que el operador lo notara): se avisa y el cambio de cliente queda como una
+  // acción aparte.
   const toggleRem = (op) => {
     setGenError(null)
     if (selCliente !== null && op.cliente_id !== selCliente) {
-      setSelCliente(op.cliente_id)
-      setSelRem([op.id])
+      setAvisoCliente(op)
       return
     }
+    setAvisoCliente(null)
     setSelCliente(op.cliente_id)
     setSelRem(prev => {
       const next = prev.includes(op.id) ? prev.filter(x => x !== op.id) : [...prev, op.id]
       if (next.length === 0) setSelCliente(null)
       return next
     })
+  }
+
+  // Cambio de cliente pedido a propósito desde el aviso.
+  const cambiarClienteSeleccion = (op) => {
+    setAvisoCliente(null)
+    setSelCliente(op.cliente_id)
+    setSelRem([op.id])
   }
 
   // No borra nada: solo saca la OP de esta cola. Sigue intacta y a cargo del
@@ -666,7 +685,7 @@ function OperadorTroqueles() {
     try {
       const { remision_id, remision_numero } = await consolidarRemisionOperador(selRem, obsRem.trim())
       await descargarPdfRemision(remision_id)
-      setSelRem([]); setSelCliente(null)
+      setSelRem([]); setSelCliente(null); setAvisoCliente(null)
       setConfirmGen(false); setObsRem('')
       setGenOk(remision_numero)
       // Las OPs generadas salen de esta lista y quedan en Historial › Remisiones.
@@ -836,6 +855,13 @@ function OperadorTroqueles() {
             </div>
             {loadingHistRem ? (
               <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Cargando…</div>
+            ) : loadHistRemError ? (
+              <div style={{ padding: 24, textAlign: 'center', color: 'var(--danger, #c0392b)', fontSize: 13 }}>
+                ✗ {loadHistRemError}
+                <div style={{ marginTop: 8 }}>
+                  <button className="btn sm" onClick={loadHistRem}>Reintentar</button>
+                </div>
+              </div>
             ) : histRemFiltrado.length === 0 ? (
               <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>
                 {busquedaHistRem.trim() ? `Sin resultados para «${busquedaHistRem.trim()}»` : 'Todavía no has generado remisiones.'}
@@ -1043,6 +1069,24 @@ function OperadorTroqueles() {
                 </span>
               </div>
               {genError && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--danger, #c0392b)' }}>✗ {genError}</div>}
+              {avisoCliente && (
+                <div style={{
+                  marginTop: 8, fontSize: 12, padding: '8px 10px', borderRadius: 6,
+                  border: '1px solid var(--warn, #b7791f)', color: 'var(--ink-2)',
+                  display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8,
+                }}>
+                  <span>
+                    Una remisión es de un solo cliente. Tienes {selRem.length} troquel(es) de{' '}
+                    <strong>{gruposRem.find(g => g.cliente_id === selCliente)?.cliente_nombre || '—'}</strong>{' '}
+                    seleccionados; <strong>{avisoCliente.numero}</strong> es de{' '}
+                    <strong>{avisoCliente.cliente_nombre}</strong>.
+                  </span>
+                  <button className="btn sm" onClick={() => cambiarClienteSeleccion(avisoCliente)}>
+                    Cambiar a {avisoCliente.cliente_nombre}
+                  </button>
+                  <button className="btn sm" onClick={() => setAvisoCliente(null)}>Seguir con la selección</button>
+                </div>
+              )}
               {genOk && (
                 <div style={{ marginTop: 8, fontSize: 12, color: 'var(--ok, #2e7d32)' }}>
                   ✓ Remisión <strong>{genOk}</strong> generada ·{' '}
@@ -1054,6 +1098,13 @@ function OperadorTroqueles() {
             </div>
             {loadingRem ? (
               <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Cargando…</div>
+            ) : loadRemError ? (
+              <div style={{ padding: 24, textAlign: 'center', color: 'var(--danger, #c0392b)', fontSize: 13 }}>
+                ✗ {loadRemError}
+                <div style={{ marginTop: 8 }}>
+                  <button className="btn sm" onClick={loadRemisionables}>Reintentar</button>
+                </div>
+              </div>
             ) : gruposRem.length === 0 ? (
               <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>
                 {busquedaRem.trim() ? `Sin resultados para «${busquedaRem.trim()}»` : 'No hay troqueles pendientes de remisión.'}
@@ -1062,9 +1113,14 @@ function OperadorTroqueles() {
               gruposRem.map(g => {
                 const bloqueado = selCliente !== null && g.cliente_id !== selCliente
                 return (
-                  <div key={g.cliente_id} style={{ opacity: bloqueado ? 0.5 : 1 }}>
-                    <div style={{ padding: '8px 16px', background: 'var(--surface-2)', borderBottom: '1px solid var(--line)', fontWeight: 700, fontSize: 13 }}>
-                      {g.cliente_nombre || '—'}
+                  <div key={g.cliente_id} style={{ opacity: bloqueado ? 0.45 : 1 }}>
+                    <div style={{ padding: '8px 16px', background: 'var(--surface-2)', borderBottom: '1px solid var(--line)', fontWeight: 700, fontSize: 13, display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <span>{g.cliente_nombre || '—'}</span>
+                      {bloqueado && (
+                        <span style={{ fontWeight: 400, fontSize: 11, color: 'var(--ink-3)' }}>
+                          · otro cliente, no entra en esta remisión
+                        </span>
+                      )}
                     </div>
                     <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
                       <tbody>
@@ -1072,10 +1128,17 @@ function OperadorTroqueles() {
                           const checked = selRem.includes(op.id)
                           return (
                             <tr key={op.id}
-                              style={{ borderBottom: '1px solid var(--line)', background: idx % 2 ? 'var(--surface-2)' : 'var(--surface)', cursor: 'pointer' }}
+                              style={{ borderBottom: '1px solid var(--line)', background: idx % 2 ? 'var(--surface-2)' : 'var(--surface)', cursor: bloqueado ? 'not-allowed' : 'pointer' }}
+                              title={bloqueado ? `${op.cliente_nombre} es otro cliente: vacía la selección para remisionarlo` : undefined}
                               onClick={() => toggleRem(op)}>
                               <td style={{ padding: '10px 12px', width: 36 }}>
-                                <input type="checkbox" checked={checked} onChange={() => toggleRem(op)} onClick={e => e.stopPropagation()} />
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  style={bloqueado ? { cursor: 'not-allowed' } : undefined}
+                                  onChange={() => toggleRem(op)}
+                                  onClick={e => e.stopPropagation()}
+                                />
                               </td>
                               <td style={{ padding: '10px 12px', width: 90, fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 13 }}>{op.numero}</td>
                               <td style={{ padding: '10px 12px', color: 'var(--ink-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{op.referencia}</td>

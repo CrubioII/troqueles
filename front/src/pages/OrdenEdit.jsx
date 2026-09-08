@@ -8,9 +8,10 @@ import { ModeloTroquelGestion } from '../components/Troquel'
 import { useAutosave } from '../hooks/useAutosave'
 import {
   getOrden, getPapeles, createOrden, updateOrden,
-  getNextNumeroOrden, createCliente, updateCliente,
+  getNextNumeroOrden, updateCliente,
   pdfOpAdmin, pdfOpProduccion,
 } from '../api'
+import { crearClienteConGuard } from '../lib/clienteDedup'
 import { useAuth } from '../context/AuthContext'
 import { useGuardedNavigate, useUnsavedGuard } from '../context/UnsavedChangesContext'
 import { buildDefaultProcesos, buildBlankState, docToState, stateToDoc, seedProcesosFromApi, computeCalc } from '../lib/opQuoteShared'
@@ -150,7 +151,7 @@ export default function OrdenEdit() {
         let clienteId = d.clienteId
         if (!clienteId) {
           if (!d.cliente.trim()) throw new Error('El campo Cliente es obligatorio')
-          const newCliente = await createCliente({
+          const newCliente = await crearClienteConGuard({
             nombre: d.cliente.trim(),
             tipo: d.tipoCliente,
             email: d.clienteEmail || '',

@@ -4,11 +4,12 @@ import { Icon } from '../components/Icons'
 import { fmtCOP, fmtNum, CONDICIONES_PAGO, SaveStatus } from '../components/core'
 import { useAutosave } from '../hooks/useAutosave'
 import {
-  getClientes, createCliente,
+  getClientes,
   getCotizacion, getCotizaciones,
   getDocumento, createDocumento, updateDocumento, deleteDocumento,
   pdfDocumento, enviarDocumento,
 } from '../api'
+import { crearClienteConGuard } from '../lib/clienteDedup'
 
 const DEFAULT_NOTA = 'En la presente cotización No incluye el impuesto del IVA, el cliente debe suministrar el diseño de logotipo e impresión.'
 
@@ -460,7 +461,7 @@ export default function DocumentoClienteEdit() {
       let clienteId = d.clienteId
       if (!clienteId) {
         if (!d.cliente.trim()) throw new Error('El campo Cliente es obligatorio')
-        const newCliente = await createCliente({ nombre: d.cliente.trim(), tipo: 'final', email: d.clienteEmail || '' })
+        const newCliente = await crearClienteConGuard({ nombre: d.cliente.trim(), tipo: 'final', email: d.clienteEmail || '' })
         clienteId = newCliente.id
         set({ clienteId })
       }

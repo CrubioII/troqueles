@@ -19,6 +19,74 @@ def normalizar_nombre_cliente(nombre):
     return re.sub(r"\s+", " ", sin_tildes).strip()
 
 
+def clave_compacta_cliente(nombre):
+    """Clave laxa, solo para *detectar* parecidos: la normalizada sin espacios ni
+    puntuación. No sirve como clave única — en producción ya conviven filas que
+    colisionarían con ella (p. ej. "troqueles ink" y "Troquelesink"), que es
+    justamente lo que queremos señalar."""
+    return re.sub(r"[^a-z0-9]", "", normalizar_nombre_cliente(nombre))
+
+
+def _distancia_edicion(a, b, maximo):
+    """Levenshtein con corte: devuelve `maximo + 1` en cuanto se pasa del umbral."""
+    if abs(len(a) - len(b)) > maximo:
+        return maximo + 1
+    previa = list(range(len(b) + 1))
+    for i, ca in enumerate(a, start=1):
+        actual = [i]
+        for j, cb in enumerate(b, start=1):
+            actual.append(min(
+                previa[j] + 1,          # borrado
+                actual[j - 1] + 1,      # inserción
+                previa[j - 1] + (ca != cb),  # sustitución
+            ))
+        if min(actual) > maximo:
+            return maximo + 1
+        previa = actual
+    return previa[-1]
+
+
+def _umbral_distancia(a, b):
+    """Cuánto typo tolerar antes de considerar dos nombres 'el mismo'.
+
+    Escalado por longitud: en nombres cortos una sola letra ya cambia el
+    cliente ("zorro" vs "toro"), en nombres largos un typo es casi seguro un
+    error de digitación ("Prepensa" vs "Preprensa Inalmega")."""
+    corto = min(len(a), len(b))
+    if corto < 4:
+        return 0
+    return 1 if corto < 8 else 2
+
+
+def clientes_similares(nombre, excluir_id=None):
+    """Clientes que son 'el mismo nombre con un typo' que `nombre`.
+
+    Alimenta el guard de alta (ClienteViewSet.create) y el modo `--similar` de
+    merge_clientes_duplicados. Compara sobre `clave_compacta_cliente`, así que
+    también atrapa las variantes que el unique de `nombre_normalizado` deja
+    pasar por diferir solo en espacios o puntuación.
+    """
+    clave = clave_compacta_cliente(nombre)
+    if not clave:
+        return []
+    qs = Cliente.objects.all()
+    if excluir_id is not None:
+        qs = qs.exclude(pk=excluir_id)
+    encontrados = []
+    for c in qs:
+        otra = clave_compacta_cliente(c.nombre)
+        if not otra:
+            continue
+        if otra == clave:
+            encontrados.append((0, c))
+            continue
+        umbral = _umbral_distancia(clave, otra)
+        if umbral and _distancia_edicion(clave, otra, umbral) <= umbral:
+            encontrados.append((_distancia_edicion(clave, otra, umbral), c))
+    encontrados.sort(key=lambda par: (par[0], par[1].nombre))
+    return [c for _, c in encontrados]
+
+
 class Cliente(models.Model):
     TIPO_CHOICES = [("final", "Cliente Final"), ("terciario", "Cliente Terciario")]
 
@@ -433,7 +501,10 @@ class RegistroProceso(models.Model):
         ("troqueladora", "Troqueladora"),
         ("guillotina_final", "Guillotina · Corte final"),
     ]
-    TAMANO_CHOICES = [
+    # `tamano` es texto libre desde la migración 0059. Este mapa solo traduce
+    # los valores que quedaron guardados cuando era una lista cerrada, para que
+    # el historial viejo no muestre el id crudo.
+    TAMANO_LABELS_LEGACY = [
         ("pliego", "Pliego completo"),
         ("medio_pliego", "1/2 pliego"),
         ("cuarto_pliego", "1/4 pliego"),
@@ -467,8 +538,10 @@ class RegistroProceso(models.Model):
     cantidad_esperada = models.PositiveIntegerField(default=0)
     faltante = models.BooleanField(default=False)
 
-    # Tamaño del papel (impresora / laminadora / barnizadora)
-    tamano = models.CharField(max_length=20, choices=TAMANO_CHOICES, blank=True, default="")
+    # Tamaño del papel (impresora / laminadora / barnizadora): opcional y de
+    # texto libre — las medidas reales de la máquina no caben en una lista.
+    # `tamano_otro` solo sobrevive por los registros anteriores a la 0059.
+    tamano = models.CharField(max_length=120, blank=True, default="")
     tamano_otro = models.CharField(max_length=120, blank=True, default="")
 
     # Impresora: qué caras se imprimieron y con cuántas tintas cada una.
@@ -511,6 +584,13 @@ class RegistroProceso(models.Model):
 
     def __str__(self):
         return f"{self.orden.numero} · {self.estacion} · {self.fecha_hora:%Y-%m-%d %H:%M}"
+
+    def tamano_display(self):
+        """Tamaño legible: hoy es lo que tecleó el Operador; en los registros
+        viejos, la etiqueta del id de la lista (o su 'otro' escrito a mano)."""
+        if self.tamano == "otro":
+            return self.tamano_otro or "Otro"
+        return dict(self.TAMANO_LABELS_LEGACY).get(self.tamano, self.tamano)
 
 
 class TroquelModelo(models.Model):

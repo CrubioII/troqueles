@@ -1008,6 +1008,9 @@ export function NuevaTareaTroquelModal({ onClose, onCreated }) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
   const [createdOrden, setCreatedOrden] = useState(null)  // OP ya creada: el reintento solo re-envía el modelo
+  // Candidatos que devolvió el 409 cliente_similar: el operador tiene que
+  // elegir uno o confirmar que de verdad es un cliente nuevo.
+  const [similares, setSimilares] = useState(null)
 
   useEffect(() => {
     if (archivo && archivo.type?.startsWith('image/')) {
@@ -1020,6 +1023,7 @@ export function NuevaTareaTroquelModal({ onClose, onCreated }) {
 
   const handleClienteChange = (v) => {
     setOp(o => ({ ...o, cliente: v, clienteId: null }))
+    setSimilares(null)
     clearTimeout(searchRef.current)
     if (!v.trim()) { setSuggestions([]); setShowSugg(false); return }
     searchRef.current = setTimeout(() => {
@@ -1035,9 +1039,15 @@ export function NuevaTareaTroquelModal({ onClose, onCreated }) {
     setOp(o => ({ ...o, cliente: c.nombre, clienteId: c.id }))
     setSuggestions([])
     setShowSugg(false)
+    setSimilares(null)
+    setError(null)
   }
 
-  const submit = async () => {
+  // `confirmarNuevo` solo llega en true desde el botón explícito del aviso de
+  // clientes parecidos. Sin eso, el backend responde 409 y no se crea nada:
+  // un cliente duplicado por typo parte en dos la cola de remisiones (agrupa
+  // por cliente_id) y el troquel enviado "desaparece" para el operador.
+  const submit = async (confirmarNuevo = false) => {
     setError(null)
     if (!createdOrden) {
       if (!op.cliente.trim()) { setError('El campo Cliente es obligatorio'); return }
@@ -1049,8 +1059,23 @@ export function NuevaTareaTroquelModal({ onClose, onCreated }) {
       if (!orden) {
         let clienteId = op.clienteId
         if (!clienteId) {
-          const nuevo = await createCliente({ nombre: op.cliente.trim(), tipo: 'final' })
+          let nuevo
+          try {
+            nuevo = await createCliente({
+              nombre: op.cliente.trim(),
+              tipo: 'final',
+              ...(confirmarNuevo ? { confirmar_nuevo: true } : {}),
+            })
+          } catch (e) {
+            if (e?.code === 'cliente_similar') {
+              setSimilares(e.body?.candidatos || [])
+              setSaving(false)
+              return
+            }
+            throw e
+          }
           clienteId = nuevo.id
+          setSimilares(null)
           setOp(o => ({ ...o, clienteId }))
         }
         orden = await createOrden({
@@ -1114,16 +1139,19 @@ export function NuevaTareaTroquelModal({ onClose, onCreated }) {
             <Field label={
               <>Cliente *
                 {op.clienteId && <span style={{ marginLeft: 6, color: 'var(--ok, #27ae60)' }}>✓ vinculado</span>}
-                {!op.clienteId && op.cliente && <span style={{ marginLeft: 6, color: 'var(--ink-3)' }}>· se creará nuevo</span>}
+                {!op.clienteId && op.cliente && <span style={{ marginLeft: 6, color: 'var(--warn, #b7791f)' }}>· sin vincular, se creará nuevo</span>}
               </>
             } full>
               <div style={{ position: 'relative' }}>
                 <input
                   className="input"
-                  style={{ width: '100%' }}
                   placeholder="Buscar cliente existente o escribir nuevo…"
                   value={op.cliente}
                   disabled={opLocked}
+                  style={{
+                    width: '100%',
+                    ...(!op.clienteId && op.cliente.trim() ? { borderColor: 'var(--warn, #b7791f)' } : {}),
+                  }}
                   onChange={e => handleClienteChange(e.target.value)}
                   onBlur={() => setTimeout(() => setShowSugg(false), 150)}
                   onFocus={() => suggestions.length > 0 && setShowSugg(true)}
@@ -1156,11 +1184,41 @@ export function NuevaTareaTroquelModal({ onClose, onCreated }) {
           </div>
         </div>
 
+        {similares && (
+          <div style={{
+            border: '1px solid var(--warn, #b7791f)', borderRadius: 8, padding: 12,
+            display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13,
+          }}>
+            <div style={{ fontWeight: 700 }}>Ya existe un cliente con un nombre casi igual</div>
+            <div style={{ color: 'var(--ink-2)', fontSize: 12 }}>
+              Si es el mismo, elígelo aquí. Crear uno aparte separa sus troqueles en la
+              cola de remisiones y no podrás reunirlos en una sola remisión.
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {similares.map(c => (
+                <button key={c.id} className="btn sm" onClick={() => selectCliente(c)}>
+                  Usar «{c.nombre}»
+                </button>
+              ))}
+            </div>
+            <div>
+              <button
+                className="btn sm"
+                disabled={saving}
+                onClick={() => submit(true)}
+                style={{ color: 'var(--ink-3)' }}
+              >
+                No, «{op.cliente.trim()}» es otro cliente — crearlo igual
+              </button>
+            </div>
+          </div>
+        )}
+
         {error && <div style={{ color: 'var(--danger, #c0392b)', fontSize: 12 }}>{error}</div>}
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <button className="btn" onClick={onClose} disabled={saving}>Cancelar</button>
-          <button className="btn primary" onClick={submit} disabled={saving}>
+          <button className="btn primary" onClick={() => submit()} disabled={saving}>
             {saving ? 'Creando…' : (opLocked ? 'Reintentar modelo' : 'Crear tarea')}
           </button>
         </div>

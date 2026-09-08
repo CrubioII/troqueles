@@ -5,7 +5,8 @@ import { fmtCOP, fmtNum, CONDICIONES_PAGO, Section } from '../components/core'
 import { SectionGenerales, SectionPapel, SectionProcesos, SectionCondiciones, SectionAcciones } from '../components/sections'
 import LiquidationPanel from '../components/LiquidationPanel'
 import { useAutosave } from '../hooks/useAutosave'
-import { getCotizacion, getPapeles, createCotizacion, updateCotizacion, cambiarEstado, createCliente, updateCliente, deleteCotizacion, crearOpDesdeCotizacion } from '../api'
+import { getCotizacion, getPapeles, createCotizacion, updateCotizacion, cambiarEstado, updateCliente, deleteCotizacion, crearOpDesdeCotizacion } from '../api'
+import { crearClienteConGuard } from '../lib/clienteDedup'
 import { useAuth } from '../context/AuthContext'
 import { buildDefaultProcesos, buildBlankState, docToState, stateToDoc, seedProcesosFromApi, computeCalc } from '../lib/opQuoteShared'
 
@@ -78,7 +79,7 @@ export default function CotizacionEdit() {
       let clienteId = d.clienteId
       if (!clienteId) {
         if (!d.cliente.trim()) throw new Error('El campo Cliente es obligatorio')
-        const newCliente = await createCliente({
+        const newCliente = await crearClienteConGuard({
           nombre: d.cliente.trim(),
           tipo: d.tipoCliente,
           email: d.clienteEmail || '',

@@ -89,13 +89,16 @@ const jsonConError = async (r) => {
   return r.json()
 }
 
-// Como `jsonConError`, pero conserva code/status del servidor en el Error
+// Como `jsonConError`, pero conserva code/status y el cuerpo del servidor en el
+// Error — quien lo atrapa suele necesitar los datos que acompañan al código
+// (p. ej. `candidatos` en un 409 cliente_similar).
 const jsonConCodigo = async (r) => {
   if (!r.ok) {
     const body = await r.json().catch(() => null)
     const err = new Error(body?.error || body?.detail || `HTTP ${r.status}`)
     err.code = body?.code
     err.status = r.status
+    err.body = body
     throw err
   }
   return r.json()
@@ -111,12 +114,15 @@ export const getPapeles = () =>
 export const getClientes = (q = '') =>
   apiFetch(`${BASE}/clientes/?search=${encodeURIComponent(q)}`).then(json)
 
+// Responde 409 { code: 'cliente_similar', candidatos } si el nombre se parece a
+// uno existente; reintentar con `confirmar_nuevo: true` para crearlo igual.
+// Ver crearClienteConGuard en lib/clienteDedup.js.
 export const createCliente = (data) =>
   apiFetch(`${BASE}/clientes/`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
-  }).then(json)
+  }).then(jsonConCodigo)
 
 export const updateCliente = (id, data) =>
   apiFetch(`${BASE}/clientes/${id}/`, {
@@ -445,7 +451,7 @@ export const getRemisionesSolicitadas = () =>
 // OPs de troquel pendientes de remisionar (aún sin remisión generada), sin dinero.
 // El front agrupa por cliente y filtra en memoria.
 export const getRemisionablesOperador = () =>
-  apiFetch(`${BASE}/ordenes/remisionables_operador/`).then(json)
+  apiFetch(`${BASE}/ordenes/remisionables_operador/`).then(jsonConError)
 
 // No es un delete: solo saca la OP de la cola de remisionables del Operador;
 // sigue intacta y a cargo del Admin de ahí en adelante.
@@ -458,7 +464,7 @@ export const descartarRemisionableOperador = (ordenId) =>
 
 // Historial de remisiones ya generadas por el Operador, sin dinero.
 export const getRemisionesGeneradasOperador = () =>
-  apiFetch(`${BASE}/ordenes/remisiones_generadas_operador/`).then(json)
+  apiFetch(`${BASE}/ordenes/remisiones_generadas_operador/`).then(jsonConError)
 
 // Deshace una remisión generada: sus OPs vuelven a la cola de remisionables.
 export const devolverRemisionOperador = (remisionId) =>

@@ -89,6 +89,7 @@ from .models import (
     Remision, RemisionItem, RegistroProceso, Notificacion,
 )
 from .models import ORDEN_CAMPOS_AUDITADOS, orden_valor_legible, registrar_cambios_orden
+from .models import clientes_similares
 from .serializers import (
     ClienteSerializer,
     PapelSerializer,
@@ -611,7 +612,6 @@ def _sin_desperdicio(detalle):
     return _DESPERDICIO_RE.sub("", detalle or "").strip(" ·")
 
 
-_TAMANO_LABELS = dict(RegistroProceso.TAMANO_CHOICES)
 _TIPO_LAMINADO_LABELS = dict(RegistroProceso.TIPO_LAMINADO_CHOICES)
 _TIPO_METALIZADO_LABELS = dict(RegistroProceso.TIPO_METALIZADO_CHOICES)
 
@@ -624,10 +624,7 @@ def _registro_detalle(registro):
     acá porque el PDF no comparte JS."""
     lineas = []
     if registro.tamano:
-        if registro.tamano == "otro":
-            lineas.append(f"Tamaño: {registro.tamano_otro or 'Otro'}")
-        else:
-            lineas.append(f"Tamaño: {_TAMANO_LABELS.get(registro.tamano, registro.tamano)}")
+        lineas.append(f"Tamaño: {registro.tamano_display()}")
     if registro.tiro_active:
         lineas.append("Tiro")
         if registro.tiro_colores_num:
@@ -866,6 +863,35 @@ class ClienteViewSet(viewsets.ModelViewSet):
     serializer_class = ClienteSerializer
     filter_backends = [filters.SearchFilter]
     search_fields = ["nombre"]
+
+    def create(self, request, *args, **kwargs):
+        """Alta de cliente, con freno a los duplicados por typo.
+
+        El unique de `nombre_normalizado` solo atrapa el mismo nombre exacto;
+        deja pasar "Prepensa Inalmega" junto a "Preprensa Inalmega" y
+        "Troquelesink" junto a "troqueles ink". Eso parte en dos la cola de
+        remisiones del Operador (agrupa por cliente_id y solo deja remisionar
+        un cliente a la vez), que es como se manifestó el bug: el troquel
+        enviado "no aparecía" y había que rehacer la remisión.
+
+        Si el nombre se parece a uno existente devolvemos 409 con los
+        candidatos para que el front ofrezca elegir el que ya existe. Crear de
+        todos modos es válido —hay clientes con nombres legítimamente
+        parecidos— pero tiene que ser deliberado: `confirmar_nuevo: true`.
+        """
+        nombre = (request.data.get("nombre") or "").strip()
+        if nombre and not request.data.get("confirmar_nuevo"):
+            similares = clientes_similares(nombre)
+            if similares:
+                return Response({
+                    "code": "cliente_similar",
+                    "error": (
+                        "Ya existe un cliente con un nombre casi igual. "
+                        "Elige el existente o confirma que es uno nuevo."
+                    ),
+                    "candidatos": [{"id": c.id, "nombre": c.nombre} for c in similares[:5]],
+                }, status=409)
+        return super().create(request, *args, **kwargs)
 
     @action(detail=False, methods=["get"])
     def resumen(self, request):
