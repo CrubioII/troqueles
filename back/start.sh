@@ -21,11 +21,16 @@ chmod 0644 /etc/cron.d/procesar-correos
 touch /var/log/procesar_correos.log
 cron
 
+# Espejar el log del cron a la salida del contenedor. El contenedor no tiene
+# shell accesible desde afuera (Lightsail no expone exec), así que lo único que
+# se puede leer en producción es stdout/stderr: sin este tail, las corridas del
+# lote de correos serían invisibles.
+tail -n 0 -F /var/log/procesar_correos.log 2>/dev/null | sed -u 's/^/[correos-cron] /' &
+
 # Listener IMAP IDLE: procesa cada correo a los segundos de llegar, sin
 # esperar al cron. Va en segundo plano; gunicorn sigue siendo el proceso
-# principal del contenedor.
-touch /var/log/escuchar_correos.log
-/app/run_escuchar_correos.sh >> /var/log/escuchar_correos.log 2>&1 &
+# principal del contenedor. Su salida va directo a stdout, por lo mismo.
+/app/run_escuchar_correos.sh 2>&1 | sed -u 's/^/[correos-listener] /' &
 
 # Iniciar el servidor web de producción Gunicorn. Los workers son ajustables por
 # variable de entorno: el nodo de Lightsail tiene menos vCPU que el App Service
