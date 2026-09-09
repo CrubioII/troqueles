@@ -43,8 +43,10 @@ jobs:
         # Los repos de terceros preinstalados en el runner (Chrome, Microsoft)
         # rompen `apt-get update` cada tanto con "Hash Sum mismatch", y ninguno
         # aporta paquetes que este job necesite: se sacan antes de actualizar.
-        sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
-                   /etc/apt/sources.list.d/microsoft-prod.list
+        # El glob cubre tanto el formato .list como el .sources (deb822), que es
+        # el que usa la imagen actual del runner.
+        sudo rm -f /etc/apt/sources.list.d/google-chrome.* \
+                   /etc/apt/sources.list.d/microsoft-prod.*
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends \
           libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b \
