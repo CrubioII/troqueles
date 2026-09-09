@@ -10,10 +10,10 @@ SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")
 DEBUG = os.getenv("DEBUG", "True") == "True"
 ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 
-# Azure App Service terminates TLS at the proxy and forwards plain HTTP,
-# setting X-Forwarded-Proto. Without this, request.is_secure() is always
-# False, so DRF builds pagination `next`/`previous` links as http:// —
-# which the frontend's CSP (https: only) then blocks.
+# El balanceador de Lightsail (igual que el proxy de Azure App Service) termina
+# TLS y reenvía HTTP plano con X-Forwarded-Proto. Sin esto, request.is_secure()
+# es siempre False, así que DRF arma los links `next`/`previous` de la
+# paginación como http:// — y la CSP del frontend (solo https:) los bloquea.
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 INSTALLED_APPS = [
@@ -80,7 +80,8 @@ if all([DB_NAME, DB_USER, DB_PASSWORD, DB_HOST]):
                 "sslmode": "require",
             },
             # Reutilizar conexiones entre requests: evita un handshake TCP+TLS
-            # a Postgres por cada request (~0.5-1s en Azure).
+            # a Postgres por cada request (~0.5-1s desde Azure; menos ahora que
+            # el contenedor corre en la misma región que el pooler de Supabase).
             "CONN_MAX_AGE": 600,
             "CONN_HEALTH_CHECKS": True,
         }
@@ -123,7 +124,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Los tracebacks de errores 500 van a stderr aunque DEBUG=False (el config por
 # defecto de Django los filtra con require_debug_true y no llegan a los logs
-# del contenedor en Azure).
+# del contenedor).
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -165,8 +166,11 @@ CSRF_TRUSTED_ORIGINS = os.getenv(
     "http://localhost:3000,http://127.0.0.1:8000"
 ).split(",")
 
-# Confiar en los subdominios de Azure para evitar errores CSRF 403 en producción
+# Confiar en los subdominios de los hosts gestionados para evitar errores CSRF
+# 403 en producción. Los de Azure siguen aquí: el frontend vive en Static Web
+# Apps y la API vieja de App Service se conserva como plan de reversa.
 CSRF_TRUSTED_ORIGINS.extend([
+    "https://*.cs.amazonlightsail.com",
     "https://*.azurewebsites.net",
     "https://*.azurestaticapps.net",
     "https://*.southcentralus-01.azurewebsites.net",

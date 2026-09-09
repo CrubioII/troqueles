@@ -7,7 +7,7 @@
 # pull, así que este hook NO bloquea a otro colaborador que pushee sin
 # haberlo configurado. El gate real e inevitable (corre en GitHub, sin
 # depender de ningún setup local) es el job `test` en
-# .github/workflows/deploy-backend.yml: el deploy a Azure no se dispara si
+# .github/workflows/deploy-backend.yml: el deploy a AWS no se dispara si
 # esos tests no pasan, sin importar desde qué máquina se hizo el push.
 #
 # Activar este hook una vez por clon (opcional, solo acelera el feedback):

@@ -1,4 +1,4 @@
-name: Deploy Backend to Azure App Service
+name: Deploy Backend to AWS Lightsail
 
 on:
   push:
@@ -7,6 +7,21 @@ on:
     paths:
       - 'back/**'
       - '.github/workflows/deploy-backend.yml'
+  # Corrida manual. `deploy: false` solo construye y empuja la imagen a ECR:
+  # es como se sembró la primera imagen, antes de que existiera un deployment
+  # del cual heredar las variables de entorno.
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: 'Desplegar en Lightsail después de construir'
+        type: boolean
+        default: true
+
+env:
+  AWS_REGION: us-east-2
+  ECR_REPOSITORY: troqueles-back
+  LIGHTSAIL_SERVICE: troqueles-api
+  LIGHTSAIL_CONTAINER: back
 
 jobs:
   test:
@@ -49,29 +64,91 @@ jobs:
     - name: Checkout source code
       uses: actions/checkout@v4
 
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Log in to Amazon ECR
+      id: ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
-
-    - name: Log in to Azure Container Registry (ACR)
-      uses: docker/login-action@v3
-      with:
-        registry: ${{ secrets.REGISTRY_LOGIN_SERVER }}
-        username: ${{ secrets.REGISTRY_USERNAME }}
-        password: ${{ secrets.REGISTRY_PASSWORD }}
 
     - name: Build and push backend Docker image
       uses: docker/build-push-action@v5
       with:
         context: ./back
         file: ./back/Dockerfile
+        # El nodo de Lightsail es x86_64; los runners de GitHub también, pero
+        # dejarlo explícito evita sorpresas si alguna vez se construye en arm.
+        platforms: linux/amd64
         push: true
-        tags: ${{ secrets.REGISTRY_LOGIN_SERVER }}/troqueles-back:latest
+        tags: |
+          ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
-    - name: Deploy to Azure Web App
-      uses: azure/webapps-deploy@v3
-      with:
-        app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
-        publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-        images: '${{ secrets.REGISTRY_LOGIN_SERVER }}/troqueles-back:latest'
+    # Las ~20 variables de entorno de producción (SECRET_KEY, DB_*, IMAP,
+    # Telegram, la connection string del Blob Storage) viven SOLO en Lightsail:
+    # nunca pasan por GitHub. Por eso el deploy lee el spec del despliegue vivo
+    # y le cambia únicamente la imagen.
+    - name: Deploy to Lightsail
+      if: github.event_name != 'workflow_dispatch' || inputs.deploy
+      env:
+        IMAGE: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+      run: |
+        set -euo pipefail
+
+        aws lightsail get-container-service-deployments \
+          --service-name "$LIGHTSAIL_SERVICE" \
+          --query 'deployments[0]' > current.json
+
+        if [ "$(jq -r 'type' current.json)" = "null" ]; then
+          echo "El servicio $LIGHTSAIL_SERVICE no tiene ningún despliegue del cual heredar" \
+               "las variables de entorno. Créalo una vez a mano (ver infra/aws/README.md)." >&2
+          exit 1
+        fi
+
+        jq --arg svc "$LIGHTSAIL_SERVICE" \
+           --arg name "$LIGHTSAIL_CONTAINER" \
+           --arg img "$IMAGE" '
+          {
+            serviceName: $svc,
+            containers: (.containers | .[$name].image = $img),
+            publicEndpoint: {
+              containerName: .publicEndpoint.containerName,
+              containerPort: .publicEndpoint.containerPort,
+              healthCheck: .publicEndpoint.healthCheck
+            }
+          }' current.json > deployment.json
+
+        # Falla ruidosamente antes de desplegar si el spec heredado perdió las
+        # variables de entorno: un deployment sin ellas arranca en sqlite.
+        vars=$(jq --arg name "$LIGHTSAIL_CONTAINER" '.containers[$name].environment | length' deployment.json)
+        echo "Variables de entorno heredadas: $vars"
+        [ "$vars" -gt 0 ] || { echo "Spec sin variables de entorno; abortando." >&2; exit 1; }
+
+        aws lightsail create-container-service-deployment --cli-input-json file://deployment.json \
+          --query 'containerService.{state:state,version:currentDeployment.version}'
+
+    - name: Wait for the deployment to become active
+      if: github.event_name != 'workflow_dispatch' || inputs.deploy
+      run: |
+        set -euo pipefail
+        for _ in $(seq 1 40); do
+          state=$(aws lightsail get-container-service-deployments \
+            --service-name "$LIGHTSAIL_SERVICE" --query 'deployments[0].state' --output text)
+          echo "estado del despliegue: $state"
+          case "$state" in
+            ACTIVE) exit 0 ;;
+            FAILED) echo "El despliegue falló; revisa los logs del contenedor." >&2; exit 1 ;;
+          esac
+          sleep 15
+        done
+        echo "El despliegue no quedó ACTIVE en 10 minutos." >&2
+        exit 1

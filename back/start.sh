@@ -6,7 +6,7 @@ python manage.py migrate --noinput
 python manage.py shell -c "from django.contrib.auth import get_user_model; User = get_user_model(); User.objects.filter(username='admin').exists() or User.objects.create_superuser('admin', 'admin@troqueles.ink', 'admin123')"
 
 # Volcar el entorno del contenedor a un archivo que cron pueda cargar
-# (cron arranca con un entorno vacío, no hereda las App Settings de Azure)
+# (cron arranca con un entorno vacío, no hereda las variables del contenedor)
 python -c "
 import os, shlex
 with open('/app/.env.cron', 'w') as f:
@@ -27,5 +27,7 @@ cron
 touch /var/log/escuchar_correos.log
 /app/run_escuchar_correos.sh >> /var/log/escuchar_correos.log 2>&1 &
 
-# Iniciar el servidor web de producción Gunicorn
-gunicorn config.wsgi:application --bind 0.0.0.0:${PORT:-8000} --workers 3 --threads 4 --worker-class gthread --timeout 120
+# Iniciar el servidor web de producción Gunicorn. Los workers son ajustables por
+# variable de entorno: el nodo de Lightsail tiene menos vCPU que el App Service
+# de Azure, así que se puede bajar a 2 sin reconstruir la imagen.
+gunicorn config.wsgi:application --bind 0.0.0.0:${PORT:-8000} --workers ${GUNICORN_WORKERS:-3} --threads 4 --worker-class gthread --timeout 120
