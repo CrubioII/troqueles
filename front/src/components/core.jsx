@@ -36,8 +36,17 @@ export const PLIEGO_SIZES = [
 export const DISENADORES = ['Oscar', 'Camilo', 'Laura', 'Diana']
 
 // ============ Cadena de producción (estaciones de máquina) ============
-// El tamaño del papel no tiene catálogo: es texto libre y opcional en el
-// registro de estación (ver RegistroProceso.jsx).
+// Los ids espejan RegistroProceso.TAMANO_CHOICES del backend.
+export const TAMANOS_REGISTRO = [
+  { id: 'pliego',        label: 'Pliego completo' },
+  { id: 'medio_pliego',  label: '1/2 pliego' },
+  { id: 'cuarto_pliego', label: '1/4 pliego' },
+  { id: 'octavo_pliego', label: '1/8 pliego' },
+  { id: 'carta',         label: 'Carta' },
+  { id: 'media_carta',   label: '1/2 carta' },
+  { id: 'cuarto_carta',  label: '1/4 carta' },
+  { id: 'otro',          label: 'Otro (especificar)' },
+]
 export const TIPOS_LAMINADO_REGISTRO = [
   { id: 'mate',       label: 'Mate' },
   { id: 'brillante',  label: 'Brillante' },

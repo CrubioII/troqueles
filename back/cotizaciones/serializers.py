@@ -721,7 +721,7 @@ class RegistroProcesoSerializer(serializers.ModelSerializer):
     operador_username = serializers.CharField(source="operador.username", read_only=True, default="")
     estacion_label = serializers.SerializerMethodField()
     proceso_label = serializers.SerializerMethodField()
-    tamano_label = serializers.CharField(source="tamano_display", read_only=True, default="")
+    tamano_label = serializers.CharField(source="get_tamano_display", read_only=True, default="")
 
     class Meta:
         model = RegistroProceso

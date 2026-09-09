@@ -612,6 +612,7 @@ def _sin_desperdicio(detalle):
     return _DESPERDICIO_RE.sub("", detalle or "").strip(" ·")
 
 
+_TAMANO_LABELS = dict(RegistroProceso.TAMANO_CHOICES)
 _TIPO_LAMINADO_LABELS = dict(RegistroProceso.TIPO_LAMINADO_CHOICES)
 _TIPO_METALIZADO_LABELS = dict(RegistroProceso.TIPO_METALIZADO_CHOICES)
 
@@ -624,7 +625,10 @@ def _registro_detalle(registro):
     acá porque el PDF no comparte JS."""
     lineas = []
     if registro.tamano:
-        lineas.append(f"Tamaño: {registro.tamano_display()}")
+        if registro.tamano == "otro":
+            lineas.append(f"Tamaño: {registro.tamano_otro or 'Otro'}")
+        else:
+            lineas.append(f"Tamaño: {_TAMANO_LABELS.get(registro.tamano, registro.tamano)}")
     if registro.tiro_active:
         lineas.append("Tiro")
         if registro.tiro_colores_num:

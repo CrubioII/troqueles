@@ -501,10 +501,7 @@ class RegistroProceso(models.Model):
         ("troqueladora", "Troqueladora"),
         ("guillotina_final", "Guillotina · Corte final"),
     ]
-    # `tamano` es texto libre desde la migración 0059. Este mapa solo traduce
-    # los valores que quedaron guardados cuando era una lista cerrada, para que
-    # el historial viejo no muestre el id crudo.
-    TAMANO_LABELS_LEGACY = [
+    TAMANO_CHOICES = [
         ("pliego", "Pliego completo"),
         ("medio_pliego", "1/2 pliego"),
         ("cuarto_pliego", "1/4 pliego"),
@@ -538,10 +535,8 @@ class RegistroProceso(models.Model):
     cantidad_esperada = models.PositiveIntegerField(default=0)
     faltante = models.BooleanField(default=False)
 
-    # Tamaño del papel (impresora / laminadora / barnizadora): opcional y de
-    # texto libre — las medidas reales de la máquina no caben en una lista.
-    # `tamano_otro` solo sobrevive por los registros anteriores a la 0059.
-    tamano = models.CharField(max_length=120, blank=True, default="")
+    # Tamaño del papel (impresora / laminadora / barnizadora)
+    tamano = models.CharField(max_length=20, choices=TAMANO_CHOICES, blank=True, default="")
     tamano_otro = models.CharField(max_length=120, blank=True, default="")
 
     # Impresora: qué caras se imprimieron y con cuántas tintas cada una.
@@ -584,13 +579,6 @@ class RegistroProceso(models.Model):
 
     def __str__(self):
         return f"{self.orden.numero} · {self.estacion} · {self.fecha_hora:%Y-%m-%d %H:%M}"
-
-    def tamano_display(self):
-        """Tamaño legible: hoy es lo que tecleó el Operador; en los registros
-        viejos, la etiqueta del id de la lista (o su 'otro' escrito a mano)."""
-        if self.tamano == "otro":
-            return self.tamano_otro or "Otro"
-        return dict(self.TAMANO_LABELS_LEGACY).get(self.tamano, self.tamano)
 
 
 class TroquelModelo(models.Model):
