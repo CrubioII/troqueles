@@ -101,7 +101,18 @@ aws lightsail get-container-log --service-name troqueles-api --container-name ba
 
 # Vida
 curl -s https://troqueles-api.f3pqpvq8822ng.us-east-2.cs.amazonlightsail.com/healthz
+
+# CPU y memoria del nodo. Sirve para decidir si hay que subir de power o bajar
+# GUNICORN_WORKERS: en reposo el contenedor va en ~33% de memoria y ~1.5% de CPU
+# con 3 workers, y el pico de CPU al desplegar es el warmup de WeasyPrint.
+aws lightsail get-container-service-metric-data --service-name troqueles-api \
+  --region us-east-2 --metric-name MemoryUtilization --period 300 --statistics Average Maximum \
+  --start-time "$(date -u -v-1H +%Y-%m-%dT%H:%M:%SZ)" --end-time "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ```
+
+El listener de correos solo escribe al arrancar, al conectarse, al correr un
+lote y al fallar: no tiene latido por ciclo, así que su silencio en los logs es
+el estado sano. Lo que hay que buscar es una línea `[correos-listener] Error:`.
 
 ## Reversa
 
