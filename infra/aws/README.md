@@ -116,7 +116,9 @@ el estado sano. Lo que hay que buscar es una línea `[correos-listener] Error:`.
 
 ## Reversa
 
-El App Service de Azure (`troqueles-api-jp` en `troqueles-rg`) quedó **detenido, no borrado**.
+El App Service de Azure (`troqueles-api-jp` en `troqueles-rg`) quedó **detenido, no borrado**,
+y el webhook del ACR (`troquelesapijpcd`) que lo reiniciaba en cada push de imagen quedó
+deshabilitado. Nada de Azure se borró.
 Para volver: `az webapp start -n troqueles-api-jp -g troqueles-rg` y revertir `VITE_API_URL`
 en `front/.env.production` y en el workflow de Static Web Apps. Mientras el plan B1 y el ACR
 sigan existiendo, siguen facturando aunque la app esté detenida.
