@@ -166,6 +166,22 @@ class RolesProduccionTestCase(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(any(rem["id"] == remision.id for rem in resp.data), resp.data)
 
+    def test_historial_incluye_remision_legacy_finalizada_sin_fechas(self):
+        """Una liquidación antigua sin sellos sigue siendo parte del historial."""
+        op_id = self._crear_op("TEST-REMISION-LEGACY-FINAL", con_troquel=False)
+        op = OrdenProduccion.objects.get(pk=op_id)
+        remision = Remision.objects.create(
+            numero="REM-LEGACY-FINAL-TEST",
+            fecha=timezone.localdate(),
+            orden=op,
+            cliente=self.cliente,
+            estado="liquidada",
+        )
+
+        resp = self.c_general.get("/api/ordenes/remisiones_generadas_operador/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(any(rem["id"] == remision.id for rem in resp.data), resp.data)
+
     def test_no_troquelador_sigue_bloqueado_de_remisiones_de_troquel(self):
         for cliente_api in (self.c_guillotina, self.c_estaciones):
             self.assertEqual(

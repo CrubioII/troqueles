@@ -2130,12 +2130,18 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         descargar el PDF o devolverlas a la cola. Vista sanitizada (sin
         valores). Incluye las liquidadas: el historial no se vacía cuando el
         Admin cobra. También incluye las remisiones entregadas por el flujo
-        anterior, que dejó ``enviada_en`` pero no ``generada_en`` (por ejemplo
-        REM-0257), para que no desaparezcan del historial del Operador.
+        anterior, que dejó ``enviada_en`` pero no ``generada_en``, y las que
+        ya quedaron liquidadas o consolidadas antes de que se registraran esos
+        sellos (por ejemplo REM-0257 / OP-0653). Ninguna de esas puede volver
+        a la cola, así que deben permanecer visibles en el historial.
         """
         qs = (
             Remision.objects
-            .filter(Q(generada_en__isnull=False) | Q(enviada_en__isnull=False))
+            .filter(
+                Q(generada_en__isnull=False)
+                | Q(enviada_en__isnull=False)
+                | ~Q(estado="pendiente")
+            )
             .select_related("cliente", "orden", "generada_por")
             .prefetch_related("remisiones_consolidadas__orden")
             .order_by("-generada_en")
