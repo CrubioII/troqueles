@@ -136,6 +136,17 @@ class RolesProduccionTestCase(TestCase):
         self.assertEqual(resp.status_code, 201, resp.data)
         self.assertEqual(resp.data["estado"], "aprobado")
 
+        # El flujo anterior podía crear la remisión al descargar/imprimir el
+        # PDF, sin estampar `generada_en`. Debe seguir visible en Historial.
+        remision_legacy = Remision.objects.get(orden_id=op_id)
+        remision_legacy.generada_en = None
+        remision_legacy.generada_por = None
+        remision_legacy.enviada_en = None
+        remision_legacy.save(update_fields=["generada_en", "generada_por", "enviada_en", "modificado"])
+        resp = self.c_troquelador.get("/api/ordenes/remisiones_generadas_operador/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(any(rem["id"] == remision_legacy.id for rem in resp.data), resp.data)
+
         resp = self.c_troquelador.get("/api/ordenes/remisionables_operador/")
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(any(op["id"] == op_id for op in resp.data), resp.data)

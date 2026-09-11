@@ -2132,8 +2132,10 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         Admin cobra. También incluye las remisiones entregadas por el flujo
         anterior, que dejó ``enviada_en`` pero no ``generada_en``, y las que
         ya quedaron liquidadas o consolidadas antes de que se registraran esos
-        sellos (por ejemplo REM-0257 / OP-0653). Ninguna de esas puede volver
-        a la cola, así que deben permanecer visibles en el historial.
+        sellos. También conserva las remisiones ya creadas para un formato de
+        troquel aprobado: las versiones antiguas podían dejar esa remisión en
+        pendiente y sin sellos (OP-0653/OP-0654/REM-0259), aunque el trabajo
+        ya estuviera cerrado.
         """
         qs = (
             Remision.objects
@@ -2141,9 +2143,15 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
                 Q(generada_en__isnull=False)
                 | Q(enviada_en__isnull=False)
                 | ~Q(estado="pendiente")
+                | Q(
+                    orden__procesos__proceso_id="troquel",
+                    orden__procesos__active=True,
+                    orden__formatos_cuchillas__estado="aprobado",
+                )
             )
             .select_related("cliente", "orden", "generada_por")
             .prefetch_related("remisiones_consolidadas__orden")
+            .distinct()
             .order_by("-generada_en")
         )
         remisiones = list(qs)
