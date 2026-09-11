@@ -2129,11 +2129,13 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         Historial de remisiones que el Operador ya generó, para volver a
         descargar el PDF o devolverlas a la cola. Vista sanitizada (sin
         valores). Incluye las liquidadas: el historial no se vacía cuando el
-        Admin cobra.
+        Admin cobra. También incluye las remisiones entregadas por el flujo
+        anterior, que dejó ``enviada_en`` pero no ``generada_en`` (por ejemplo
+        REM-0257), para que no desaparezcan del historial del Operador.
         """
         qs = (
             Remision.objects
-            .filter(generada_en__isnull=False)
+            .filter(Q(generada_en__isnull=False) | Q(enviada_en__isnull=False))
             .select_related("cliente", "orden", "generada_por")
             .prefetch_related("remisiones_consolidadas__orden")
             .order_by("-generada_en")

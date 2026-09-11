@@ -13,6 +13,7 @@ para la variante manual que sí deja usuarios/datos reales para inspección.
 """
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from cotizaciones.models import (
@@ -148,6 +149,22 @@ class RolesProduccionTestCase(TestCase):
         resp = self.c_troquelador.get("/api/ordenes/remisiones_generadas_operador/")
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(any(rem["id"] == remision_id for rem in resp.data), resp.data)
+
+    def test_historial_incluye_remision_legacy_enviada_sin_marca_generada(self):
+        """Las entregas anteriores a `generada_en` no pueden desaparecer."""
+        op_id = self._crear_op("TEST-REMISION-LEGACY", con_troquel=False)
+        op = OrdenProduccion.objects.get(pk=op_id)
+        remision = Remision.objects.create(
+            numero="REM-LEGACY-TEST",
+            fecha=timezone.localdate(),
+            orden=op,
+            cliente=self.cliente,
+            enviada_en=timezone.now(),
+        )
+
+        resp = self.c_general.get("/api/ordenes/remisiones_generadas_operador/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(any(rem["id"] == remision.id for rem in resp.data), resp.data)
 
     def test_no_troquelador_sigue_bloqueado_de_remisiones_de_troquel(self):
         for cliente_api in (self.c_guillotina, self.c_estaciones):
