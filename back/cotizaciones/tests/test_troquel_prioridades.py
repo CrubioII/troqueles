@@ -5,7 +5,10 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from cotizaciones.models import Cliente, OrdenProduccion, OpProceso
-from cotizaciones.troquel_prioridades import reordenar_cola_troquel_por_clientes
+from cotizaciones.troquel_prioridades import (
+    _procesos_en_cola,
+    reordenar_cola_troquel_por_clientes,
+)
 
 
 User = get_user_model()
@@ -89,3 +92,9 @@ class TroquelClientePrioridadTests(TestCase):
             {"cliente_ids": [self.cliente_a.id, self.cliente_b.id]}, format="json",
         )
         self.assertEqual(prohibida.status_code, 403)
+
+    def test_bloqueo_de_cola_se_limita_a_los_procesos(self):
+        # PostgreSQL no permite bloquear el lado nullable del LEFT JOIN que
+        # añade ``orden__remision__isnull``. El endpoint debe bloquear solo
+        # OpProceso, que es además la única tabla que actualiza.
+        self.assertEqual(_procesos_en_cola(lock=True).query.select_for_update_of, ("self",))

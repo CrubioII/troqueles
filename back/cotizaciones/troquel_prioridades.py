@@ -24,7 +24,11 @@ def _procesos_en_cola(lock=False):
         .exclude(orden__formatos_cuchillas__estado__in=ESTADOS_FORMATO_FUERA_DE_COLA)
         .select_related("orden__cliente")
     )
-    return qs.select_for_update() if lock else qs
+    # El filtro ``orden__remision__isnull`` incorpora un LEFT OUTER JOIN. En
+    # PostgreSQL, ``FOR UPDATE`` sin ``OF`` intenta bloquear también el lado
+    # nullable de ese join y falla. Solo las filas de OpProceso cambian abajo,
+    # así que limitar el bloqueo a ``self`` es tanto suficiente como válido.
+    return qs.select_for_update(of=("self",)) if lock else qs
 
 
 def reordenar_cola_troquel_por_clientes(cliente_ids=None):
