@@ -7,11 +7,11 @@ Roles (booleanos independientes en PerfilOperador; normalmente un usuario
 tiene uno solo, pero nada impide combinarlos):
   es_general      → todas las estaciones de la cadena + Guillotina + módulo
                      Troqueles + remisiones (de cadena y de troquel).
-  es_troquelador  → solo el módulo Troqueles (fabricación de molde, formato
-                     de cuchillas) — NO incluye la cola/consolidación de
-                     remisiones de troquel (eso es de General) ni la estación
-                     'troqueladora' de la cadena (esa es la máquina que
-                     trocela, no quien fabrica el molde).
+  es_troquelador  → módulo Troqueles (fabricación de molde, formato de
+                     cuchillas y remisiones de tareas de troquel puro), pero
+                     no remisiones de producción de cadena ni la estación
+                     'troqueladora' (esa es la máquina que trocela, no quien
+                     fabrica el molde).
   es_estaciones   → Impresora, Laminadora, Barnizadora, Troqueladora.
   es_guillotina   → Guillotina (corte inicial + corte final).
 """
@@ -48,9 +48,7 @@ def estaciones_permitidas(user):
 
 
 def puede_troqueles(user):
-    """Acceso al módulo Troqueles (molde + formato de cuchillas). La cola/
-    consolidación de remisiones de troquel es aparte, ver `puede_remisiones_generales`.
-    """
+    """Acceso al módulo Troqueles, incluido remisionar tareas de troquel puro."""
     if user.is_staff:
         return True
     perfil = _perfil(user)

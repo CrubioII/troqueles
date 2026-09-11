@@ -109,17 +109,48 @@ class RolesProduccionTestCase(TestCase):
             resp = cliente_api.post("/api/formatos-cuchillas/", {"orden": op_id}, format="json")
             self.assertEqual(resp.status_code, 403)
 
-    def test_remisionables_operador_solo_general(self):
-        # La cola/consolidación de remisiones de troquel es de General: el
-        # Troquelador fabrica molde y llena el formato, no remisiona.
-        for cliente_api in (self.c_guillotina, self.c_estaciones, self.c_troquelador):
+    def test_remisionables_operador_tambien_disponible_para_troquelador(self):
+        # El Troquelador genera el PDF de sus tareas de troquel puro. Las
+        # remisiones de cadena siguen siendo exclusivas de General.
+        for cliente_api in (self.c_guillotina, self.c_estaciones):
             resp = cliente_api.get("/api/ordenes/remisionables_operador/")
             self.assertEqual(resp.status_code, 403)
-        resp = self.c_general.get("/api/ordenes/remisionables_operador/")
-        self.assertEqual(resp.status_code, 200)
+        for cliente_api in (self.c_general, self.c_troquelador):
+            resp = cliente_api.get("/api/ordenes/remisionables_operador/")
+            self.assertEqual(resp.status_code, 200)
 
-    def test_troquelador_bloqueado_de_remisiones_de_troquel(self):
-        for cliente_api in (self.c_troquelador, self.c_guillotina, self.c_estaciones):
+    def test_solo_troquel_aprobado_aparece_y_troquelador_puede_remisionarlo(self):
+        resp = self.c_troquelador.post("/api/ordenes/", {
+            "fecha": "2026-09-03", "cliente": self.cliente.id,
+            "referencia": "TEST-TROQUEL-REMISION", "cantidad": 1,
+            "procesos": [{"proceso_id": "troquel", "active": True}],
+        }, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        op_id = resp.data["id"]
+
+        resp = self.c_troquelador.post("/api/formatos-cuchillas/", {
+            "orden": op_id, "cuchilla_cm": 100, "cuchilla_tipo": "doble_bisel",
+            "cuchilla_puntos": "2", "enviar": True,
+        }, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertEqual(resp.data["estado"], "aprobado")
+
+        resp = self.c_troquelador.get("/api/ordenes/remisionables_operador/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(any(op["id"] == op_id for op in resp.data), resp.data)
+
+        resp = self.c_troquelador.post("/api/ordenes/consolidar_remision_operador/", {
+            "orden_ids": [op_id],
+        }, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        remision_id = resp.data["remision_id"]
+
+        resp = self.c_troquelador.get("/api/ordenes/remisiones_generadas_operador/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(any(rem["id"] == remision_id for rem in resp.data), resp.data)
+
+    def test_no_troquelador_sigue_bloqueado_de_remisiones_de_troquel(self):
+        for cliente_api in (self.c_guillotina, self.c_estaciones):
             self.assertEqual(
                 cliente_api.post("/api/ordenes/consolidar_remision_operador/", {"orden_ids": []}, format="json").status_code,
                 403,

@@ -1357,17 +1357,18 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
     # se valida a sí misma más abajo porque su chequeo depende de query params
     # (?estacion= vs ?proceso=troquel).
     #
-    # La cola/consolidación de remisiones de troquel es de General (no del
-    # Troquelador: él solo fabrica molde y llena el formato de cuchillas).
+    # Las remisiones de producción de cadena son de General. El Troquelador
+    # también puede cerrar y remisionar las OPs que son únicamente de troquel;
+    # esas son las que aparecen en `remisionables_operador`.
     _ACCIONES_REMISIONES_GENERALES = {
         "remisionables_produccion",
-        "remisionables_operador", "descartar_remisionable_operador",
-        "consolidar_remision_operador", "remision_operador_pdf",
-        "remisiones_generadas_operador", "devolver_remision_operador",
     }
     _ACCIONES_ALGUNA_REMISION = {
         "enviar_remision", "remision_pdf", "cancelar_remision",
         "remisiones_solicitadas",
+        "remisionables_operador", "descartar_remisionable_operador",
+        "consolidar_remision_operador", "remision_operador_pdf",
+        "remisiones_generadas_operador", "devolver_remision_operador",
     }
     # CRUD de la OP en sí (pantalla "Órdenes (CRUD)" y el modal de "+ Nueva
     # tarea de troquel" en Troqueles.jsx): General y Troquelador, no Guillotina
@@ -1384,6 +1385,21 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
             _require_remisiones_generales(request)
         elif accion in self._ACCIONES_ALGUNA_REMISION or accion in self._ACCIONES_ORDENES_DIRECTAS:
             _require_alguna_remision(request)
+
+    def _solo_troquel_puro_para_no_general(self, request, ops):
+        """Evita que un troquelador acceda por API a remisiones de cadena.
+
+        La interfaz solo le muestra troqueles puros, pero esta validación deja
+        la misma frontera de permisos también para llamadas directas.
+        """
+        if roles.puede_remisiones_generales(request.user):
+            return
+        if any(op.procesos.filter(
+            proceso_id__in=chain.CHAIN_PROCESOS, active=True
+        ).exists() for op in ops):
+            raise PermissionDenied(
+                "Solo puedes gestionar remisiones de tareas únicamente de troquel."
+            )
 
     def _solo_op_directa(self, request):
         """Le cierra al Operador las OPs derivadas de una cotización.
@@ -2037,6 +2053,7 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         ops = list(OrdenProduccion.objects.filter(pk__in=ids).select_related("cliente"))
         if len(ops) != len(set(ids)):
             return Response({"error": "Alguna OP no existe."}, status=404)
+        self._solo_troquel_puro_para_no_general(request, ops)
         cliente_ids = {op.cliente_id for op in ops}
         if len(cliente_ids) > 1:
             return Response({"error": "Todas las OP deben ser del mismo cliente."}, status=400)
@@ -2093,6 +2110,7 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         rem = Remision.objects.filter(pk=rem_id).select_related("cliente", "orden").first()
         if rem is None:
             return Response({"error": "Remisión no encontrada."}, status=404)
+        self._solo_troquel_puro_para_no_general(request, _remision_operador_ops(rem))
         ctx = _remision_operador_pdf_ctx(rem)
         try:
             html_pdf = render_to_string("cotizaciones/pdf_remision_operador.html", ctx)
@@ -2120,7 +2138,15 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
             .prefetch_related("remisiones_consolidadas__orden")
             .order_by("-generada_en")
         )
-        data = RemisionGeneradaOperadorSerializer(qs, many=True, context={"request": request}).data
+        remisiones = list(qs)
+        if not roles.puede_remisiones_generales(request.user):
+            remisiones = [
+                rem for rem in remisiones
+                if not any(op.procesos.filter(
+                    proceso_id__in=chain.CHAIN_PROCESOS, active=True
+                ).exists() for op in _remision_operador_ops(rem))
+            ]
+        data = RemisionGeneradaOperadorSerializer(remisiones, many=True, context={"request": request}).data
         return Response(data)
 
     @action(detail=False, methods=["post"], url_path="devolver_remision_operador")
@@ -2135,6 +2161,7 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         rem = Remision.objects.filter(pk=rem_id).select_related("orden").first()
         if rem is None:
             return Response({"error": "Remisión no encontrada."}, status=404)
+        self._solo_troquel_puro_para_no_general(request, _remision_operador_ops(rem))
         if rem.generada_en is None:
             return Response({"error": f"La remisión {rem.numero} no está generada."}, status=409)
         if rem.estado != "pendiente":
@@ -2157,6 +2184,7 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         orden = OrdenProduccion.objects.filter(pk=orden_id).first()
         if orden is None:
             return Response({"error": "OP no encontrada."}, status=404)
+        self._solo_troquel_puro_para_no_general(request, [orden])
         if orden.remision_descartada_operador_en is None:
             orden.remision_descartada_operador_en = timezone.now()
             orden.save(update_fields=["remision_descartada_operador_en"])
