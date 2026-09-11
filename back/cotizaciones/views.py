@@ -11,6 +11,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from django.core.mail import EmailMessage
 from django.db import connection, transaction
 from django.db.models import Exists, F, Max, OuterRef, ProtectedError, Q, Subquery, Sum
+from django.db.models.functions import Coalesce
 from django.http import HttpResponse
 from django.template.loader import render_to_string
 from django.conf import settings
@@ -2152,7 +2153,12 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
             .select_related("cliente", "orden", "generada_por")
             .prefetch_related("remisiones_consolidadas__orden")
             .distinct()
-            .order_by("-generada_en")
+            # Las remisiones antiguas no siempre tienen `generada_en`; usar
+            # una única fecha de actividad evita que queden mezcladas al final.
+            .annotate(historial_en=Coalesce(
+                "generada_en", "enviada_en", "modificado", "creado",
+            ))
+            .order_by("-historial_en", "-id")
         )
         remisiones = list(qs)
         if not roles.puede_remisiones_generales(request.user):
@@ -2527,7 +2533,7 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
 
     queryset = FormatoCuchillas.objects.select_related(
         "orden", "orden__cliente", "operador", "revisado_por"
-    )
+    ).order_by("-fecha_hora", "-id")
     serializer_class = FormatoCuchillasSerializer
     filter_backends = [filters.OrderingFilter]
     ordering_fields = ["fecha_hora"]
