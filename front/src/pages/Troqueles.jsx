@@ -14,7 +14,7 @@ import {
   updateFormatoCuchillas, cancelarEnvioFormato,
   getRemisionablesOperador, descartarRemisionableOperador, consolidarRemisionOperador, pdfRemisionOperadorConsolidada,
   getRemisionesGeneradasOperador, devolverRemisionOperador,
-  getRemisionesSolicitadas, setProcesoPrioridades,
+  getRemisionesSolicitadas, setTroquelClientePrioridades,
   getClientes, editarCamposOrden,
 } from '../api'
 import { useSyncPolling } from '../lib/useSyncPolling'
@@ -128,6 +128,8 @@ function AdminTroqueles() {
   const [confirmDelete, setConfirmDelete] = useState(null)
   const [busqueda, setBusqueda] = useState('')           // filtro de la cola del operador
   const [prioridadError, setPrioridadError] = useState(null)
+  const [reordenandoCliente, setReordenandoCliente] = useState(false)
+  const [clientesContraidos, setClientesContraidos] = useState(() => new Set())
 
   const loadSolicitudes = () =>
     getRemisionesSolicitadas()
@@ -136,7 +138,7 @@ function AdminTroqueles() {
 
   useEffect(() => { loadSolicitudes() }, [])
   useSyncPolling({
-    ordenes: () => loadOrdenes(true),
+    ordenes: () => reordenandoCliente ? Promise.resolve() : loadOrdenes(true),
     remisiones_solicitadas: loadSolicitudes,
   })
 
@@ -169,8 +171,9 @@ function AdminTroqueles() {
     }
   }
 
-  // Cola del Operador: toda OP con troquel activo entra automáticamente al subir
-  // la tarea. Orden FIFO por fecha de subida; la prioridad manual manda si está.
+  // Cola base: el backend persiste las prioridades de las OPs como bloques de
+  // cliente. La prioridad manual manda; lo que nunca se haya priorizado sigue
+  // por antigüedad al final.
   const ordenesEnCola = useMemo(() => (
     [...ordenes].sort((a, b) => {
       const pa = a.prioridad_troquel ?? Infinity
@@ -180,61 +183,61 @@ function AdminTroqueles() {
   ), [ordenes])
 
   const filtrando = !!busqueda.trim()
+  // Un cliente es una sola unidad de prioridad. Sus tareas se muestran FIFO,
+  // independiente de un orden viejo que las hubiera dejado intercaladas.
+  const agruparPorCliente = (lista) => {
+    const grupos = new Map()
+    for (const orden of lista) {
+      const key = orden.cliente
+      if (!grupos.has(key)) grupos.set(key, { id: key, nombre: orden.cliente_nombre || 'Sin cliente', ordenes: [] })
+      grupos.get(key).ordenes.push(orden)
+    }
+    return [...grupos.values()].map(g => ({ ...g, ordenes: [...g.ordenes].sort(byCreado) }))
+  }
+
+  const clientesEnCola = useMemo(() => agruparPorCliente(ordenesEnCola), [ordenesEnCola])
   const ordenesFiltradas = useMemo(() => {
     const t = norm(busqueda.trim())
     if (!t) return ordenesEnCola
     return ordenesEnCola.filter(o => [o.numero, o.cliente_nombre, o.referencia].some(v => norm(v).includes(t)))
   }, [ordenesEnCola, busqueda])
 
-  // Reordena la cola y persiste la numeración 1..N (optimista + rollback)
-  const reordenar = (nuevaCola) => {
+  const clientesFiltrados = useMemo(() => agruparPorCliente(ordenesFiltradas), [ordenesFiltradas])
+
+  // Reordena clientes completos y persiste la numeración plana que consume el
+  // Operador. El backend valida que no falte ningún cliente activo.
+  const reordenarClientes = (nuevosClientes) => {
     const snapshot = ordenes
-    const prioridadPorId = new Map(nuevaCola.map((o, i) => [o.id, i + 1]))
+    const prioridadPorId = new Map(nuevosClientes.flatMap(g => g.ordenes).map((o, i) => [o.id, i + 1]))
     setOrdenes(prev => prev.map(o => (
       prioridadPorId.has(o.id) ? { ...o, prioridad_troquel: prioridadPorId.get(o.id) } : o
     )))
     setPrioridadError(null)
-    setProcesoPrioridades('troquel', nuevaCola.map(o => o.id)).catch(() => {
+    setTroquelClientePrioridades(nuevosClientes.map(g => g.id)).catch(() => {
       setOrdenes(snapshot)
       setPrioridadError('No se pudo guardar el orden. Intenta de nuevo.')
     })
   }
 
-  // Manda una OP directo al primer puesto de la cola.
-  const priorizar = (e, ord) => {
-    e.stopPropagation()
-    const cola = [ord, ...ordenesEnCola.filter(o => o.id !== ord.id)]
-    reordenar(cola)
-  }
-
-  // Cuenta de OPs por cliente en la cola completa (no la filtrada por búsqueda),
-  // para poder priorizar todas las de un cliente de un solo golpe.
-  const gruposCliente = useMemo(() => {
-    const map = new Map()
-    for (const o of ordenesEnCola) {
-      const key = o.cliente_nombre || '—'
-      map.set(key, (map.get(key) || 0) + 1)
-    }
-    return [...map.entries()]
-      .map(([nombre, count]) => ({ nombre, count }))
-      .sort((a, b) => b.count - a.count)
-  }, [ordenesEnCola])
-
-  // Manda todas las OPs de un cliente al frente de la cola, en bloque,
-  // conservando su orden relativo (FIFO/prioridad ya asignada entre ellas).
-  const priorizarCliente = (nombre) => {
-    const delCliente = ordenesEnCola.filter(o => (o.cliente_nombre || '—') === nombre)
-    const resto = ordenesEnCola.filter(o => (o.cliente_nombre || '—') !== nombre)
-    reordenar([...delCliente, ...resto])
-  }
-
-  // Descarta cualquier prioridad manual y vuelve a la cola por antigüedad
-  // (la más vieja primero).
-  const ordenarPorAntiguedad = () => reordenar([...ordenesEnCola].sort(byCreado))
+  // Descarta el orden manual a nivel de cliente: gana la tarea más antigua de
+  // cada grupo y dentro de él siempre se mantiene FIFO.
+  const ordenarPorAntiguedad = () => reordenarClientes(
+    [...clientesEnCola].sort((a, b) => byCreado(a.ordenes[0], b.ordenes[0]))
+  )
 
   // Con búsqueda activa se ve solo un pedazo de la cola: reordenar ahí
   // renumeraría mal las OPs escondidas, así que el arrastre se apaga.
-  const drag = useDragOrder(ordenesFiltradas, reordenar, { disabled: filtrando })
+  const drag = useDragOrder(clientesFiltrados, reordenarClientes, {
+    disabled: filtrando,
+    onDragStateChange: setReordenandoCliente,
+  })
+  const clienteArrastrado = drag.items.find(g => String(g.id) === String(drag.dragId))
+  const alternarCliente = (clienteId) => setClientesContraidos(prev => {
+    const siguiente = new Set(prev)
+    if (siguiente.has(clienteId)) siguiente.delete(clienteId)
+    else siguiente.add(clienteId)
+    return siguiente
+  })
 
   // Los precios del troquel se ponen sobre la remisión, no en la OP.
   const irAPrecios = (s) => navigate(`/remisiones/${s.remision_id}`)
@@ -270,31 +273,20 @@ function AdminTroqueles() {
         actions={<button className="btn sm primary" onClick={() => setShowNueva(true)}>+ Nueva tarea de troquel</button>}
       >
         <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', fontSize: 12, color: 'var(--ink-3)' }}>
-          Toda tarea de troquel que se crea entra automáticamente aquí, en orden de subida (FIFO).
+          La prioridad se define por cliente: el grupo #1 se trabaja primero y sus troqueles se mantienen en orden de subida (FIFO).
           {filtrando
             ? ' Limpia la búsqueda para poder reordenar la cola.'
-            : ' Arrastra una fila por su manija para cambiar la prioridad, o usa «Priorizar» para mandarla al primer puesto.'}
+            : ' Arrastra un cliente por su manija para cambiar su puesto en la cola.'}
         </div>
         {prioridadError && (
           <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', fontSize: 12, color: 'var(--danger, #c0392b)' }}>
             ✗ {prioridadError}
           </div>
         )}
-        {(gruposCliente.length > 1 || ordenesEnCola.length > 1) && (
+        {clientesEnCola.length > 1 && (
           <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
-            {gruposCliente.length > 1 && (
-              <>
-                <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>Priorizar por cliente:</span>
-                {gruposCliente.map(g => (
-                  <button key={g.nombre} className="btn sm" onClick={() => priorizarCliente(g.nombre)}>
-                    {g.nombre} ({g.count})
-                  </button>
-                ))}
-                <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--line)', margin: '0 4px' }} />
-              </>
-            )}
             <button className="btn sm" onClick={ordenarPorAntiguedad} title="Descarta el orden manual y vuelve a ordenar por fecha de subida">
-              Ordenar por antigüedad (más antigua primero)
+              Ordenar clientes por antigüedad
             </button>
           </div>
         )}
@@ -321,57 +313,59 @@ function AdminTroqueles() {
           {ordenesFiltradas.length === 0 ? (
             <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Sin resultados para «{busqueda.trim()}»</div>
           ) : (
-          <div className="table-scroll">
-          <table style={{ width: '100%', minWidth: 860, borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ borderBottom: '2px solid var(--line)' }}>
-                {['', '#', 'OP #', 'Subida', 'Cliente', 'Referencia', 'Progreso', '', ''].map((h, i) => (
-                  <th key={i} style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--ink-3)', background: 'var(--surface-2)' }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {drag.items.map((ord, idx) => {
-                const sub = fmtSubida(ord.creado)
-                const esPrimero = ordenesEnCola[0]?.id === ord.id
-                const dr = drag.rowProps(ord)
-                return (
-                  <tr key={ord.id} {...dr}
-                    style={{ borderBottom: '1px solid var(--line)', background: idx % 2 ? 'var(--surface-2)' : 'var(--surface)', cursor: 'pointer', ...dr.style }}
-                    onClick={() => abrirGestion(ord)}>
-                    <td style={{ padding: '10px 6px', width: 28 }}>
-                      {!filtrando && <DragHandle {...drag.handleProps(ord)} />}
-                    </td>
-                    <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 13, color: 'var(--ink-3)', width: 40 }}>{idx + 1}</td>
-                    <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 12 }}>{ord.numero}</td>
-                    <td style={{ padding: '10px 12px', fontSize: 12, fontWeight: 600, color: sub.color }}>{sub.txt}</td>
-                    <td style={{ padding: '10px 12px', fontWeight: 600 }}>{ord.cliente_nombre}</td>
-                    <td style={{ padding: '10px 12px', color: 'var(--ink-2)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ord.referencia}</td>
-                    <td style={{ padding: '10px 12px' }}>
-                      {ord.progreso ? (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <ProgressBar pct={ord.progreso.porcentaje} />
-                          <span style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'JetBrains Mono, monospace' }}>{ord.progreso.completados}/{ord.progreso.total}</span>
-                        </div>
-                      ) : '—'}
-                    </td>
-                    <td style={{ padding: '10px 12px' }} onClick={e => e.stopPropagation()}>
-                      <button className="btn sm" title="Mandar al primer puesto" disabled={esPrimero} onClick={e => priorizar(e, ord)}>Priorizar</button>
-                    </td>
-                    <td style={{ padding: '10px 12px' }} onClick={e => e.stopPropagation()}>
-                      <button
-                        className={'btn sm' + (confirmDelete === ord.id ? ' danger' : '')}
-                        onClick={e => handleDelete(e, ord)}
-                      >
-                        {confirmDelete === ord.id ? '¿Eliminar?' : 'Eliminar'}
-                      </button>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-          </div>
+          <>
+            <div className="troquel-client-queue" data-drag-list>
+            {drag.items.map((grupo, idx) => {
+              const dr = drag.rowProps(grupo)
+              const contraido = clientesContraidos.has(grupo.id)
+              return (
+                <div key={grupo.id} {...dr} className="troquel-client-group" style={dr.style}>
+                  <div className="troquel-client-header">
+                    <div className="troquel-client-rank">{idx + 1}</div>
+                    {!filtrando && <DragHandle {...drag.handleProps(grupo)} />}
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontWeight: 750 }}>{grupo.nombre}</div>
+                      <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>
+                        {grupo.ordenes.length} {grupo.ordenes.length === 1 ? 'troquel pendiente' : 'troqueles pendientes'} · FIFO por subida
+                      </div>
+                    </div>
+                    <span className="troquel-client-priority">Prioridad #{idx + 1}</span>
+                    <button
+                      className="troquel-client-toggle"
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); alternarCliente(grupo.id) }}
+                      aria-expanded={!contraido}
+                      title={contraido ? 'Mostrar tareas de este cliente' : 'Ocultar tareas de este cliente'}
+                    >
+                      <Icon.Chev style={{ transform: contraido ? 'rotate(0deg)' : 'rotate(90deg)' }} />
+                      <span>{contraido ? 'Mostrar' : 'Ocultar'}</span>
+                    </button>
+                  </div>
+                  {!contraido && <div className="table-scroll">
+                    <table className="troquel-client-tasks">
+                      <thead><tr>{['OP #', 'Subida', 'Referencia', 'Progreso', ''].map((h, i) => <th key={i}>{h}</th>)}</tr></thead>
+                      <tbody>{grupo.ordenes.map(ord => {
+                        const sub = fmtSubida(ord.creado)
+                        return <tr key={ord.id} onClick={() => abrirGestion(ord)}>
+                          <td className="op-number">{ord.numero}</td>
+                          <td style={{ color: sub.color, fontWeight: 600 }}>{sub.txt}</td>
+                          <td className="op-reference">{ord.referencia}</td>
+                          <td>{ord.progreso ? <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><ProgressBar pct={ord.progreso.porcentaje} /><span className="op-progress">{ord.progreso.completados}/{ord.progreso.total}</span></div> : '—'}</td>
+                          <td onClick={e => e.stopPropagation()}><button className={'btn sm' + (confirmDelete === ord.id ? ' danger' : '')} onClick={e => handleDelete(e, ord)}>{confirmDelete === ord.id ? '¿Eliminar?' : 'Eliminar'}</button></td>
+                        </tr>
+                      })}</tbody>
+                    </table>
+                  </div>}
+                </div>
+              )
+            })}
+            </div>
+            {drag.dragging && clienteArrastrado && drag.pointer && (
+              <div className="troquel-drag-ghost" style={{ left: drag.pointer.x + 16, top: drag.pointer.y + 16 }}>
+                <Icon.Drag /> <strong>{clienteArrastrado.nombre}</strong><span>{clienteArrastrado.ordenes.length} troquel(es)</span>
+              </div>
+            )}
+          </>
           )}
           </>
         )}

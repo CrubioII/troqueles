@@ -337,6 +337,15 @@ export const setProcesoPrioridades = (procesoId, ordenIds) =>
     body: JSON.stringify({ orden_ids: ordenIds }),
   }).then(json)
 
+// Cola de Troqueles por cliente: cada cliente es un bloque y sus OPs se
+// conservan FIFO dentro de ese bloque.
+export const setTroquelClientePrioridades = (clienteIds) =>
+  apiFetch(`${BASE}/ordenes/procesos/troquel/prioridades-clientes/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ cliente_ids: clienteIds }),
+  }).then(json)
+
 // Igual, pero para la cola de una estación de la cadena (numera todos los
 // procesos que la estación cubre, no uno solo)
 export const setEstacionPrioridades = (estacionId, ordenIds) =>

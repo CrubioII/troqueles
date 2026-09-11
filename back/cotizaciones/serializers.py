@@ -1,9 +1,11 @@
 import unicodedata
 
 from rest_framework import serializers
+from django.db import transaction
 from .models import Cliente, Papel, Cotizacion, CotizacionProceso, DocumentoCliente, DocumentoClienteItem, OrdenProduccion, OpProceso, OrdenCambio, RegistroMaquina, TroquelModelo, FormatoCuchillas, Remision, RemisionItem, RegistroProceso, Notificacion
 from .models import ORDEN_CAMPOS_AUDITADOS, orden_valor_legible, registrar_cambios_orden
 from . import chain
+from .troquel_prioridades import reordenar_cola_troquel_por_clientes
 
 
 class ClienteSerializer(serializers.ModelSerializer):
@@ -194,6 +196,9 @@ class CotizacionSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         procesos_data = validated_data.pop("procesos", None)
+        recalcular_cola_troquel = "cliente" in validated_data or (
+            procesos_data is not None and any(p.get("proceso_id") == "troquel" for p in procesos_data)
+        )
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
@@ -279,6 +284,7 @@ class OpProcesoSerializer(serializers.ModelSerializer):
 
 
 class OrdenListSerializer(serializers.ModelSerializer):
+    cliente = serializers.IntegerField(source="cliente_id", read_only=True)
     cliente_nombre = serializers.CharField(source="cliente.nombre", read_only=True)
     cotizacion_numero = serializers.CharField(source="cotizacion.numero", read_only=True, default="")
     valor_total_efectivo = serializers.SerializerMethodField()
@@ -289,7 +295,7 @@ class OrdenListSerializer(serializers.ModelSerializer):
     class Meta:
         model = OrdenProduccion
         fields = [
-            "id", "numero", "fecha", "fecha_entrega", "cliente_nombre", "referencia",
+            "id", "numero", "fecha", "fecha_entrega", "cliente", "cliente_nombre", "referencia",
             "cantidad", "valor_total_efectivo", "abono", "saldo",
             "cotizacion", "cotizacion_numero", "creado", "modificado",
             "progreso", "prioridad_troquel",
@@ -439,9 +445,14 @@ class OrdenSerializer(serializers.ModelSerializer):
             for campo in OP_CAMPOS_DINERO + OP_CAMPOS_COMERCIALES:
                 validated_data.pop(campo, None)
             procesos_data = [_sin_dinero(p) for p in procesos_data]
-        orden = OrdenProduccion.objects.create(**validated_data)
-        for p in procesos_data:
-            OpProceso.objects.create(orden=orden, **p)
+        with transaction.atomic():
+            orden = OrdenProduccion.objects.create(**validated_data)
+            for p in procesos_data:
+                OpProceso.objects.create(orden=orden, **p)
+            # Una tarea nueva se integra inmediatamente a la cola por cliente:
+            # su cliente activo conserva su bloque; uno nuevo queda al final.
+            if any(p.get("proceso_id") == "troquel" and p.get("active") for p in procesos_data):
+                reordenar_cola_troquel_por_clientes()
         return orden
 
     def update(self, instance, validated_data):
@@ -491,6 +502,8 @@ class OrdenSerializer(serializers.ModelSerializer):
                     orden=instance, completado=completado, completado_en=completado_en,
                     prioridad=prioridad, **p,
                 )
+        if recalcular_cola_troquel:
+            reordenar_cola_troquel_por_clientes()
         return instance
 
 

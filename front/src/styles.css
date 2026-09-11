@@ -1192,6 +1192,51 @@ input.input[type="number"]::-webkit-inner-spin-button {
   display: flex; align-items: center; justify-content: center; gap: 6px;
 }
 
+/* ── Cola de Troqueles por cliente ── */
+.troquel-client-queue { padding: 14px 16px 18px; display: grid; gap: 10px; }
+.troquel-client-group {
+  position: relative; border: 1px solid var(--line); border-radius: 10px;
+  overflow: hidden; background: var(--surface); transition: transform .14s ease, box-shadow .14s ease, opacity .14s ease;
+}
+.troquel-client-group[data-drag-over="before"] { box-shadow: 0 -4px 0 var(--accent), 0 4px 14px rgba(20, 42, 80, .10); }
+.troquel-client-group[data-drag-over="after"] { box-shadow: 0 4px 0 var(--accent), 0 4px 14px rgba(20, 42, 80, .10); }
+.troquel-client-header {
+  min-height: 58px; padding: 10px 14px; display: flex; align-items: center; gap: 11px;
+  background: var(--surface-2); border-bottom: 1px solid var(--line);
+}
+.troquel-client-rank {
+  width: 26px; height: 26px; display: grid; place-items: center; flex: 0 0 auto;
+  border-radius: 50%; color: var(--accent); background: var(--accent-soft); font: 700 12px 'JetBrains Mono', monospace;
+}
+.troquel-client-priority { color: var(--ink-3); font-size: 11px; font-weight: 700; white-space: nowrap; }
+.troquel-client-toggle {
+  display: inline-flex; align-items: center; gap: 4px; padding: 5px 7px;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--surface);
+  color: var(--ink-2); font: inherit; font-size: 11px; font-weight: 650; cursor: pointer;
+}
+.troquel-client-toggle:hover { border-color: var(--accent); color: var(--accent); }
+.troquel-client-toggle svg { transition: transform .16s ease; }
+.troquel-client-tasks { width: 100%; min-width: 650px; border-collapse: collapse; }
+.troquel-client-tasks th { padding: 8px 12px; text-align: left; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-3); }
+.troquel-client-tasks td { padding: 9px 12px; border-top: 1px solid var(--line); font-size: 12px; cursor: pointer; }
+.troquel-client-tasks tbody tr:hover { background: var(--accent-soft); }
+.troquel-client-tasks .op-number, .troquel-client-tasks .op-progress { font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 11px; }
+.troquel-client-tasks .op-reference { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
+.troquel-drag-ghost {
+  position: fixed; z-index: 10000; pointer-events: none; display: flex; align-items: center; gap: 8px;
+  max-width: min(340px, calc(100vw - 32px)); padding: 10px 13px; border-radius: 9px;
+  color: var(--ink-1); background: var(--surface); border: 1px solid var(--accent);
+  box-shadow: 0 12px 30px rgba(20, 42, 80, .25); font-size: 13px;
+}
+.troquel-drag-ghost span { color: var(--ink-3); font-size: 11px; }
+
+@media (max-width: 640px) {
+  .troquel-client-queue { padding: 10px; }
+  .troquel-client-header { padding: 9px 10px; }
+  .troquel-client-priority { display: none; }
+  .troquel-client-toggle span { display: none; }
+}
+
 /* ── Print isolation ── */
 @page { size: A4; margin: 12mm 15mm; }
 

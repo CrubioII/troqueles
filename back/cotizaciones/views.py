@@ -119,6 +119,7 @@ from .serializers import (
 )
 from . import chain
 from . import roles
+from .troquel_prioridades import reordenar_cola_troquel_por_clientes
 
 
 def _require_admin(request):
@@ -1561,6 +1562,22 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         """
         return self._guardar_prioridades(request, [proceso_id], f"proceso '{proceso_id}'")
 
+    @action(detail=False, methods=["post"], url_path="procesos/troquel/prioridades-clientes")
+    def set_troquel_cliente_prioridades(self, request):
+        """POST /api/ordenes/procesos/troquel/prioridades-clientes/.
+
+        Body: ``{ cliente_ids: [id, ...] }``. La lista ordena todos los
+        clientes activos de Troqueles; las OPs de cada cliente se mantienen
+        juntas y FIFO. Solo Admin (por ``initial``).
+        """
+        if "cliente_ids" not in request.data:
+            return Response({"error": "Se espera 'cliente_ids' como lista."}, status=400)
+        try:
+            orden_ids = reordenar_cola_troquel_por_clientes(request.data.get("cliente_ids"))
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=400)
+        return Response({"ok": True, "total": len(orden_ids), "orden_ids": orden_ids})
+
     @action(detail=False, methods=["post"], url_path=r"estaciones/(?P<estacion_id>[^/.]+)/prioridades")
     def set_estacion_prioridades(self, request, estacion_id=None):
         """POST /api/ordenes/estaciones/{estacion_id}/prioridades/ — Body: { orden_ids: [id, ...] }.
@@ -1664,6 +1681,10 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         for campo, valor in pendientes.items():
             setattr(op, campo, valor)
         op.save()
+        if "cliente" in pendientes and op.procesos.filter(
+            proceso_id="troquel", active=True, completado=False
+        ).exists():
+            reordenar_cola_troquel_por_clientes()
         if previos:
             registrar_cambios_orden(op, previos, request.user)
         return Response(OrdenOperadorSerializer(op, context={"request": request}).data)
