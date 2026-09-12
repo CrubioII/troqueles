@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { ProgressBar, REMISION_STATUS_DEFS, SaveStatus } from '../components/core'
@@ -56,9 +56,9 @@ const byCreado = (a, b) => {
 }
 
 // Manija de arrastre: recibe tal cual lo que devuelve drag.handleProps(op).
-function DragHandle({ style, ...props }) {
+function DragHandle({ style, className, ...props }) {
   return (
-    <span {...props} style={{ ...style, display: 'inline-flex', color: 'var(--ink-3)' }}>
+    <span {...props} className={`troquel-drag-handle${className ? ` ${className}` : ''}`} style={{ ...style, display: 'inline-flex', color: 'var(--ink-3)' }}>
       <Icon.Drag />
     </span>
   )
@@ -128,7 +128,10 @@ function AdminTroqueles() {
   const [busqueda, setBusqueda] = useState('')           // filtro de la cola del operador
   const [prioridadError, setPrioridadError] = useState(null)
   const [reordenandoCliente, setReordenandoCliente] = useState(false)
+  const [guardandoOrden, setGuardandoOrden] = useState(false)
+  const [undoOrden, setUndoOrden] = useState(null)
   const [clientesContraidos, setClientesContraidos] = useState(() => new Set())
+  const contraidosAntesDeArrastrar = useRef(null)
 
   const loadSolicitudes = () =>
     getRemisionesSolicitadas()
@@ -137,7 +140,7 @@ function AdminTroqueles() {
 
   useEffect(() => { loadSolicitudes() }, [])
   useSyncPolling({
-    ordenes: () => reordenandoCliente ? Promise.resolve() : loadOrdenes(true),
+    ordenes: () => (reordenandoCliente || guardandoOrden) ? Promise.resolve() : loadOrdenes(true),
     remisiones_solicitadas: loadSolicitudes,
   })
 
@@ -205,18 +208,32 @@ function AdminTroqueles() {
 
   // Reordena clientes completos y persiste la numeración plana que consume el
   // Operador. El backend valida que no falte ningún cliente activo.
-  const reordenarClientes = (nuevosClientes) => {
+  const reordenarClientes = (nuevosClientes, { previous = clientesEnCola, showUndo = true } = {}) => {
     const snapshot = ordenes
     const prioridadPorId = new Map(nuevosClientes.flatMap(g => g.ordenes).map((o, i) => [o.id, i + 1]))
     setOrdenes(prev => prev.map(o => (
       prioridadPorId.has(o.id) ? { ...o, prioridad_troquel: prioridadPorId.get(o.id) } : o
     )))
     setPrioridadError(null)
-    setTroquelClientePrioridades(nuevosClientes.map(g => g.id)).catch(() => {
-      setOrdenes(snapshot)
-      setPrioridadError('No se pudo guardar el orden. Intenta de nuevo.')
-    })
+    setGuardandoOrden(true)
+    return setTroquelClientePrioridades(nuevosClientes.map(g => g.id))
+      .then(() => {
+        if (!showUndo) return
+        const movido = nuevosClientes.find((g, index) => previous[index]?.id !== g.id)
+        if (movido) setUndoOrden({ nombre: movido.nombre, posicion: nuevosClientes.indexOf(movido) + 1, previous })
+      })
+      .catch(() => {
+        setOrdenes(snapshot)
+        setPrioridadError('No se pudo guardar el orden. Intenta de nuevo.')
+      })
+      .finally(() => setGuardandoOrden(false))
   }
+
+  useEffect(() => {
+    if (!undoOrden) return undefined
+    const timer = window.setTimeout(() => setUndoOrden(null), 5000)
+    return () => window.clearTimeout(timer)
+  }, [undoOrden])
 
   // Descarta el orden manual a nivel de cliente: gana la tarea más antigua de
   // cada grupo y dentro de él siempre se mantiene FIFO.
@@ -228,8 +245,33 @@ function AdminTroqueles() {
   // renumeraría mal las OPs escondidas, así que el arrastre se apaga.
   const drag = useDragOrder(clientesFiltrados, reordenarClientes, {
     disabled: filtrando,
-    onDragStateChange: setReordenandoCliente,
+    // El gesto tiene dos fases: primero se compacta la cola; tras la breve
+    // pulsación sostenida el hook empieza a calcular destinos sobre esa
+    // geometría ya estable.
+    activationDelay: 260,
+    onDragPending: (pending) => {
+      if (pending) {
+        contraidosAntesDeArrastrar.current = clientesContraidos
+        setClientesContraidos(new Set(clientesFiltrados.map(g => g.id)))
+      } else if (contraidosAntesDeArrastrar.current) {
+        setClientesContraidos(contraidosAntesDeArrastrar.current)
+        contraidosAntesDeArrastrar.current = null
+      }
+    },
+    onDragStateChange: (dragging) => {
+      setReordenandoCliente(dragging)
+      if (!dragging && contraidosAntesDeArrastrar.current) {
+        setClientesContraidos(contraidosAntesDeArrastrar.current)
+        contraidosAntesDeArrastrar.current = null
+      }
+    },
   })
+  const deshacerOrden = () => {
+    if (!undoOrden) return
+    const anterior = undoOrden.previous
+    setUndoOrden(null)
+    reordenarClientes(anterior, { previous: clientesEnCola, showUndo: false })
+  }
   const clienteArrastrado = drag.items.find(g => String(g.id) === String(drag.dragId))
   const alternarCliente = (clienteId) => setClientesContraidos(prev => {
     const siguiente = new Set(prev)
@@ -275,7 +317,7 @@ function AdminTroqueles() {
           La prioridad se define por cliente: el grupo #1 se trabaja primero y sus troqueles se mantienen en orden de subida (FIFO).
           {filtrando
             ? ' Limpia la búsqueda para poder reordenar la cola.'
-            : ' Arrastra un cliente por su manija para cambiar su puesto en la cola.'}
+            : ' Mantén y arrastra la manija de un cliente para cambiar su puesto en la cola.'}
         </div>
         {prioridadError && (
           <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', fontSize: 12, color: 'var(--danger, #c0392b)' }}>
@@ -320,8 +362,8 @@ function AdminTroqueles() {
               return (
                 <div key={grupo.id} {...dr} className="troquel-client-group" style={dr.style}>
                   <div className="troquel-client-header">
-                    <div className="troquel-client-rank">{idx + 1}</div>
                     {!filtrando && <DragHandle {...drag.handleProps(grupo)} />}
+                    <div className="troquel-client-rank">{idx + 1}</div>
                     <div style={{ minWidth: 0, flex: 1 }}>
                       <div style={{ fontWeight: 750 }}>{grupo.nombre}</div>
                       <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>
@@ -340,8 +382,9 @@ function AdminTroqueles() {
                       <span>{contraido ? 'Mostrar' : 'Ocultar'}</span>
                     </button>
                   </div>
-                  {!contraido && <div className="table-scroll">
-                    <table className="troquel-client-tasks">
+                  <div className={'troquel-client-tasks-wrap' + (contraido ? ' is-collapsed' : '')}>
+                    <div className="table-scroll">
+                      <table className="troquel-client-tasks">
                       <thead><tr>{['OP #', 'Subida', 'Referencia', 'Progreso', ''].map((h, i) => <th key={i}>{h}</th>)}</tr></thead>
                       <tbody>{grupo.ordenes.map(ord => {
                         const sub = fmtSubida(ord.creado)
@@ -353,8 +396,9 @@ function AdminTroqueles() {
                           <td onClick={e => e.stopPropagation()}><button className={'btn sm' + (confirmDelete === ord.id ? ' danger' : '')} onClick={e => handleDelete(e, ord)}>{confirmDelete === ord.id ? '¿Eliminar?' : 'Eliminar'}</button></td>
                         </tr>
                       })}</tbody>
-                    </table>
-                  </div>}
+                      </table>
+                    </div>
+                  </div>
                 </div>
               )
             })}
@@ -362,6 +406,12 @@ function AdminTroqueles() {
             {drag.dragging && clienteArrastrado && drag.pointer && (
               <div className="troquel-drag-ghost" style={{ left: drag.pointer.x + 16, top: drag.pointer.y + 16 }}>
                 <Icon.Drag /> <strong>{clienteArrastrado.nombre}</strong><span>{clienteArrastrado.ordenes.length} troquel(es)</span>
+              </div>
+            )}
+            {undoOrden && (
+              <div className="troquel-order-snackbar" role="status">
+                <span>{undoOrden.nombre} movido a posición {undoOrden.posicion}</span>
+                <button type="button" onClick={deshacerOrden}>DESHACER</button>
               </div>
             )}
           </>

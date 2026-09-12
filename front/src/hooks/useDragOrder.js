@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 /**
  * Reordenar una cola arrastrando sus filas.
@@ -15,7 +15,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
  * `onReorder` recibe la lista completa ya reordenada; quien la reciba
  * persiste el orden (posición = prioridad, 1 = primero).
  */
-export function useDragOrder(items, onReorder, { disabled = false, getId = (it) => it.id, onDragStateChange = () => {} } = {}) {
+export function useDragOrder(items, onReorder, { disabled = false, getId = (it) => it.id, onDragStateChange = () => {}, onDragPending = () => {}, activationDelay = 0, livePreview = false } = {}) {
   // `preview` congela el orden visible al iniciar el arrastre; null = manda
   // `items`. Mover las tarjetas bajo el cursor durante el gesto hace que una
   // tarjeta arrastrada hacia abajo se convierta en su propio objetivo.
@@ -27,8 +27,53 @@ export function useDragOrder(items, onReorder, { disabled = false, getId = (it) 
   const dragRef = useRef(null)     // { id, list } del arrastre en curso
   const pointerRef = useRef(null)
   const autoScrollFrameRef = useRef(null)
+  const rectsRef = useRef(new Map())
+  const pendingRef = useRef(null)
+  const pendingTimerRef = useRef(null)
+  const onDragPendingRef = useRef(onDragPending)
 
   const list = preview || items
+
+  useEffect(() => { onDragPendingRef.current = onDragPending }, [onDragPending])
+
+  // FLIP animation: React cambia el orden del DOM para abrir espacio mientras
+  // se arrastra; este pequeño paso anima cada tarjeta desde su rectángulo
+  // anterior al nuevo, como una lista de música al reorganizarse.
+  useLayoutEffect(() => {
+    if (!livePreview) return undefined
+    const zona = document.querySelector('[data-drag-list]')
+    const elementos = [...(zona?.querySelectorAll?.('[data-drag-id]') || [])]
+    const siguientes = new Map(elementos.map(el => [el.getAttribute('data-drag-id'), el.getBoundingClientRect()]))
+    const frameIds = []
+    for (const el of elementos) {
+      const antes = rectsRef.current.get(el.getAttribute('data-drag-id'))
+      const ahora = siguientes.get(el.getAttribute('data-drag-id'))
+      if (!antes || !ahora) continue
+      const dx = antes.left - ahora.left
+      const dy = antes.top - ahora.top
+      if (!dx && !dy) continue
+      el.style.transition = 'none'
+      el.style.transform = `translate(${dx}px, ${dy}px)`
+      frameIds.push(requestAnimationFrame(() => {
+        el.style.transition = ''
+        el.style.transform = ''
+      }))
+    }
+    rectsRef.current = siguientes
+    return () => frameIds.forEach(cancelAnimationFrame)
+  }, [list, livePreview])
+
+  const ordenar = useCallback((base, id, targetId, position) => {
+    const desde = base.findIndex(it => String(getId(it)) === String(id))
+    const hasta = base.findIndex(it => String(getId(it)) === String(targetId))
+    if (desde < 0 || hasta < 0 || desde === hasta) return base
+    const resultado = [...base]
+    const [movida] = resultado.splice(desde, 1)
+    let destino = hasta + (position === 'after' ? 1 : 0)
+    if (desde < destino) destino -= 1
+    resultado.splice(destino, 0, movida)
+    return resultado
+  }, [getId])
 
   const stopAutoScroll = useCallback(() => {
     if (autoScrollFrameRef.current != null) cancelAnimationFrame(autoScrollFrameRef.current)
@@ -40,6 +85,35 @@ export function useDragOrder(items, onReorder, { disabled = false, getId = (it) 
   const moverSobrePuntero = useCallback((x, y) => {
     const st = dragRef.current
     if (!st) return
+
+    // La vista de Troqueles reordena las tarjetas en vivo. En ese caso la
+    // tarjeta original (transparente) puede quedar debajo del dedo y
+    // `elementFromPoint` la devolvería como su propio destino. Eso bloquea el
+    // arrastre justo cuando la lista se compacta. Calculamos la inserción por
+    // el centro visual de las otras tarjetas y excluimos siempre la activa.
+    if (livePreview) {
+      const zona = document.querySelector('[data-drag-list]')
+      const rectZona = zona?.getBoundingClientRect?.()
+      if (!rectZona || x < rectZona.left || x > rectZona.right) return
+      const tarjetas = [...(zona.querySelectorAll?.('[data-drag-id]') || [])]
+        .filter(el => String(el.getAttribute('data-drag-id')) !== String(st.id))
+      if (!tarjetas.length) return
+      const siguiente = tarjetas.find(el => {
+        const rect = el.getBoundingClientRect()
+        return y < rect.top + rect.height / 2
+      })
+      const bajo = siguiente || tarjetas[tarjetas.length - 1]
+      const sobreId = bajo.getAttribute('data-drag-id')
+      const posicion = siguiente ? 'before' : 'after'
+      if (st.targetId === sobreId && st.targetPosition === posicion) return
+      st.targetId = sobreId
+      st.targetPosition = posicion
+      setOverId(sobreId)
+      setDropPosition(posicion)
+      setPreview(ordenar(st.list, st.id, sobreId, posicion))
+      return
+    }
+
     let bajo = document.elementFromPoint(x, y)?.closest?.('[data-drag-id]')
     let posicionForzada = null
     // Fuera de una tarjeta, el espacio inmediatamente antes/después de la
@@ -75,7 +149,7 @@ export function useDragOrder(items, onReorder, { disabled = false, getId = (it) 
     st.targetPosition = posicion
     setOverId(sobreId)
     setDropPosition(posicion)
-  }, [getId])
+  }, [getId, livePreview, ordenar])
 
   const iniciarAutoScroll = useCallback(() => {
     if (autoScrollFrameRef.current != null) return
@@ -102,6 +176,16 @@ export function useDragOrder(items, onReorder, { disabled = false, getId = (it) 
 
   useEffect(() => () => stopAutoScroll(), [stopAutoScroll])
 
+  const cancelarPendiente = useCallback(() => {
+    if (pendingTimerRef.current != null) clearTimeout(pendingTimerRef.current)
+    pendingTimerRef.current = null
+    if (!pendingRef.current) return
+    pendingRef.current = null
+    onDragPendingRef.current(false)
+  }, [])
+
+  useEffect(() => () => cancelarPendiente(), [cancelarPendiente])
+
   const finish = useCallback((commit) => {
     const st = dragRef.current
     dragRef.current = null
@@ -120,32 +204,48 @@ export function useDragOrder(items, onReorder, { disabled = false, getId = (it) 
       const desde = ordenFinal.findIndex(it => String(getId(it)) === String(st.id))
       const hasta = ordenFinal.findIndex(it => String(getId(it)) === String(st.targetId))
       if (desde >= 0 && hasta >= 0) {
-        ordenFinal = [...ordenFinal]
-        const [movida] = ordenFinal.splice(desde, 1)
-        let destino = hasta + (st.targetPosition === 'after' ? 1 : 0)
-        if (desde < destino) destino -= 1
-        ordenFinal.splice(destino, 0, movida)
+        ordenFinal = ordenar(ordenFinal, st.id, st.targetId, st.targetPosition)
       }
     }
     const despues = ordenFinal.map(getId).join(',')
     if (commit && antes !== despues) onReorder(ordenFinal)
-  }, [items, onReorder, getId, onDragStateChange, stopAutoScroll])
+  }, [items, onReorder, getId, onDragStateChange, stopAutoScroll, ordenar])
+
+  const comenzarArrastre = useCallback((st) => {
+    dragRef.current = { id: st.id, list: st.list, targetId: null, targetPosition: null }
+    setDragId(st.id)
+    setPreview(st.list)
+    setPointer(st.point)
+    pointerRef.current = st.point
+    onDragStateChange(true)
+  }, [onDragStateChange])
 
   const onPointerDown = useCallback((e, item) => {
     if (disabled || e.button === 1 || e.button === 2) return
     e.preventDefault()
     e.stopPropagation()
-    const id = getId(item)
-    dragRef.current = { id, list, targetId: null, targetPosition: null }
-    setDragId(id)
-    setPreview(list)
-    setPointer({ x: e.clientX, y: e.clientY })
-    pointerRef.current = { x: e.clientX, y: e.clientY }
-    onDragStateChange(true)
+    const st = { id: getId(item), list, point: { x: e.clientX, y: e.clientY } }
     e.currentTarget.setPointerCapture?.(e.pointerId)
-  }, [disabled, list, getId, onDragStateChange])
+    if (!activationDelay) {
+      comenzarArrastre(st)
+      return
+    }
+    pendingRef.current = st
+    onDragPendingRef.current(true)
+    pendingTimerRef.current = setTimeout(() => {
+      const pendiente = pendingRef.current
+      pendingTimerRef.current = null
+      if (!pendiente) return
+      pendingRef.current = null
+      comenzarArrastre(pendiente)
+    }, activationDelay)
+  }, [disabled, list, getId, activationDelay, comenzarArrastre])
 
   const onPointerMove = useCallback((e) => {
+    if (pendingRef.current) {
+      pendingRef.current.point = { x: e.clientX, y: e.clientY }
+      return
+    }
     if (!dragRef.current) return
     setPointer({ x: e.clientX, y: e.clientY })
     pointerRef.current = { x: e.clientX, y: e.clientY }
@@ -153,22 +253,34 @@ export function useDragOrder(items, onReorder, { disabled = false, getId = (it) 
     iniciarAutoScroll()
   }, [moverSobrePuntero, iniciarAutoScroll])
 
-  const onPointerUp = useCallback(() => finish(true), [finish])
-  const onPointerCancel = useCallback(() => finish(false), [finish])
+  const onPointerUp = useCallback(() => {
+    if (pendingRef.current) cancelarPendiente()
+    else finish(true)
+  }, [finish, cancelarPendiente])
+  const onPointerCancel = useCallback(() => {
+    if (pendingRef.current) cancelarPendiente()
+    else finish(false)
+  }, [finish, cancelarPendiente])
 
   // Pointer capture normalmente entrega el release a la manija, pero este
   // respaldo evita dejar la interfaz bloqueada si el navegador lo pierde al
   // cruzar el borde de la ventana durante un auto-scroll.
   useEffect(() => {
-    const soltar = () => { if (dragRef.current) finish(true) }
-    const cancelar = () => { if (dragRef.current) finish(false) }
+    const soltar = () => {
+      if (pendingRef.current) cancelarPendiente()
+      else if (dragRef.current) finish(true)
+    }
+    const cancelar = () => {
+      if (pendingRef.current) cancelarPendiente()
+      else if (dragRef.current) finish(false)
+    }
     window.addEventListener('pointerup', soltar)
     window.addEventListener('pointercancel', cancelar)
     return () => {
       window.removeEventListener('pointerup', soltar)
       window.removeEventListener('pointercancel', cancelar)
     }
-  }, [finish])
+  }, [finish, cancelarPendiente])
 
   const rowProps = useCallback((item) => ({
     'data-drag-id': String(getId(item)),
