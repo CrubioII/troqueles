@@ -208,7 +208,7 @@ function AdminTroqueles() {
 
   // Reordena clientes completos y persiste la numeración plana que consume el
   // Operador. El backend valida que no falte ningún cliente activo.
-  const reordenarClientes = (nuevosClientes, { previous = clientesEnCola, showUndo = true } = {}) => {
+  const reordenarClientes = (nuevosClientes, { previous = clientesEnCola, showUndo = true, movedId = null } = {}) => {
     const snapshot = ordenes
     const prioridadPorId = new Map(nuevosClientes.flatMap(g => g.ordenes).map((o, i) => [o.id, i + 1]))
     setOrdenes(prev => prev.map(o => (
@@ -219,7 +219,9 @@ function AdminTroqueles() {
     return setTroquelClientePrioridades(nuevosClientes.map(g => g.id))
       .then(() => {
         if (!showUndo) return
-        const movido = nuevosClientes.find((g, index) => previous[index]?.id !== g.id)
+        const movido = movedId != null
+          ? nuevosClientes.find(g => String(g.id) === String(movedId))
+          : nuevosClientes.find((g, index) => previous[index]?.id !== g.id)
         if (movido) setUndoOrden({ nombre: movido.nombre, posicion: nuevosClientes.indexOf(movido) + 1, previous })
       })
       .catch(() => {

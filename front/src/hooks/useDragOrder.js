@@ -208,7 +208,13 @@ export function useDragOrder(items, onReorder, { disabled = false, getId = (it) 
       }
     }
     const despues = ordenFinal.map(getId).join(',')
-    if (commit && antes !== despues) onReorder(ordenFinal)
+    if (commit && antes !== despues) {
+      onReorder(ordenFinal, {
+        movedId: st.id,
+        fromIndex: st.list.findIndex(it => String(getId(it)) === String(st.id)),
+        toIndex: ordenFinal.findIndex(it => String(getId(it)) === String(st.id)),
+      })
+    }
   }, [items, onReorder, getId, onDragStateChange, stopAutoScroll, ordenar])
 
   const comenzarArrastre = useCallback((st) => {
