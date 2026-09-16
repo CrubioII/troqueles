@@ -6,6 +6,7 @@ en `pipeline.procesar_correo` y ejecuta las acciones de IMAP/Telegram que ese
 resultado pide. Un correo que falla no tumba la corrida (spec 5.2): cada uid
 va en su propio try/except.
 """
+import imaplib
 import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -101,6 +102,10 @@ def _ejecutar(dry_run, enviar_resumen, dias_atras):
         for uid in uids:
             try:
                 mensaje, tamano = imap_client.descargar_correo(conn, uid)
+            except (OSError, imaplib.IMAP4.abort):
+                # A timed-out buffered socket cannot be reused. Release the
+                # batch lock and let the supervisor retry with a new connection.
+                raise
             except Exception:
                 logger.exception("No se pudo descargar el correo uid=%s", uid)
                 errores += 1

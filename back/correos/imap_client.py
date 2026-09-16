@@ -41,11 +41,17 @@ class ImapError(Exception):
 
 
 def conectar():
-    conn = imaplib.IMAP4_SSL(settings.IMAP_HOST, settings.IMAP_PORT)
-    conn.login(settings.IMAP_USER, settings.IMAP_PASSWORD)
-    status, _ = conn.select("INBOX")
-    if status != "OK":
-        raise ImapError("No se pudo seleccionar INBOX")
+    # Bound reads as well as connection setup: a stalled FETCH must not hold
+    # the batch's database lock forever. IDLE waits separately with select().
+    conn = imaplib.IMAP4_SSL(settings.IMAP_HOST, settings.IMAP_PORT, timeout=60)
+    try:
+        conn.login(settings.IMAP_USER, settings.IMAP_PASSWORD)
+        status, _ = conn.select("INBOX")
+        if status != "OK":
+            raise ImapError("No se pudo seleccionar INBOX")
+    except Exception:
+        conn.shutdown()
+        raise
     return conn
 
 

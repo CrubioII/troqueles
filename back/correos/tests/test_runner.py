@@ -4,7 +4,7 @@ Lo que se cubre aquí es lo que el listener añadió y el batch diario no
 necesitaba: no spamear el resumen, no pisarse con otra corrida, y no
 descargar cuerpos de correos ya procesados.
 """
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -49,6 +49,35 @@ def _lock_ocupado():
     TELEGRAM_TOKEN="tok", TELEGRAM_CHAT_ID="1", IMAP_CARPETA_COTIZAR="Cotizar", BATCH_DIAS_ATRAS=3,
 )
 class EjecutarLoteTests(TestCase):
+    def test_stalled_download_releases_lock_and_reconnects_on_retry(self):
+        conn, patches = self._mocks({b"1": _mensaje("<timeout@x.com>")})
+        lock_events = []
+
+        @contextmanager
+        def batch_lock():
+            lock_events.append("acquired")
+            try:
+                yield True
+            finally:
+                lock_events.append("released")
+
+        with ExitStack() as stack:
+            for mock_patch in patches:
+                stack.enter_context(mock_patch)
+            stack.enter_context(patch("correos.runner.lock_lote", batch_lock))
+            download = stack.enter_context(patch(
+                "correos.imap_client.descargar_correo", side_effect=TimeoutError("stalled read"),
+            ))
+            with self.assertRaises(TimeoutError):
+                runner.ejecutar_lote(enviar_resumen=False)
+            download.assert_called_once()
+        self.assertEqual(lock_events, ["acquired", "released"])
+        conn.logout.assert_called_once()
+        self.assertFalse(CorreoProcesado.objects.exists())
+
+        summary, _, _ = self._correr({b"1": _mensaje("<timeout@x.com>")}, enviar_resumen=False)
+        self.assertEqual(summary["ordenes_creadas"], 1)
+
     def _mocks(self, mensajes_por_uid, ids_por_uid=None):
         conn = MagicMock()
         conn.untagged_responses = {"PERMANENTFLAGS": [b"(\\Answered \\Flagged \\*)"]}

@@ -9,7 +9,9 @@
 cd /app
 
 while true; do
-    python manage.py escuchar_correos
+    # Recycle the process even if it stalls outside IMAP. SIGKILL is the
+    # fallback because the listener handles SIGTERM cooperatively.
+    timeout --kill-after=30s 30m python manage.py escuchar_correos
     echo "[supervisor] el listener termino; reiniciando en 30s"
     sleep 30
 done

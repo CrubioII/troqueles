@@ -10,6 +10,21 @@ from correos import imap_client
 from correos.reglas.adjuntos import extension_valida
 
 
+class ConnectionTests(SimpleTestCase):
+    def test_connection_has_read_timeout(self):
+        with patch("correos.imap_client.imaplib.IMAP4_SSL") as factory:
+            factory.return_value.select.return_value = ("OK", [])
+            self.assertIs(imap_client.conectar(), factory.return_value)
+        self.assertEqual(factory.call_args.kwargs["timeout"], 60)
+
+    def test_failed_login_closes_socket(self):
+        with patch("correos.imap_client.imaplib.IMAP4_SSL") as factory:
+            factory.return_value.login.side_effect = TimeoutError("stalled login")
+            with self.assertRaises(TimeoutError):
+                imap_client.conectar()
+        factory.return_value.shutdown.assert_called_once()
+
+
 def _mensaje_iphone_partido():
     """Simula el bug real de n8n: el cuerpo llega partido en dos bloques
     text/plain alrededor de un adjunto inline (firma de imagen del iPhone)."""

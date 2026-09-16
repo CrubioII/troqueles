@@ -4,4 +4,5 @@
 # el contenedor.
 . /app/.env.cron
 cd /app
-exec python manage.py procesar_correos "$@"
+# Bound the whole batch, including storage uploads and database calls.
+exec timeout --kill-after=30s 30m python manage.py procesar_correos "$@"
