@@ -26,6 +26,30 @@ env:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # SQLite no reproduce reglas de bloqueo ni muchas restricciones de
+    # PostgreSQL. Probar contra PostgreSQL evita desplegar consultas válidas
+    # localmente pero rechazadas por la base de datos de producción.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: troqueles_test
+          POSTGRES_USER: troqueles
+          POSTGRES_PASSWORD: troqueles
+        options: >-
+          --health-cmd "pg_isready -U troqueles -d troqueles_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    env:
+      DB_NAME: troqueles_test
+      DB_USER: troqueles
+      DB_PASSWORD: troqueles
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      DB_SSLMODE: disable
 
     steps:
     - name: Checkout source code

@@ -66,6 +66,7 @@ DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 DB_HOST = os.getenv("DB_HOST")
 DB_PORT = os.getenv("DB_PORT", "5432")
+DB_SSLMODE = os.getenv("DB_SSLMODE", "require")
 
 if all([DB_NAME, DB_USER, DB_PASSWORD, DB_HOST]):
     DATABASES = {
@@ -77,7 +78,9 @@ if all([DB_NAME, DB_USER, DB_PASSWORD, DB_HOST]):
             "HOST": DB_HOST,
             "PORT": DB_PORT,
             "OPTIONS": {
-                "sslmode": "require",
+                # Producción usa Supabase por TLS. El PostgreSQL efímero de
+                # CI no expone TLS, por eso el workflow declara ``disable``.
+                "sslmode": DB_SSLMODE,
             },
             # Reutilizar conexiones entre requests: evita un handshake TCP+TLS
             # a Postgres por cada request (~0.5-1s desde Azure; menos ahora que

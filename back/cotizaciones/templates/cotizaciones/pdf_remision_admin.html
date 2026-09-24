@@ -237,15 +237,12 @@
       <span class="meta-lbl">Fecha de elaboración</span>
       <span class="meta-val">{{ rem.fecha }}</span>
     </div>
+    {% if troqueles %}
     <div class="meta-cell">
-      {% if troqueles %}
       <span class="meta-lbl">Troqueles</span>
       <span class="meta-val">{{ troqueles|length }}</span>
-      {% else %}
-      <span class="meta-lbl">Cantidad entregada</span>
-      <span class="meta-val">{{ cantidad_entregada }}</span>
-      {% endif %}
     </div>
+    {% endif %}
   </div>
 
   <!-- Troqueles: consumo en cm + costos por OP -->
@@ -301,16 +298,14 @@
   {% endfor %}
 
   <!-- Producción: especificación por proceso de la cadena -->
-  {% if procesos and troqueles %}
-  <div class="troquel-qty" style="padding:10px 18px 0; text-align:right;"><strong>Cantidad entregada:</strong> {{ cantidad_entregada }}</div>
-  {% endif %}
   {% for p in procesos %}
-  <div class="troquel">
+  <div class="troquel" style="break-inside:avoid;">
     <div class="troquel-head">
       <div>
         <span class="troquel-ref">{{ p.referencia|default:"Producción" }}</span>
         &nbsp;<span class="troquel-op">{{ p.op_numero }}</span>
       </div>
+      <div class="troquel-qty" style="flex-shrink:0;"><strong>Cantidad entregada:</strong> {{ p.cantidad_entregada }}</div>
     </div>
     <table class="consumos">
       <thead>

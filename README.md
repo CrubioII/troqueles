@@ -66,6 +66,24 @@ Cliente solicita producto
 
 ## 🚀 Instalación y Desarrollo
 
+### Iniciar backend y frontend juntos
+
+Con las dependencias instaladas, ejecuta desde la raíz del proyecto:
+
+```bash
+python3 dev.py
+```
+
+Abre http://localhost:5173/. El backend corre en el puerto 8000 y ambos
+servidores recargan al cambiar el código. Mantén la terminal abierta;
+Ctrl+C detiene los dos. También puedes ejecutar el script por su ruta
+absoluta desde cualquier carpeta. Si el puerto 8000 o 5173 está ocupado,
+el script detiene los procesos que lo están usando y reinicia los servidores.
+Primero solicita el cierre; si no responden en cinco segundos, fuerza su cierre.
+Antes de iniciar los servidores, aplica todas las migraciones pendientes con
+`manage.py migrate --noinput`. Si una migración falla, muestra el error y no
+inicia los servidores. No instala dependencias automáticamente.
+
 ### Prerrequisitos
 
 - Python 3.11+

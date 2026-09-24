@@ -658,14 +658,11 @@ def _registro_detalle(registro):
 
 
 def _remision_procesos_ctx(op):
-    """Bloque de resultados reales por estación de esta OP: la especificación
-    que el Operador registró (tamaño, tiro/retiro y tintas, tipo de laminado)
-    por proceso, en el orden de la cadena — sin operador ni estación (uso
-    interno) y sin cantidad por proceso (la cantidad entregada al cliente es
-    una sola cifra para toda la remisión, la del último proceso de la cadena;
-    ver _remision_operador_pdf_ctx). Exclusivo para la remisión de producción
-    completa (no toca costos ni el desglose de troquel, que sigue viniendo de
-    FormatoCuchillas)."""
+    """Production details and delivered quantity for one OP.
+
+    Delivery uses the latest record from the last recorded active process in
+    chain order, rather than planned units or a sum of intermediate results.
+    """
     proceso_ids = sorted(
         op.procesos.filter(proceso_id__in=chain.CHAIN_PROCESOS, active=True)
         .values_list("proceso_id", flat=True),
@@ -688,6 +685,7 @@ def _remision_procesos_ctx(op):
         "op_id": op.id,
         "op_numero": op.numero,
         "referencia": op.referencia,
+        "cantidad_entregada": _fmt_num(items[-1]["cantidad_realizada"]),
         "items": items,
     }
 
@@ -759,9 +757,8 @@ def _remision_operador_pdf_ctx(rem, admin=False, con_desperdicio=False):
 
     procesos = [p for p in (_remision_procesos_ctx(op) for op in _remision_operador_ops(rem)) if p]
 
-    # Cantidad entregada de producción: una sola cifra para toda la remisión,
-    # sumando por OP lo que realmente salió del último proceso de su cadena
-    # (no lo esperado/planeado ni el detalle por estación intermedia).
+    # Preserve the aggregate for API compatibility. Documents display the
+    # delivered quantity on each OP instead of combining different products.
     cantidad_entregada = sum(p["items"][-1]["cantidad_realizada"] for p in procesos if p["items"])
 
     ctx = {

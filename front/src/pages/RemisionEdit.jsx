@@ -75,28 +75,19 @@ function DesgloseTroqueles({ desglose }) {
   )
 }
 
-// ─────────── Desglose de producción por proceso (solo lectura) ───────────
-// Especificación técnica de lo que hizo cada proceso de la cadena — sin
-// estación ni operador (uso interno) y sin cantidad por proceso: lo que de
-// verdad importa es lo entregado al cliente, una sola cifra para toda la
-// remisión (el último proceso de la cadena de cada OP).
+// Read-only production details, with delivered quantity per OP.
 function DesgloseProcesos({ desglose }) {
   if (!desglose || !desglose.procesos?.length) return null
   return (
     <>
-      {desglose.cantidad_entregada != null && (
-        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'baseline', gap: 10, marginBottom: 10 }}>
-          <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--ink-3)' }}>
-            Cantidad entregada
-          </span>
-          <span className="mono" style={{ fontSize: 15, fontWeight: 800, color: 'var(--accent)' }}>{desglose.cantidad_entregada}</span>
-        </div>
-      )}
       {desglose.procesos.map((p, i) => (
         <div key={i} style={{ marginBottom: 16 }}>
-          <div style={{ marginBottom: 6 }}>
-            <strong style={{ fontSize: 13 }}>{p.referencia || 'Producción'}</strong>{' '}
-            <span className="mono" style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 700 }}>{p.op_numero}</span>
+          <div style={{ marginBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: 10 }}>
+            <div>
+              <strong style={{ fontSize: 13 }}>{p.referencia || 'Producción'}</strong>{' '}
+              <span className="mono" style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 700 }}>{p.op_numero}</span>
+            </div>
+            <span style={{ fontSize: 12 }}>Cantidad entregada: <strong className="mono">{p.cantidad_entregada}</strong></span>
           </div>
           <div className="table-scroll">
             <table className="cot-doc-table" style={{ minWidth: 360 }}>
@@ -367,7 +358,7 @@ function SendModal({ rem, items, total, desglose, onClose, onSend }) {
                 {items.map((it, i) => (
                   <tr key={i}><td>{it.descripcion || '—'}</td><td className="num">{it.cantidad}</td><td className="num">{fmtCOP(it.valor_total)}</td></tr>
                 ))}
-                <tr className="cot-doc-total"><td colSpan={2}>Total entregado</td><td className="num">{fmtNum(totalCantidad)} u</td></tr>
+                {!desglose?.procesos?.length && <tr className="cot-doc-total"><td colSpan={2}>Total entregado</td><td className="num">{fmtNum(totalCantidad)} u</td></tr>}
                 <tr className="cot-doc-total"><td colSpan={2}>Total a pagar</td><td className="num">{fmtCOP(total)}</td></tr>
               </tbody>
             </table>
@@ -836,8 +827,8 @@ export default function RemisionEdit() {
                   </tr>
                 ))}
                 <tr>
-                  <td style={{ padding: '10px 6px', textAlign: 'right', fontWeight: 700 }}>Total entregado</td>
-                  <td style={{ padding: '10px 6px', textAlign: 'right', fontWeight: 700, color: 'var(--accent)' }}>{fmtNum(totalCantidad)}</td>
+                  <td style={{ padding: '10px 6px', textAlign: 'right', fontWeight: 700 }}>{desglose?.procesos?.length ? 'Total' : 'Total entregado'}</td>
+                  <td style={{ padding: '10px 6px', textAlign: 'right', fontWeight: 700, color: 'var(--accent)' }}>{!desglose?.procesos?.length && fmtNum(totalCantidad)}</td>
                   <td></td>
                   {editable && <td></td>}
                 </tr>
@@ -867,6 +858,13 @@ export default function RemisionEdit() {
                 ? <PreciosTroqueles desglose={desglose} onSaved={recargarTrasPrecios} onDevolver={t => { setMotivo(''); setDevError(null); setDevolviendo(t) }} registerRef={registerTroquelRef} onDirtyChange={handleTroquelDirtyChange} />
                 : <DesgloseTroqueles desglose={desglose} />}
             </div>
+          </div>
+        )}
+
+        {desglose?.procesos?.length > 0 && (
+          <div className="section open" style={{ marginBottom: 16, padding: 18 }}>
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12 }}>Producción entregada por OP</div>
+            <DesgloseProcesos desglose={desglose} />
           </div>
         )}
 

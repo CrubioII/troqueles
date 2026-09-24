@@ -308,8 +308,8 @@
     <tfoot>
       <tr class="total-row">
         <td></td>
-        <td class="item-desc">Total entregado</td>
-        <td class="col-cant">{{ total_cantidad }}</td>
+        <td class="item-desc">{% if procesos %}Total{% else %}Total entregado{% endif %}</td>
+        <td class="col-cant">{% if not procesos %}{{ total_cantidad }}{% endif %}</td>
         <td class="col-total">{{ total_valor }}</td>
       </tr>
     </tfoot>
@@ -368,16 +368,14 @@
   {% endif %}
 
   <!-- Producción: especificación por proceso de la cadena -->
-  {% if procesos %}
-  <div class="troquel-qty" style="padding:10px 18px 0; text-align:right;"><strong>Cantidad entregada:</strong> {{ cantidad_entregada }}</div>
-  {% endif %}
   {% for p in procesos %}
-  <div class="troquel">
+  <div class="troquel" style="break-inside:avoid;">
     <div class="troquel-head">
       <div>
         <span class="troquel-ref">{{ p.referencia|default:"Producción" }}</span>
         &nbsp;<span class="troquel-op">{{ p.op_numero }}</span>
       </div>
+      <div class="troquel-qty" style="flex-shrink:0;"><strong>Cantidad entregada:</strong> {{ p.cantidad_entregada }}</div>
     </div>
     <table class="consumos">
       <thead>
