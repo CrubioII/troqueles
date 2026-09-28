@@ -962,7 +962,7 @@ class RemisionListSerializer(serializers.ModelSerializer):
     consolidated_numbers = serializers.SerializerMethodField()
 
     def get_consolidated_numbers(self, obj):
-        return sorted(source.numero for source in obj.remisiones_consolidadas.all())
+        return sorted((source.numero for source in obj.remisiones_consolidadas.all()), reverse=True)
 
     class Meta:
         model = Remision

@@ -28,9 +28,9 @@ class RemisionListConsolidationTests(TestCase):
         )
 
     def test_active_and_history_rows_include_consolidated_numbers(self):
-        target = self.make_remision()
         first = self.make_remision()
         second = self.make_remision()
+        target = self.make_remision()
         _consolidar_remisiones(target, [first, second])
 
         response = self.client.get("/api/remisiones/", {"estado": "pendiente"})
@@ -38,7 +38,7 @@ class RemisionListConsolidationTests(TestCase):
         self.assertEqual(len(response.data["results"]), 1)
         self.assertEqual(
             response.data["results"][0]["consolidated_numbers"],
-            [first.numero, second.numero],
+            [second.numero, first.numero],
         )
 
         found = self.client.get("/api/remisiones/", {
@@ -51,5 +51,5 @@ class RemisionListConsolidationTests(TestCase):
         history = self.client.get("/api/remisiones/", {"estado": "liquidada"})
         self.assertEqual(
             history.data["results"][0]["consolidated_numbers"],
-            [first.numero, second.numero],
+            [second.numero, first.numero],
         )
