@@ -3,6 +3,7 @@ import { useLayoutEffect, useRef } from 'react'
 export default function GroupedIntegerInput({ value, onChange, ...inputProps }) {
   const inputRef = useRef(null)
   const cursorDigitsRef = useRef(null)
+  const pastedRef = useRef(false)
   const number = Number(value)
   const display = value === '' || value == null || !Number.isFinite(number)
     ? ''
@@ -30,11 +31,14 @@ export default function GroupedIntegerInput({ value, onChange, ...inputProps }) 
       type="text"
       inputMode="numeric"
       value={display}
+      onPaste={() => { pastedRef.current = true }}
       onChange={event => {
         const raw = event.target.value
         cursorDigitsRef.current = raw.slice(0, event.target.selectionStart ?? raw.length).replace(/\D/g, '').length
-        // Accept pasted API-style values such as 600000.00 without multiplying them by 100.
-        const digits = raw.replace(/[.,]00$/, '').replace(/\D/g, '')
+        // Treat .00 as decimals only when pasted; during deletion it may be a thousands group.
+        const pasted = pastedRef.current || event.nativeEvent.inputType === 'insertFromPaste'
+        pastedRef.current = false
+        const digits = (pasted ? raw.replace(/[.,]00$/, '') : raw).replace(/\D/g, '')
         onChange(digits ? Number(digits) : '')
       }}
     />
