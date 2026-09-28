@@ -2300,9 +2300,11 @@ class RemisionViewSet(viewsets.ModelViewSet):
     OrdenProduccionViewSet.enviar_remision (solo PDF cliente).
     """
 
-    queryset = Remision.objects.select_related("cliente", "orden").prefetch_related("items")
+    queryset = Remision.objects.select_related("cliente", "orden").prefetch_related(
+        "items", "remisiones_consolidadas"
+    )
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ["numero", "cliente__nombre", "orden__numero"]
+    search_fields = ["numero", "remisiones_consolidadas__numero", "cliente__nombre", "orden__numero"]
     ordering_fields = ["creado", "fecha", "estado"]
     http_method_names = ["get", "patch", "put", "post", "delete", "head", "options"]
 

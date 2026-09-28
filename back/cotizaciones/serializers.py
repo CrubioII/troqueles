@@ -959,8 +959,13 @@ class RemisionSerializer(serializers.ModelSerializer):
 class RemisionListSerializer(serializers.ModelSerializer):
     cliente_nombre = serializers.CharField(source="cliente.nombre", read_only=True)
     orden_numero = serializers.CharField(source="orden.numero", read_only=True, default="")
+    consolidated_numbers = serializers.SerializerMethodField()
+
+    def get_consolidated_numbers(self, obj):
+        return sorted(source.numero for source in obj.remisiones_consolidadas.all())
 
     class Meta:
         model = Remision
         fields = ["id", "numero", "fecha", "cliente_nombre", "orden_numero",
-                  "estado", "mostrar_valores", "tiene_troquel", "creado", "modificado"]
+                  "estado", "mostrar_valores", "tiene_troquel", "creado", "modificado",
+                  "consolidated_numbers"]

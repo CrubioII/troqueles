@@ -21,6 +21,13 @@ function StatusBadge({ estado }) {
   )
 }
 
+function displayRemisionNumbers(rem) {
+  const included = (rem.consolidated_numbers || []).map(number =>
+    number.startsWith('REM-') ? number.slice(4) : number
+  )
+  return [rem.numero || '—', ...included].join(' & ')
+}
+
 function Skeleton() {
   return (
     <div style={{ padding: '32px 0' }}>
@@ -222,9 +229,9 @@ export default function Remisiones() {
                       onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
                       onMouseLeave={e => e.currentTarget.style.background = idx % 2 === 0 ? 'transparent' : 'rgba(0,0,0,0.012)'}
                     >
-                      <td style={{ padding: '12px 16px', whiteSpace: 'nowrap' }}>
+                      <td style={{ padding: '12px 16px', minWidth: 150, whiteSpace: 'nowrap' }}>
                         <span className="mono" style={{ fontWeight: 600, color: 'var(--accent)', fontSize: 12 }}>
-                          {rem.numero || '—'}
+                          {displayRemisionNumbers(rem)}
                         </span>
                       </td>
                       <td style={{ padding: '12px 16px', whiteSpace: 'nowrap', color: 'var(--ink-3)', fontSize: 12 }}>
