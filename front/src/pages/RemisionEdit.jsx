@@ -6,6 +6,7 @@ import { fmtCOP, fmtNum, REMISION_STATUS_DEFS, SaveStatus } from '../components/
 import { useAutosave } from '../hooks/useAutosave'
 import { TroquelCostos } from '../components/Troquel'
 import { RegistroProcesoHistory } from '../components/RegistroProceso'
+import GroupedIntegerInput from '../components/GroupedIntegerInput'
 import { getRemision, updateRemision, liquidarRemision, pdfRemision, getRemisionDesglose, getRemisionesImportables, importarRemisiones, devolverFormatoCuchillas, deleteRemision, getRegistrosProceso, updateRegistroProceso } from '../api'
 import logo from '../assets/logo.png'
 
@@ -811,12 +812,12 @@ export default function RemisionEdit() {
                         onChange={e => updateItem(i, 'descripcion', e.target.value)} placeholder="Descripción del ítem…" />
                     </td>
                     <td style={{ padding: '6px 6px' }}>
-                      <input className="input" type="number" step="0.01" value={it.cantidad} disabled={!editable}
-                        onChange={e => updateItem(i, 'cantidad', e.target.value)} style={{ textAlign: 'right' }} />
+                      <GroupedIntegerInput className="input" value={it.cantidad} disabled={!editable}
+                        onChange={value => updateItem(i, 'cantidad', value)} style={{ textAlign: 'right' }} />
                     </td>
                     <td style={{ padding: '6px 6px' }}>
-                      <input className="input" type="number" step="1" value={it.valor_total} disabled={!editable}
-                        onChange={e => updateItem(i, 'valor_total', e.target.value)} style={{ textAlign: 'right' }} />
+                      <GroupedIntegerInput className="input" value={it.valor_total} disabled={!editable}
+                        onChange={value => updateItem(i, 'valor_total', value)} style={{ textAlign: 'right' }} />
                     </td>
                     {editable && (
                       <td style={{ padding: '6px 2px', textAlign: 'center' }}>

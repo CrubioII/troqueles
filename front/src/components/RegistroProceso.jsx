@@ -4,6 +4,7 @@ import {
   ESTACIONES_CONFIG, TAMANOS_REGISTRO, TIPOS_LAMINADO_REGISTRO, TIPOS_METALIZADO_REGISTRO,
 } from './core'
 import { createRegistroProceso, anularRegistroProceso } from '../api'
+import GroupedIntegerInput from './GroupedIntegerInput'
 
 const fmtFecha = (iso) => new Date(iso).toLocaleString('es-CO', {
   day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
@@ -474,14 +475,12 @@ export function RegistroProcesoHistory({ registros, loading, showOrden = true, o
                       )}
                     </td>
                     <td style={{ padding: '6px 12px' }}>
-                      <input
+                      <GroupedIntegerInput
                         className="input"
-                        type="number"
-                        step="0.01"
                         placeholder="—"
                         style={{ width: 110, fontSize: 12 }}
                         value={montoDrafts[r.id] ?? (r.monto_cobrado ?? '')}
-                        onChange={e => setMontoDrafts(d => ({ ...d, [r.id]: e.target.value }))}
+                        onChange={value => setMontoDrafts(d => ({ ...d, [r.id]: value }))}
                         onBlur={() => guardarMonto(r.id)}
                         onKeyDown={e => { if (e.key === 'Enter') { e.currentTarget.blur() } }}
                       />
