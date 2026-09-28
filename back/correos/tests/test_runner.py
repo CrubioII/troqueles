@@ -49,6 +49,12 @@ def _lock_ocupado():
     TELEGRAM_TOKEN="tok", TELEGRAM_CHAT_ID="1", IMAP_CARPETA_COTIZAR="Cotizar", BATCH_DIAS_ATRAS=3,
 )
 class EjecutarLoteTests(TestCase):
+    def setUp(self):
+        # Keep TestCase's PostgreSQL transaction open during batch tests.
+        close_connections = patch("correos.runner.close_old_connections")
+        close_connections.start()
+        self.addCleanup(close_connections.stop)
+
     def test_stalled_download_releases_lock_and_reconnects_on_retry(self):
         conn, patches = self._mocks({b"1": _mensaje("<timeout@x.com>")})
         lock_events = []

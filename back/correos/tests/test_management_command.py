@@ -48,6 +48,12 @@ def _mock_conn():
     TELEGRAM_TOKEN="tok", TELEGRAM_CHAT_ID="1", IMAP_CARPETA_COTIZAR="Cotizar", BATCH_DIAS_ATRAS=3,
 )
 class ProcesarCorreosCommandTests(TestCase):
+    def setUp(self):
+        # Keep TestCase's PostgreSQL transaction open during batch tests.
+        close_connections = patch("correos.runner.close_old_connections")
+        close_connections.start()
+        self.addCleanup(close_connections.stop)
+
     def _preparar_mocks(self, mensajes_por_uid):
         conn = _mock_conn()
         parche_conectar = patch("correos.imap_client.conectar", return_value=conn)
