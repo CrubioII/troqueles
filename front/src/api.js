@@ -89,13 +89,37 @@ const jsonConError = async (r) => {
   return r.json()
 }
 
+const validationFieldLabels = {
+  email: 'Correo del cliente',
+  cliente: 'Cliente',
+  nombre: 'Nombre del cliente',
+  referencia: 'Referencia',
+  fecha: 'Fecha',
+  cantidad: 'Cantidad solicitada',
+  non_field_errors: 'Datos',
+}
+
+function apiErrorMessage(body, status) {
+  if (typeof body?.error === 'string') return body.error
+  if (typeof body?.detail === 'string') return body.detail
+  if (body && typeof body === 'object' && !Array.isArray(body)) {
+    const fieldErrors = Object.entries(body).flatMap(([field, value]) => {
+      const messages = Array.isArray(value) ? value : [value]
+      return messages.filter(message => typeof message === 'string')
+        .map(message => `${validationFieldLabels[field] || field}: ${message}`)
+    })
+    if (fieldErrors.length) return fieldErrors.join(' ')
+  }
+  return `HTTP ${status}`
+}
+
 // Como `jsonConError`, pero conserva code/status y el cuerpo del servidor en el
 // Error — quien lo atrapa suele necesitar los datos que acompañan al código
 // (p. ej. `candidatos` en un 409 cliente_similar).
 const jsonConCodigo = async (r) => {
   if (!r.ok) {
     const body = await r.json().catch(() => null)
-    const err = new Error(body?.error || body?.detail || `HTTP ${r.status}`)
+    const err = new Error(apiErrorMessage(body, r.status))
     err.code = body?.code
     err.status = r.status
     err.body = body
@@ -114,6 +138,9 @@ export const getPapeles = () =>
 export const getClientes = (q = '') =>
   apiFetch(`${BASE}/clientes/?search=${encodeURIComponent(q)}`).then(json)
 
+export const getCliente = (id) =>
+  apiFetch(`${BASE}/clientes/${id}/`).then(json)
+
 // Responde 409 { code: 'cliente_similar', candidatos } si el nombre se parece a
 // uno existente; reintentar con `confirmar_nuevo: true` para crearlo igual.
 // Ver crearClienteConGuard en lib/clienteDedup.js.
@@ -129,7 +156,7 @@ export const updateCliente = (id, data) =>
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
-  }).then(json)
+  }).then(jsonConCodigo)
 
 // Listado de clientes con señales de re-engagement y finanzas
 export const getClientesResumen = () =>
@@ -150,14 +177,14 @@ export const createCotizacion = (data) =>
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
-  }).then(json)
+  }).then(jsonConCodigo)
 
 export const updateCotizacion = (id, data) =>
   apiFetch(`${BASE}/cotizaciones/${id}/`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
-  }).then(json)
+  }).then(jsonConCodigo)
 
 // Copia una cotización (con sus procesos) como borrador nuevo — mismo producto,
 // condiciones distintas (p. ej. tarifa con o sin suministros del cliente)

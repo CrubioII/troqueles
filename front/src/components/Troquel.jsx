@@ -7,6 +7,7 @@ import {
   getFormatosCuchillas, createFormatoCuchillas, updateFormatoCuchillas,
   getClientes, createCliente, createOrden, patchOrden,
 } from '../api'
+import { exactClientMatch } from '../lib/clienteDedup'
 
 const asList = (data) => (Array.isArray(data) ? data : (data?.results || []))
 const IMG_RE = /\.(png|jpe?g|gif|webp|bmp|svg)$/i
@@ -291,7 +292,7 @@ const EMPTY_FORMATO = {
   cuchilla_cm: 0, cuchilla_tipo: '', cuchilla_puntos: '',
   grafa_cm: 0, grafa_puntos: '', grafa_altura: '',
   ch_cm: 0, ch_medida: '',
-  perfo_cm: 0, perfo_medida: '',
+  perforados: [{ medida: '', cm: 0 }],
   observaciones: '',
   cauchos: [{ tipo: 'verde', cm: 0 }],
   sacabocados: [{ medida: '', cantidad: 0 }],
@@ -308,6 +309,7 @@ const formatoPayload = (form) => {
   // Una fila de sacabocados sin medida (o de gan sin tipo) es solo el placeholder
   // del formulario: no se envía, para no chocar con la validación de tipo requerido.
   data.sacabocados = (data.sacabocados || []).filter(f => f.medida !== '')
+  data.perforados = (data.perforados || []).filter(f => f.medida !== '')
   data.gan = (data.gan || []).filter(f => f.tipo !== '')
   return data
 }
@@ -318,6 +320,11 @@ const initFormato = (formato) => {
   Object.keys(EMPTY_FORMATO).forEach(k => { if (formato[k] != null) f[k] = formato[k] })
   if (!Array.isArray(f.cauchos) || !f.cauchos.length) f.cauchos = [{ tipo: 'verde', cm: 0 }]
   if (!Array.isArray(f.sacabocados) || !f.sacabocados.length) f.sacabocados = [{ medida: '', cantidad: 0 }]
+  if (!Array.isArray(formato.perforados) || !formato.perforados.length) {
+    f.perforados = formato.perfo_medida
+      ? [{ medida: formato.perfo_medida, cm: Number(formato.perfo_cm) || 0 }]
+      : [{ medida: '', cm: 0 }]
+  }
   if (!Array.isArray(f.gan) || !f.gan.length) f.gan = [{ tipo: '', cantidad: 0 }]
   return f
 }
@@ -368,6 +375,10 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
     setForm(f => ({ ...f, cauchos: f.cauchos.map((row, i) => (i === idx ? { ...row, [k]: v } : row)) }))
   const addCaucho = () => setForm(f => ({ ...f, cauchos: [...f.cauchos, { tipo: 'verde', cm: 0 }] }))
   const removeCaucho = (idx) => setForm(f => ({ ...f, cauchos: f.cauchos.filter((_, i) => i !== idx) }))
+  const setPerforado = (idx, k, v) =>
+    setForm(f => ({ ...f, perforados: f.perforados.map((row, i) => (i === idx ? { ...row, [k]: v } : row)) }))
+  const addPerforado = () => setForm(f => ({ ...f, perforados: [...f.perforados, { medida: '', cm: 0 }] }))
+  const removePerforado = (idx) => setForm(f => ({ ...f, perforados: f.perforados.filter((_, i) => i !== idx) }))
   const setSac = (idx, k, v) =>
     setForm(f => ({ ...f, sacabocados: f.sacabocados.map((row, i) => (i === idx ? { ...row, [k]: v } : row)) }))
   const addSac = () => setForm(f => ({ ...f, sacabocados: [...f.sacabocados, { medida: '', cantidad: 0 }] }))
@@ -500,15 +511,27 @@ export function FormatoCuchillasForm({ ordenId, onCreated, formato, onUpdated, o
             </select>
           </Field>
         </FieldGroup>
-        <FieldGroup title="Perforado">
-          <Field label="cm" w={90}><NumField placeholder="0" value={form.perfo_cm} onChange={v => set('perfo_cm', v)} /></Field>
-          <Field label="Tamaño" w={100}>
-            <select className="input" value={form.perfo_medida} onChange={e => set('perfo_medida', e.target.value)}>
-              <option value="">—</option>
-              {PERFO_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </Field>
-        </FieldGroup>
+      </div>
+
+      <div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
+          Perforado — tamaño(s) usados y cm de cada uno
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {form.perforados.map((row, idx) => (
+            <div key={idx} style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-end' }}>
+              <Field label={idx === 0 ? 'Tamaño' : ''} w={110}>
+                <select className="input" value={row.medida} onChange={e => setPerforado(idx, 'medida', e.target.value)}>
+                  <option value="">—</option>
+                  {PERFO_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </Field>
+              <Field label={idx === 0 ? 'Cantidad (cm)' : ''} w={110}><NumField placeholder="0" value={row.cm} onChange={v => setPerforado(idx, 'cm', v)} /></Field>
+              <button className="btn sm" onClick={() => removePerforado(idx)} disabled={form.perforados.length === 1} style={{ marginBottom: 4 }}>Quitar</button>
+            </div>
+          ))}
+          <button className="btn sm" onClick={addPerforado} style={{ alignSelf: 'flex-start', marginTop: 2 }}>+ Agregar perforado</button>
+        </div>
       </div>
 
       <div>
@@ -792,10 +815,13 @@ export function FormatosCuchillasHistory({ formatos, loading, onEdit, showOrden 
             const gan = (f.gan || []).length
               ? f.gan.map(r => `${GAN_TIPO_LABELS[r.tipo] || r.tipo}: ${r.cantidad}`).join(' · ')
               : (f.gan_legacy || '')
+            const perforado = (f.perforados || []).length
+              ? f.perforados.map(r => medidaCell(r.cm, r.medida, '')).filter(Boolean).join(' · ')
+              : medidaCell(f.perfo_cm, f.perfo_medida, '')
             const chSacGan = [
               medidaCell(f.ch_cm, f.ch_medida, f.ch),
               sac,
-              medidaCell(f.perfo_cm, f.perfo_medida, ''),
+              perforado,
               gan,
             ].filter(Boolean).join(' / ') || '—'
             const desperdicio = Number(f.desperdicio_cm) > 0
@@ -1005,6 +1031,7 @@ export function NuevaTareaTroquelModal({ onClose, onCreated }) {
   const [suggestions, setSuggestions] = useState([])
   const [showSugg, setShowSugg] = useState(false)
   const searchRef = useRef(null)
+  const searchVersion = useRef(0)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
   const [createdOrden, setCreatedOrden] = useState(null)  // OP ya creada: el reintento solo re-envía el modelo
@@ -1025,10 +1052,14 @@ export function NuevaTareaTroquelModal({ onClose, onCreated }) {
     setOp(o => ({ ...o, cliente: v, clienteId: null }))
     setSimilares(null)
     clearTimeout(searchRef.current)
+    const version = ++searchVersion.current
     if (!v.trim()) { setSuggestions([]); setShowSugg(false); return }
     searchRef.current = setTimeout(() => {
       getClientes(v).then(data => {
+        if (version !== searchVersion.current) return
         const results = data.results || data
+        const exact = exactClientMatch(v, results)
+        if (exact) { selectCliente(exact); return }
         setSuggestions(results)
         setShowSugg(results.length > 0)
       }).catch(() => {})
@@ -1036,6 +1067,8 @@ export function NuevaTareaTroquelModal({ onClose, onCreated }) {
   }
 
   const selectCliente = (c) => {
+    clearTimeout(searchRef.current)
+    searchVersion.current += 1
     setOp(o => ({ ...o, cliente: c.nombre, clienteId: c.id }))
     setSuggestions([])
     setShowSugg(false)
@@ -1068,13 +1101,20 @@ export function NuevaTareaTroquelModal({ onClose, onCreated }) {
             })
           } catch (e) {
             if (e?.code === 'cliente_similar') {
-              setSimilares(e.body?.candidatos || [])
-              setSaving(false)
-              return
+              const candidatos = e.body?.candidatos || []
+              const exact = exactClientMatch(op.cliente, candidatos)
+              if (exact) {
+                clienteId = exact.id
+                selectCliente(exact)
+              } else {
+                setSimilares(candidatos)
+                return
+              }
+            } else {
+              throw e
             }
-            throw e
           }
-          clienteId = nuevo.id
+          if (nuevo) clienteId = nuevo.id
           setSimilares(null)
           setOp(o => ({ ...o, clienteId }))
         }

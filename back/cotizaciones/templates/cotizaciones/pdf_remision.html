@@ -257,7 +257,7 @@
     <div class="brand">
       {% if logo_uri %}<img src="{{ logo_uri }}" alt="Troqueles INK" height="30" width="auto" style="height:30px;width:auto;max-height:30px;"><br>{% endif %}
       <div class="doc-title">Remisión</div>
-      <div class="doc-meta">{{ rem.numero }} &nbsp;·&nbsp; {{ rem.fecha }}</div>
+      <div class="doc-meta">{{ rem.numero }}</div>
     </div>
   </div>
 
@@ -357,6 +357,12 @@
     {% else %}
     <div class="no-consumo">Sin formato de cuchillas registrado.</div>
     {% endif %}
+    {% if t.additional_processes %}
+    <div class="troquel-nota">
+      <div class="troquel-nota-lbl">Procesos complementarios</div>
+      <div class="troquel-nota-text">{% for description in t.additional_processes %}<div>{{ description|capfirst }}</div>{% endfor %}</div>
+    </div>
+    {% endif %}
     {% if t.observaciones %}
     <div class="troquel-nota">
       <div class="troquel-nota-lbl">Observaciones del troquel</div>
@@ -393,6 +399,12 @@
           </td>
         </tr>
         {% endfor %}
+        {% if p.additional_processes %}
+        <tr>
+          <td>Procesos complementarios</td>
+          <td class="col-detalle">{% for description in p.additional_processes %}<div>{{ description|capfirst }}</div>{% endfor %}</td>
+        </tr>
+        {% endif %}
       </tbody>
     </table>
   </div>

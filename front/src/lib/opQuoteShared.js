@@ -48,9 +48,9 @@ export function buildDefaultProcesos() {
 export function seedProcesosFromApi(apiProcesos) {
   const fromApi = buildDefaultProcesos()
   ;(apiProcesos || []).forEach(p => {
-    if (fromApi[p.proceso_id]) {
+    if (fromApi[p.proceso_id] || /^otros_\d+$/.test(p.proceso_id)) {
       fromApi[p.proceso_id] = {
-        ...fromApi[p.proceso_id],
+        ...(fromApi[p.proceso_id] || { ...fromApi.otros, descripcion: '' }),
         active: p.active,
         costo: parseFloat(p.costo) || 0,
         costoOverride: p.costo_override != null ? parseFloat(p.costo_override) : null,
@@ -314,8 +314,16 @@ export function computeCalc(d, procesos) {
     else if (cm) costo = cm.costo
     else if (pdef.autoCalc) costo = autoValues[pdef.id] || 0
     else costo = p.costo || 0
-    addRow({ id: pdef.id, nombre: pdef.nombre, ...(cm || {}), costo }, cm)
+    addRow({ id: pdef.id, nombre: pdef.id === 'otros' && p.descripcion ? `Otros · ${p.descripcion}` : pdef.nombre, ...(cm || {}), costo }, cm)
   }))
+  Object.entries(procesos).filter(([id, p]) => /^otros_\d+$/.test(id) && p.active).forEach(([id, p]) => {
+    const cm = p.costoOverride == null ? applyChargeMode(p.chargeMode, p.valorBase, cantidadProduccion) : null
+    const costo = p.costoOverride ?? cm?.costo ?? p.costo ?? 0
+    const row = { id, nombre: p.descripcion ? `Otros · ${p.descripcion}` : 'Otros', ...(cm || {}), costo }
+    if (cm) { totalCobrosDirectos += costo; row.directo = true }
+    else totalProcesos += costo
+    procRows.push(row)
+  })
   const totalCostosOPAuto = costoPapel + totalProcesos
   const totalCostosOP = d.totalCostosOverride !== null ? d.totalCostosOverride : totalCostosOPAuto
   const valorUnitarioAuto = d.cantidad > 0 ? Math.round(totalCostosOPAuto / d.cantidad * (1 + (d.margen || 80) / 100)) : 0

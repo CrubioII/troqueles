@@ -328,7 +328,12 @@ class OrdenListSerializer(serializers.ModelSerializer):
 
 def _orden_progreso(obj):
     """Progreso de la OP = % de procesos activos marcados como completado."""
-    activos = [p for p in obj.procesos.all() if p.active]
+    # Otros are custom cost/description lines, with no machine station that can
+    # submit a RegistroProceso. They must not hold a finished OP below 100%.
+    activos = [
+        p for p in obj.procesos.all()
+        if p.active and p.proceso_id != "otros" and not p.proceso_id.startswith("otros_")
+    ]
     if not activos:
         return None
     completados = sum(1 for p in activos if p.completado)
@@ -455,8 +460,13 @@ class OrdenSerializer(serializers.ModelSerializer):
                 reordenar_cola_troquel_por_clientes()
         return orden
 
+    @transaction.atomic
     def update(self, instance, validated_data):
         procesos_data = validated_data.pop("procesos", None)
+        cliente_anterior_id = instance.cliente_id
+        troquel_anterior_activo = any(
+            p.proceso_id == "troquel" and p.active for p in instance.procesos.all()
+        )
         if self._sin_plata:
             # Sin estos campos en validated_data, el instance conserva los suyos.
             for campo in OP_CAMPOS_DINERO + OP_CAMPOS_COMERCIALES:
@@ -474,6 +484,15 @@ class OrdenSerializer(serializers.ModelSerializer):
             # OP desde COT: solo liquidación editable
             validated_data = {k: v for k, v in validated_data.items() if k in OP_LOCKED_WHITELIST}
             procesos_data = None
+        troquel_nuevo_activo = (
+            any(p["proceso_id"] == "troquel" and p.get("active", False) for p in procesos_data)
+            if procesos_data is not None else troquel_anterior_activo
+        )
+        cliente_nuevo = validated_data.get("cliente")
+        recalcular_cola_troquel = (
+            troquel_anterior_activo != troquel_nuevo_activo
+            or (troquel_nuevo_activo and cliente_nuevo is not None and cliente_anterior_id != cliente_nuevo.id)
+        )
         # Auditoría: valores previos de los campos auditados que se van a tocar.
         previos = {
             campo: orden_valor_legible(instance, campo)
@@ -598,6 +617,22 @@ class FormatoCuchillasSerializer(serializers.ModelSerializer):
             filas.append({"medida": medida, "cantidad": cantidad})
         return filas
 
+    def validate_perforados(self, value):
+        medidas_validas = dict(FormatoCuchillas.PERFO_MEDIDA_CHOICES)
+        if not isinstance(value, list):
+            raise serializers.ValidationError("Debe ser una lista de filas {medida, cm}.")
+        filas = []
+        for fila in value:
+            try:
+                medida = fila.get("medida")
+                cm = float(fila.get("cm") or 0)
+            except (AttributeError, TypeError, ValueError):
+                raise serializers.ValidationError("Cada perforado requiere medida válida y cm ≥ 0.")
+            if medida not in medidas_validas or cm < 0:
+                raise serializers.ValidationError("Cada perforado requiere medida válida y cm ≥ 0.")
+            filas.append({"medida": medida, "cm": cm})
+        return filas
+
     def validate_gan(self, value):
         tipos_validos = dict(FormatoCuchillas.GAN_TIPO_CHOICES)
         if not isinstance(value, list):
@@ -640,7 +675,7 @@ class FormatoCuchillasSerializer(serializers.ModelSerializer):
             "id", "orden", "orden_numero", "cliente_nombre", "fecha_entrega", "referencia",
             "cuchilla_cm", "cuchilla_tipo", "cuchilla_puntos",
             "grafa_cm", "grafa_puntos", "grafa_altura",
-            "ch_cm", "ch_medida", "sac_cm", "sac_medida", "sac_cantidad", "sacabocados", "perfo_cm", "perfo_medida",
+            "ch_cm", "ch_medida", "sac_cm", "sac_medida", "sac_cantidad", "sacabocados", "perfo_cm", "perfo_medida", "perforados",
             "desperdicio_cm", "madera", "cauchos", "gan", "gan_legacy", "observaciones",
             "dos_puntos", "tres_puntos", "perfo", "ch", "sac", "desperdicio",  # legacy, solo lectura
             "tiempo_encalado_min", "tiempo_encuchillado_min", "tiempo_encauchado_min",
@@ -651,6 +686,7 @@ class FormatoCuchillasSerializer(serializers.ModelSerializer):
             "id", "operador", "fecha_hora",
             "dos_puntos", "tres_puntos", "perfo", "ch", "sac", "desperdicio",
             "sac_cm", "sac_medida", "sac_cantidad",  # legacy, reemplazados por `sacabocados`
+            "perfo_cm", "perfo_medida",  # legacy, reemplazados por `perforados`
             "gan_legacy",  # legacy, reemplazado por `gan`
             "estado", "devolucion_motivo", "revisado_en",
         ]

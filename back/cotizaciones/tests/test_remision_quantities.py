@@ -83,3 +83,56 @@ class RemisionQuantitiesTests(TestCase):
         self.assert_documents(die, [], die_count=1)
         mixed = self.make_remission(die=True)
         self.assert_documents(mixed, [(mixed.orden.numero, "1.200")], die_count=1)
+
+    def test_custom_processes_appear_without_changing_delivered_quantity(self):
+        rem = self.make_remission(production=False)
+        OpProceso.objects.create(orden=rem.orden, proceso_id="troquelado", active=True, completado=True)
+        RegistroProceso.objects.create(
+            orden=rem.orden, proceso_id="troquelado", estacion="troqueladora",
+            cantidad_realizada=123, cantidad_esperada=123,
+        )
+        OpProceso.objects.create(
+            orden=rem.orden, proceso_id="otros", active=True,
+            extras={"descripcion": "Ensanduichado"},
+        )
+        OpProceso.objects.create(
+            orden=rem.orden, proceso_id="otros_1", active=True,
+            extras={"descripcion": "Plegado final"},
+        )
+        OpProceso.objects.create(
+            orden=rem.orden, proceso_id="otros_2", active=False,
+            extras={"descripcion": "No realizado"},
+        )
+
+        ctx = _remision_operador_pdf_ctx(rem)
+        self.assertEqual(ctx["cantidad_entregada"], "123")
+        self.assertEqual(ctx["procesos"][0]["cantidad_entregada"], "123")
+        self.assertEqual(ctx["procesos"][0]["additional_processes"], ["Ensanduichado", "Plegado final"])
+        for template in ("pdf_remision_operador.html", "pdf_remision_admin.html", "pdf_remision.html"):
+            with self.subTest(template=template):
+                context = (_remision_pdf_ctx(rem) if template == "pdf_remision.html"
+                           else _remision_operador_pdf_ctx(rem, admin=template == "pdf_remision_admin.html"))
+                html = render_to_string("cotizaciones/" + template, context)
+                self.assertIn("Procesos complementarios", html)
+                self.assertIn("Ensanduichado", html)
+                self.assertIn("Plegado final", html)
+                self.assertNotIn("No realizado", html)
+                self.assertIn("Cantidad entregada:</strong> 123", html)
+
+    def test_die_only_custom_processes_appear_in_die_block(self):
+        rem = self.make_remission(production=False, die=True)
+        OpProceso.objects.create(
+            orden=rem.orden, proceso_id="otros", active=True,
+            extras={"descripcion": "Ensanduichado"},
+        )
+        ctx = _remision_operador_pdf_ctx(rem)
+        self.assertEqual(ctx["procesos"], [])
+        self.assertEqual(ctx["troqueles"][0]["additional_processes"], ["Ensanduichado"])
+        self.assert_documents(rem, [], die_count=1)
+        for template in ("pdf_remision_operador.html", "pdf_remision_admin.html", "pdf_remision.html"):
+            with self.subTest(template=template):
+                context = (_remision_pdf_ctx(rem) if template == "pdf_remision.html"
+                           else _remision_operador_pdf_ctx(rem, admin=template == "pdf_remision_admin.html"))
+                html = render_to_string("cotizaciones/" + template, context)
+                self.assertIn("Procesos complementarios", html)
+                self.assertIn("Ensanduichado", html)

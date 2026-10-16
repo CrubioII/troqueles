@@ -41,7 +41,7 @@ const MODULES = [
   {
     key: 'troqueles',
     label: 'Troqueles',
-    desc: 'OPs con fabricación de troquel: modelo, anotaciones técnicas y formato de cuchillas. El troquelado se gestiona en Producción General.',
+    desc: 'OPs con fabricación de troquel: modelo, anotaciones técnicas y formato de cuchillas. El troquelado se registra en la estación Troqueladora.',
     action: 'Entrar',
     path: '/produccion/troqueles',
     color: '#B8541C',

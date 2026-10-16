@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Icon } from '../components/Icons'
-import { fmtNum, ProgressBar, Checkbox, ESTACION_DE_PROCESO, REMISION_STATUS_DEFS } from '../components/core'
+import { fmtNum, ProgressBar, Checkbox, ESTACIONES_CONFIG, ESTACION_DE_PROCESO, REMISION_STATUS_DEFS } from '../components/core'
 import {
   getOrdenes, getOrden, toggleProcesoCompletado,
   getRemisionablesProduccion, consolidarRemisionOperador, pdfRemisionOperadorConsolidada,
@@ -67,11 +67,20 @@ function procesoBloqueado(proceso) {
   return !!ESTACION_DE_PROCESO[proceso.proceso_id] || proceso.proceso_id === 'troquel'
 }
 
+function procesoLabel(proceso) {
+  if (proceso.proceso_id === 'otros' || /^otros_\d+$/.test(proceso.proceso_id)) {
+    return proceso.extras?.descripcion?.trim() || 'Otro proceso sin descripción'
+  }
+  return PROCESO_LABELS[proceso.proceso_id] || proceso.proceso_id
+}
+
 function ProcesoRow({ ordId, proceso, onToggled, isAdmin }) {
+  const navigate = useNavigate()
   const [busy, setBusy] = useState(false)
   const bloqueado = procesoBloqueado(proceso)
   const estacion = ESTACION_DE_PROCESO[proceso.proceso_id]
-  const label = PROCESO_LABELS[proceso.proceso_id] || proceso.proceso_id
+  const estacionRuta = Object.values(ESTACIONES_CONFIG).find(cfg => cfg.procesos.includes(proceso.proceso_id))?.ruta
+  const label = procesoLabel(proceso)
 
   const handleToggle = () => {
     if (busy || bloqueado || !isAdmin) return
@@ -100,14 +109,17 @@ function ProcesoRow({ ordId, proceso, onToggled, isAdmin }) {
         {label}
       </span>
       {bloqueado && (
-        <span
+        <button
+          type="button"
+          onClick={() => estacionRuta && navigate(estacionRuta)}
           title={estacion
-            ? `Se completa solo con un registro real en ${estacion}.`
+            ? `Abrir ${estacion}. Se completa solo con un registro real allí.`
             : 'Se completa solo cuando se aprueba el formato de cuchillas.'}
-          style={{ fontSize: 10, color: 'var(--ink-3)', border: '1px solid var(--line)', borderRadius: 4, padding: '1px 5px' }}
+          disabled={!estacionRuta}
+          style={{ fontSize: 10, color: 'var(--ink-3)', border: '1px solid var(--line)', borderRadius: 4, padding: '1px 5px', background: 'transparent', cursor: estacionRuta ? 'pointer' : 'default' }}
         >
           {estacion || 'Troquel'}
-        </span>
+        </button>
       )}
     </div>
   )

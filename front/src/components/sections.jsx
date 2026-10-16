@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { Fragment, useState, useRef } from 'react'
 import { Icon } from './Icons'
 import { getClientes } from '../api'
 import {
@@ -8,22 +8,28 @@ import {
   SheetDiagram, Checkbox, MoneyInput, StatusPicker, NumField, SaveStatus,
 } from './core'
 import { CHARGE_MODES, applyChargeMode } from '../lib/opQuoteShared'
+import { exactClientMatch } from '../lib/clienteDedup'
 
 // =========================================================
 // Section 1 — Datos Generales
 // =========================================================
-export function SectionGenerales({ d, set, showEstado = true, numeroLabel = 'N° cotización', showFechaEntrega = false, showClientDetails = true }) {
+export function SectionGenerales({ d, set, showEstado = true, numeroLabel = 'N° cotización', showFechaEntrega = false, showClientDetails = true, emailError = '' }) {
   const [suggestions, setSuggestions] = useState([])
   const [showSugg, setShowSugg] = useState(false)
   const searchRef = useRef(null)
+  const searchVersion = useRef(0)
 
   const handleClienteChange = (v) => {
     set({ cliente: v, clienteId: null })
     clearTimeout(searchRef.current)
+    const version = ++searchVersion.current
     if (!v.trim()) { setSuggestions([]); setShowSugg(false); return }
     searchRef.current = setTimeout(() => {
       getClientes(v).then(data => {
+        if (version !== searchVersion.current) return
         const results = data.results || data
+        const exact = exactClientMatch(v, results)
+        if (exact) { selectCliente(exact); return }
         setSuggestions(results)
         setShowSugg(results.length > 0)
       }).catch(() => {})
@@ -31,6 +37,8 @@ export function SectionGenerales({ d, set, showEstado = true, numeroLabel = 'N°
   }
 
   const selectCliente = (c) => {
+    clearTimeout(searchRef.current)
+    searchVersion.current += 1
     set({ cliente: c.nombre, clienteId: c.id, clienteEmail: c.email || '', clienteTelefono: c.telefono || '', clienteNit: c.nit || '' })
     setSuggestions([])
     setShowSugg(false)
@@ -106,7 +114,11 @@ export function SectionGenerales({ d, set, showEstado = true, numeroLabel = 'N°
             placeholder="correo@empresa.com"
             value={d.clienteEmail || ''}
             onChange={e => set({ clienteEmail: e.target.value })}
+            aria-invalid={!!emailError}
+            aria-describedby={emailError ? 'client-email-error' : undefined}
+            style={emailError ? { borderColor: 'var(--danger, #c0392b)' } : undefined}
           />
+          {emailError && <span id="client-email-error" role="alert" style={{ color: 'var(--danger, #c0392b)', fontSize: 11 }}>{emailError}</span>}
         </div>
       )}
       {showClientDetails && (
@@ -639,7 +651,7 @@ function ProcRowDefault({ pdef, p, onToggle, onUpdate, autoVal, cantidadProducci
             )}
           </>
         )}
-        {pdef.id === 'otros' && (
+        {(pdef.id === 'otros' || /^otros_\d+$/.test(pdef.id)) && (
           <input className="input" placeholder="Descripción del proceso adicional"
             value={p.descripcion || ''}
             onChange={e => onUpdate({ descripcion: e.target.value })} />
@@ -705,7 +717,7 @@ function ProcRow(props) {
 // los otros para que no se pueda dejar más de uno marcado desde el formulario.
 const BARNIZADO_EXCLUSIVOS = ESTACIONES_CONFIG.barnizadora.procesos
 
-export function SectionProcesos({ procesos, setProc, autoValues, cantidadProduccion, showMoney = true }) {
+export function SectionProcesos({ procesos, setProc, autoValues, cantidadProduccion, showMoney = true, allowMultipleOtros = false, onAddOther, onRemoveOther }) {
   const toggle = (procesoId) => {
     const willActivate = !procesos[procesoId]?.active
     if (willActivate && BARNIZADO_EXCLUSIVOS.includes(procesoId)) {
@@ -717,24 +729,41 @@ export function SectionProcesos({ procesos, setProc, autoValues, cantidadProducc
   return (
     <div>
       {PROCESS_GROUPS.map(g => {
-        const activos = g.procesos.filter(p => procesos[p.id]?.active).length
+        const extraOtros = allowMultipleOtros && g.procesos.some(p => p.id === 'otros')
+          ? Object.keys(procesos).filter(id => /^otros_\d+$/.test(id)) : []
+        const activos = g.procesos.filter(p => procesos[p.id]?.active).length + extraOtros.filter(id => procesos[id]?.active).length
         return (
           <div className="proc-group" data-group={g.id} key={g.id}>
             <div className="proc-group-header">
               {g.titulo}
-              <span className="count">{activos} de {g.procesos.length} activos</span>
+              <span className="count">{activos} de {g.procesos.length + extraOtros.length} activos</span>
             </div>
             {g.procesos.map(pdef => (
-              <ProcRow
-                key={pdef.id}
-                showMoney={showMoney}
-                pdef={pdef}
-                p={procesos[pdef.id]}
-                autoVal={autoValues[pdef.id]}
-                cantidadProduccion={cantidadProduccion}
-                onToggle={() => toggle(pdef.id)}
-                onUpdate={(patch) => setProc(pdef.id, patch)}
-              />
+              <Fragment key={pdef.id}>
+                <ProcRow
+                  showMoney={showMoney}
+                  pdef={pdef}
+                  p={procesos[pdef.id]}
+                  autoVal={autoValues[pdef.id]}
+                  cantidadProduccion={cantidadProduccion}
+                  onToggle={() => toggle(pdef.id)}
+                  onUpdate={(patch) => setProc(pdef.id, patch)}
+                />
+                {allowMultipleOtros && pdef.id === 'otros' && <>
+                  {Object.keys(procesos).filter(id => /^otros_\d+$/.test(id)).map(id => (
+                    <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ flex: 1 }}>
+                        <ProcRow showMoney={showMoney} pdef={{ ...pdef, id }} p={procesos[id]}
+                          autoVal={0} cantidadProduccion={cantidadProduccion}
+                          onToggle={() => setProc(id, { active: !procesos[id].active })}
+                          onUpdate={(patch) => setProc(id, patch)} />
+                      </div>
+                      <button className="btn sm" type="button" onClick={() => onRemoveOther(id)}>Quitar</button>
+                    </div>
+                  ))}
+                  <button className="btn sm" type="button" onClick={onAddOther} style={{ margin: '6px 0 10px 36px' }}>+ Agregar otro proceso</button>
+                </>}
+              </Fragment>
             ))}
           </div>
         )

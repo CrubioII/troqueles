@@ -684,6 +684,8 @@ class FormatoCuchillas(models.Model):
     sacabocados = models.JSONField(default=list, blank=True)
     perfo_cm = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     perfo_medida = models.CharField(max_length=10, choices=PERFO_MEDIDA_CHOICES, blank=True, default="")
+    # Perforation rows: [{"medida": "2x2", "cm": <number>}, ...].
+    perforados = models.JSONField(default=list, blank=True)
     # Desperdicio de cuchilla en cm (misma unidad que cuchilla_cm: total = cuchilla + desperdicio)
     desperdicio_cm = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     # Descripción libre del bloque de madera donde se monta el troquel (medidas,
@@ -896,4 +898,3 @@ class PerfilOperador(models.Model):
 
     def __str__(self):
         return f"Perfil de {self.user.username}"
-

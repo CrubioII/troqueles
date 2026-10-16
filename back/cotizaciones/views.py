@@ -216,7 +216,14 @@ def _build_costos_seed(formato, precios=None):
         add("sacabocados", "Sacabocados", formato.sac_medida, "cm", formato.sac_cm)
     elif formato.sac_medida or float(formato.sac_cantidad or 0) > 0:
         add("sacabocados", "Sacabocados", formato.get_sac_medida_display(), "und", formato.sac_cantidad)
-    if float(formato.perfo_cm or 0) > 0:
+    if formato.perforados:
+        for idx, fila in enumerate(formato.perforados):
+            medida = fila.get("medida") or ""
+            cm = float(fila.get("cm") or 0)
+            if cm > 0:
+                add(f"perforaciones-{idx}", "Perforado", medida, "cm", cm,
+                    price_key=f"perforaciones:{medida}" if medida else "perforaciones")
+    elif float(formato.perfo_cm or 0) > 0:
         add("perforaciones", "Perforado", formato.perfo_medida, "cm", formato.perfo_cm)
     gan = formato.gan or []
     if gan:
@@ -241,6 +248,7 @@ def _sync_troquel_costos(op):
     prev = {item.get("key"): item for item in (modelo.costos_items or [])}
     prev_caucho_precio = {}
     prev_sac_precio = {}
+    prev_perfo_precio = {}
     prev_gan_precio = {}
     for item in (modelo.costos_items or []):
         if str(item.get("key", "")).startswith("caucho-") and float(item.get("precio") or 0) > 0:
@@ -249,6 +257,11 @@ def _sync_troquel_costos(op):
             # A diferencia del caucho, el concepto de sacabocados es genérico ("Sacabocados")
             # para toda medida — hay que distinguir por price_key (que sí lleva la medida).
             prev_sac_precio.setdefault(item.get("price_key"), item.get("precio"))
+        if str(item.get("key", "")).startswith("perforaciones") and float(item.get("precio") or 0) > 0:
+            prev_perfo_precio.setdefault(
+                f"perforaciones:{item.get('detalle')}" if item.get("key") == "perforaciones"
+                else item.get("price_key"), item.get("precio")
+            )
         if str(item.get("key", "")).startswith("gan-") and float(item.get("precio") or 0) > 0:
             prev_gan_precio.setdefault(item.get("concepto"), item.get("precio"))
     # Precios por defecto del cliente (rellenan las líneas que el Admin no fijó).
@@ -272,6 +285,8 @@ def _sync_troquel_costos(op):
         # Precio previo de la misma medida de sacabocados; si no hay, conserva el default del cliente.
         if line["key"].startswith("sacabocados-") and not float(line["precio"] or 0):
             line["precio"] = prev_sac_precio.get(line["concepto"]) or line["precio"]
+        if line["key"].startswith("perforaciones-") and not float(line["precio"] or 0):
+            line["precio"] = prev_perfo_precio.get(line["price_key"]) or precios.get("perforaciones") or line["precio"]
         # Precio previo del mismo tipo de gan; si no hay, conserva el default del cliente.
         if line["key"].startswith("gan-") and not float(line["precio"] or 0):
             line["precio"] = prev_gan_precio.get(line["concepto"]) or line["precio"]
@@ -657,6 +672,22 @@ def _registro_detalle(registro):
     return lineas
 
 
+def _additional_processes(op):
+    """Custom work descriptions that do not produce a station record or quantity."""
+    custom = sorted(
+        (
+            p for p in op.procesos.all()
+            if p.active and (p.proceso_id == "otros" or re.fullmatch(r"otros_\d+", p.proceso_id))
+        ),
+        key=lambda p: 0 if p.proceso_id == "otros" else int(p.proceso_id[6:]),
+    )
+    return [
+        description
+        for p in custom
+        if (description := str((p.extras or {}).get("descripcion") or "").strip())
+    ]
+
+
 def _remision_procesos_ctx(op):
     """Production details and delivered quantity for one OP.
 
@@ -687,6 +718,7 @@ def _remision_procesos_ctx(op):
         "referencia": op.referencia,
         "cantidad_entregada": _fmt_num(items[-1]["cantidad_realizada"]),
         "items": items,
+        "additional_processes": _additional_processes(op),
     }
 
 
@@ -742,6 +774,11 @@ def _remision_operador_pdf_ctx(rem, admin=False, con_desperdicio=False):
             # producto de la OP (eso es harina de otro costal: la cadena).
             "cantidad": 1,
             "consumos": consumos,
+            "additional_processes": (
+                _additional_processes(op)
+                if not op.procesos.filter(proceso_id__in=chain.CHAIN_PROCESOS, active=True).exists()
+                else []
+            ),
             # Nota del Operador sobre este troquel: se imprime bajo su bloque.
             "observaciones": (formato.observaciones or "") if formato else "",
             # Quién y cuándo llenó este formato de cuchillas — el Admin lo pide

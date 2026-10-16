@@ -7,11 +7,21 @@ import LiquidationPanel from '../components/LiquidationPanel'
 import { useAutosave } from '../hooks/useAutosave'
 import { getCotizacion, getPapeles, createCotizacion, updateCotizacion, cambiarEstado, updateCliente, deleteCotizacion, crearOpDesdeCotizacion } from '../api'
 import { crearClienteConGuard } from '../lib/clienteDedup'
+import { isValidEmail } from '../lib/validation'
 import { useAuth } from '../context/AuthContext'
 import { buildDefaultProcesos, buildBlankState, docToState, stateToDoc, seedProcesosFromApi, computeCalc } from '../lib/opQuoteShared'
 
 const apiToState = (cot, papelCatalog) => docToState(cot, papelCatalog, 'cot')
 const stateToApi = (d, procesos) => stateToDoc(d, procesos, 'cot')
+const emailErrorMessage = 'El correo necesita un dominio completo, por ejemplo nombre@empresa.com. Corrígelo o deja el campo vacío.'
+const clientFields = (cot) => ({
+  cliente: cot.cliente_nombre || '',
+  clienteId: cot.cliente || null,
+  clienteEmail: cot.cliente_email || '',
+  clienteTelefono: cot.cliente_telefono || '',
+  clienteNit: cot.cliente_nit || '',
+  tipoCliente: cot.tipo_cliente || 'final',
+})
 
 export default function CotizacionEdit() {
   const { id } = useParams()
@@ -31,8 +41,14 @@ export default function CotizacionEdit() {
   const [creatingOp, setCreatingOp] = useState(false)
   const [ordenId, setOrdenId] = useState(null)
   const [empezandoNueva, setEmpezandoNueva] = useState(false)
+  const [tabs, setTabs] = useState(() => [{ key: 0, id: isNew ? null : Number(id), data: null }])
+  const [activeTab, setActiveTab] = useState(0)
 
-  const set = (patch) => setData(prev => ({ ...prev, ...patch }))
+  const set = (patch) => {
+    if (Object.prototype.hasOwnProperty.call(patch, 'clienteEmail') ||
+        Object.prototype.hasOwnProperty.call(patch, 'cliente')) setSaveError(null)
+    setData(prev => ({ ...prev, ...patch }))
+  }
   const setProc = (pid, patch) => setProcesos(prev => ({ ...prev, [pid]: { ...prev[pid], ...patch } }))
   const toggle = (k) => setOpen(o => ({ ...o, [k]: !o[k] }))
 
@@ -47,14 +63,16 @@ export default function CotizacionEdit() {
 
         if (cot) {
           const catalog = papeles.results || papeles
-          setData(apiToState(cot, catalog))
+          const loadedData = apiToState(cot, catalog)
+          setData(loadedData)
           setOriginalEstado(cot.estado || 'borrador')
           setOrdenId(cot.orden_id || null)
 
           // Seed procesos from API data if present
-          if (cot.procesos && cot.procesos.length > 0) {
-            setProcesos(seedProcesosFromApi(cot.procesos))
-          }
+          const loadedProcesos = cot.procesos?.length ? seedProcesosFromApi(cot.procesos) : buildDefaultProcesos()
+          setProcesos(loadedProcesos)
+          setTabs([{ key: 0, id: cot.id, data: loadedData, procesos: loadedProcesos,
+            originalEstado: cot.estado || 'borrador', ordenId: cot.orden_id || null }])
         } else if (papeles.results || papeles) {
           // For new cotización: default to first paper in catalog
           const catalog = papeles.results || papeles
@@ -71,11 +89,13 @@ export default function CotizacionEdit() {
   // ============ Calculations ============
   const calc = useMemo(() => computeCalc(d, procesos), [d, procesos])
   const isConvertida = (originalEstado || d.estado) === 'convertida'
+  const emailError = isValidEmail(d.clienteEmail) ? '' : emailErrorMessage
 
   // ============ Save handlers ============
   const save = async (estadoOverride = null) => {
     setSaveError(null)
     try {
+      if (emailError) throw new Error(emailError)
       let clienteId = d.clienteId
       if (!clienteId) {
         if (!d.cliente.trim()) throw new Error('El campo Cliente es obligatorio')
@@ -87,7 +107,8 @@ export default function CotizacionEdit() {
           nit: d.clienteNit || '',
         })
         clienteId = newCliente.id
-        set({ clienteId: newCliente.id })
+        set({ cliente: newCliente.nombre, clienteId: newCliente.id,
+          clienteEmail: newCliente.email || '', clienteTelefono: newCliente.telefono || '', clienteNit: newCliente.nit || '' })
       } else {
         await updateCliente(clienteId, {
           email: d.clienteEmail || '',
@@ -121,14 +142,14 @@ export default function CotizacionEdit() {
         estado: result.estado || prev.estado,
       }))
       setOriginalEstado(result.estado || 'borrador')
-      return result.id
+      return result
     } catch (e) {
       setSaveError(e.message)
       throw e
     }
   }
 
-  const { status: saveStatus, retry: retrySave, flush: flushSave } = useAutosave(
+  const { status: saveStatus, retry: retrySave, flush: flushSave, markPristine } = useAutosave(
     useMemo(() => {
       const { id, numero, estado, ...dComparable } = d
       return { d: dComparable, procesos }
@@ -137,45 +158,97 @@ export default function CotizacionEdit() {
     { enabled: false, isValid: () => !isConvertida && !!d.cliente.trim() && !!d.referencia.trim() }
   )
 
+  useEffect(() => {
+    if (!loading) markPristine()
+  }, [loading, activeTab, markPristine])
+
   const handleDelete = () => {
     navigate('/cotizaciones')
     deleteCotizacion(d.id).catch(() => {})
   }
 
-  // Arrancar otra cotización sin volver al listado: se cierra la actual
-  // (autosave al día) y la pantalla queda en blanco, lista para la siguiente.
-  // Se reescribe la URL a /cotizaciones/nuevo para que recargar no traiga de
-  // vuelta la anterior; el id real se vuelve a poner solo al primer guardado.
+  const saveCurrentTab = async () => {
+    if (isConvertida) {
+      setTabs(prev => prev.map(tab => tab.key === activeTab
+        ? { ...tab, id: d.id, data: d, procesos, originalEstado, ordenId }
+        : tab))
+      return null
+    }
+    if (!d.cliente.trim() || !d.referencia.trim()) {
+      const message = 'Completa Cliente y Referencia y guarda la cotización antes de abrir otra.'
+      setSaveError(message)
+      throw new Error(message)
+    }
+    const saved = await save()
+    const savedData = { ...d, ...clientFields(saved), id: saved.id,
+      numero: saved.numero || d.numero, estado: saved.estado || d.estado }
+    setTabs(prev => prev.map(tab => tab.key === activeTab
+      ? { ...tab, id: saved.id, data: savedData, procesos,
+          originalEstado: saved.estado || 'borrador', ordenId }
+      : tab))
+    return saved
+  }
+
+  const activateTab = (tab) => {
+    setData(tab.data)
+    setProcesos(tab.procesos)
+    setOriginalEstado(tab.originalEstado || 'borrador')
+    setOrdenId(tab.ordenId || null)
+    setSaveError(null)
+    setActiveTab(tab.key)
+    window.history.replaceState(null, '', tab.id ? `/cotizaciones/${tab.id}` : '/cotizaciones/nuevo')
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const handleSelectTab = async (key) => {
+    if (key === activeTab || empezandoNueva) return
+    setEmpezandoNueva(true)
+    try {
+      await saveCurrentTab()
+      const tab = tabs.find(item => item.key === key)
+      if (tab) activateTab(tab)
+    } catch {
+      // saveCurrentTab displays the error and keeps the current quote visible.
+    } finally {
+      setEmpezandoNueva(false)
+    }
+  }
+
   const handleNuevaCotizacion = async () => {
     if (empezandoNueva) return
     setEmpezandoNueva(true)
     try {
-      await flushSave()
+      const saved = await saveCurrentTab()
+      const blank = buildBlankState('cot')
+      const firstPaper = papelCatalog[0]
+      const nextData = {
+        ...blank,
+        ...(firstPaper ? { papelId: String(firstPaper.id), precioPliego: parseFloat(firstPaper.precio) } : {}),
+        ...(saved ? clientFields(saved) : {
+          cliente: d.cliente, clienteId: d.clienteId, clienteEmail: d.clienteEmail,
+          clienteTelefono: d.clienteTelefono, clienteNit: d.clienteNit, tipoCliente: d.tipoCliente,
+        }),
+      }
+      const nextProcesos = buildDefaultProcesos()
+      const key = Math.max(...tabs.map(tab => tab.key)) + 1
+      setTabs(prev => [...prev, { key, id: null, data: nextData, procesos: nextProcesos,
+        originalEstado: 'borrador', ordenId: null }])
+      activateTab({ key, id: null, data: nextData, procesos: nextProcesos })
     } catch {
-      // el fallo ya quedó en saveError; igual se abre la nueva
+      // Keep the current quote open so its unsaved edits are not lost.
+    } finally {
+      setEmpezandoNueva(false)
     }
-    const blank = buildBlankState('cot')
-    const primerPapel = papelCatalog[0]
-    setData(primerPapel
-      ? { ...blank, papelId: String(primerPapel.id), precioPliego: parseFloat(primerPapel.precio) }
-      : blank)
-    setProcesos(buildDefaultProcesos())
-    setOriginalEstado('borrador')
-    setOrdenId(null)
-    setSaveError(null)
-    window.history.replaceState(null, '', '/cotizaciones/nuevo')
-    window.scrollTo({ top: 0, behavior: 'smooth' })
-    setEmpezandoNueva(false)
   }
 
   const handleSaveAndSend = async () => {
     setSending(true)
     try {
       await flushSave()
-      const savedId = await save()
+      const saved = await save()
       const vu = Math.round(calc.valorUnitario || 0)
       const vt = Math.round(calc.valorTotal || 0)
-      navigate(`/documentos/nuevo?cotizacion=${savedId}&vu=${vu}&vt=${vt}`)
+      navigate(`/documentos/nuevo?cotizacion=${saved.id}&vu=${vu}&vt=${vt}`)
     } catch (e) {
       // el error ya quedó reflejado en saveError vía save()
     } finally {
@@ -240,18 +313,44 @@ export default function CotizacionEdit() {
           <button
             className="btn accent"
             style={{ padding: '2px 10px', fontSize: 12 }}
-            disabled={empezandoNueva}
+            disabled={empezandoNueva || saveStatus === 'saving'}
             onClick={handleNuevaCotizacion}
-            title="Guarda esta y abre una cotización nueva en blanco, sin salir de aquí"
+            title="Guarda esta cotización y abre otra para el mismo cliente"
           >
             {empezandoNueva ? 'Guardando…' : '+ Nueva cotización'}
           </button>
           {saveError && (
-            <span style={{ color: 'var(--danger, #c0392b)', fontSize: 12 }}>
-              Error: {saveError}
+            <span role="alert" style={{ color: 'var(--danger, #c0392b)', fontSize: 12 }}>
+              No se guardó: {saveError}
             </span>
           )}
         </div>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, overflowX: 'auto',
+        padding: '8px 20px', borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
+        <span className="muted" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>Cotizaciones de esta sesión</span>
+        {tabs.map(tab => {
+          const current = tab.key === activeTab
+          const quote = current ? d : tab.data
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              className="btn"
+              onClick={() => handleSelectTab(tab.key)}
+              disabled={empezandoNueva || saveStatus === 'saving'}
+              aria-current={current ? 'page' : undefined}
+              style={{ whiteSpace: 'nowrap', fontSize: 11, padding: '5px 9px',
+                borderColor: current ? 'var(--accent)' : 'var(--border)',
+                color: current ? 'var(--accent)' : 'var(--ink)',
+                fontWeight: current ? 700 : 400 }}
+            >
+              {quote?.id ? quote.numero : `Nueva ${tab.key + 1}`}
+              {quote?.referencia ? ` · ${quote.referencia.slice(0, 28)}` : ''}
+            </button>
+          )
+        })}
       </div>
 
       {/* Phase stepper */}
@@ -308,7 +407,7 @@ export default function CotizacionEdit() {
               <span>· Cantidad:</span> <span className="v mono">{fmtNum(d.cantidad)}</span>
             </>}
           >
-            <SectionGenerales d={d} set={set} />
+            <SectionGenerales d={d} set={set} emailError={emailError} />
           </Section>
 
           <Section

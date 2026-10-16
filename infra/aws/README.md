@@ -39,6 +39,12 @@ reenvía. Si algún día el spec llegara sin variables, el paso aborta antes de 
 
 ### Cambiar una variable de entorno
 
+El frontend público usa `https://troquelesink.com`. Mantener ese origen en
+`containers.back.environment.CORS_ALLOWED_ORIGINS` junto al dominio de Azure
+Static Web Apps; de lo contrario, el navegador bloquea el preflight de
+`POST /api/auth/login/` antes de enviar las credenciales. La variable es una
+lista de orígenes exactos separados por comas, sin rutas ni barra final.
+
 ```sh
 aws lightsail get-container-service-deployments --service-name troqueles-api \
   --region us-east-2 --query 'deployments[0]' > /tmp/dep.json

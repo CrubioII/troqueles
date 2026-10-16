@@ -9,7 +9,7 @@ import {
   getDocumento, createDocumento, updateDocumento, deleteDocumento,
   pdfDocumento, enviarDocumento,
 } from '../api'
-import { crearClienteConGuard } from '../lib/clienteDedup'
+import { crearClienteConGuard, exactClientMatch } from '../lib/clienteDedup'
 
 const DEFAULT_NOTA = 'En la presente cotización No incluye el impuesto del IVA, el cliente debe suministrar el diseño de logotipo e impresión.'
 
@@ -118,15 +118,24 @@ function ClienteField({ value, clienteId, onChange, onSelect }) {
 
   useEffect(() => {
     if (!value || value.length < 1) { setSuggestions([]); return }
+    let active = true
     const t = setTimeout(() => {
       getClientes(value).then(r => {
+        if (!active) return
         const list = r.results || r
+        const exact = exactClientMatch(value, list)
+        if (exact && !clienteId) {
+          onSelect(exact.id, exact.nombre, exact.email || '', exact.telefono || '', exact.nit || '')
+          setSuggestions([])
+          setOpen(false)
+          return
+        }
         setSuggestions(list)
         setOpen(list.length > 0)
       }).catch(() => {})
     }, 200)
-    return () => clearTimeout(t)
-  }, [value])
+    return () => { active = false; clearTimeout(t) }
+  }, [value, clienteId])
 
   useEffect(() => {
     const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
@@ -140,7 +149,7 @@ function ClienteField({ value, clienteId, onChange, onSelect }) {
         className="input"
         placeholder="Nombre del cliente"
         value={value}
-        onChange={e => { onChange(e.target.value); onSelect(null, '', '', '', '') }}
+        onChange={e => onChange(e.target.value)}
         onFocus={() => suggestions.length > 0 && setOpen(true)}
       />
       {clienteId && (
@@ -363,7 +372,10 @@ export default function DocumentoClienteEdit() {
   const [showSend, setShowSend] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
-  const set = (patch) => setData(prev => ({ ...prev, ...patch }))
+  const set = (patch) => {
+    if (Object.prototype.hasOwnProperty.call(patch, 'cliente') || patch.clienteId) setSaveError(null)
+    setData(prev => ({ ...prev, ...patch }))
+  }
 
   // Source cotización: from URL param (new doc) or first item (existing doc)
   const sourceCotId = searchParams.get('cotizacion') || d.items.find(i => i.cotizacion)?.cotizacion
@@ -463,7 +475,8 @@ export default function DocumentoClienteEdit() {
         if (!d.cliente.trim()) throw new Error('El campo Cliente es obligatorio')
         const newCliente = await crearClienteConGuard({ nombre: d.cliente.trim(), tipo: 'final', email: d.clienteEmail || '' })
         clienteId = newCliente.id
-        set({ clienteId })
+        set({ cliente: newCliente.nombre, clienteId,
+          clienteEmail: newCliente.email || '', clienteTelefono: newCliente.telefono || '', clienteNit: newCliente.nit || '' })
       }
       const payload = stateToApi({ ...d, clienteId })
       let result

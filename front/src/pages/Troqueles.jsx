@@ -19,6 +19,7 @@ import {
 } from '../api'
 import { useSyncPolling } from '../lib/useSyncPolling'
 import { useDragOrder } from '../hooks/useDragOrder'
+import { exactClientMatch } from '../lib/clienteDedup'
 
 const asList = (data) => (Array.isArray(data) ? data : (data?.results || []))
 
@@ -447,8 +448,10 @@ function OperadorOpDatos({ orden, onSaved }) {
   const [clienteNombre, setClienteNombre] = useState(orden.cliente_nombre || '')
   const [suggestions, setSuggestions] = useState([])
   const [showSugg, setShowSugg] = useState(false)
+  const searchVersion = useRef(0)
 
   useEffect(() => {
+    searchVersion.current += 1
     setReferencia(orden.referencia || '')
     setClienteId(orden.cliente || null)
     setClienteNombre(orden.cliente_nombre || '')
@@ -458,13 +461,23 @@ function OperadorOpDatos({ orden, onSaved }) {
   const buscarClientes = (q) => {
     setClienteNombre(q)
     setClienteId(null)   // sin sugerencia elegida no hay cliente válido
+    const version = ++searchVersion.current
     if (!q || q.trim().length < 2) { setSuggestions([]); setShowSugg(false); return }
     getClientes(q)
-      .then(d => { const l = asList(d); setSuggestions(l); setShowSugg(l.length > 0) })
-      .catch(() => { setSuggestions([]); setShowSugg(false) })
+      .then(d => {
+        if (version !== searchVersion.current) return
+        const list = asList(d)
+        const exact = exactClientMatch(q, list)
+        if (exact) { elegirCliente(exact); return }
+        setSuggestions(list); setShowSugg(list.length > 0)
+      })
+      .catch(() => { if (version === searchVersion.current) { setSuggestions([]); setShowSugg(false) } })
   }
 
-  const elegirCliente = (c) => { setClienteId(c.id); setClienteNombre(c.nombre); setShowSugg(false) }
+  const elegirCliente = (c) => {
+    searchVersion.current += 1
+    setClienteId(c.id); setClienteNombre(c.nombre); setShowSugg(false)
+  }
 
   const { status: saveStatus, retry: retrySave } = useAutosave(
     { referencia, clienteId },

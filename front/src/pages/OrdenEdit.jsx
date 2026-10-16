@@ -91,8 +91,22 @@ export default function OrdenEdit() {
 
   const locked = !!d.cotizacionId
 
-  const set = (patch) => setData(prev => ({ ...prev, ...patch }))
+  const set = (patch) => {
+    if (Object.prototype.hasOwnProperty.call(patch, 'cliente')) setSaveError(null)
+    if (patch.clienteId) setSaveError(null)
+    setData(prev => ({ ...prev, ...patch }))
+  }
   const setProc = (pid, patch) => setProcesos(prev => ({ ...prev, [pid]: { ...prev[pid], ...patch } }))
+  const addOtherProcess = () => setProcesos(prev => {
+    const ids = Object.keys(prev).filter(id => /^otros_\d+$/.test(id)).map(id => Number(id.slice(6)))
+    const id = `otros_${Math.max(0, ...ids) + 1}`
+    return { ...prev, [id]: { ...buildDefaultProcesos().otros, active: true, descripcion: '' } }
+  })
+  const removeOtherProcess = (id) => setProcesos(prev => {
+    const next = { ...prev }
+    delete next[id]
+    return next
+  })
   const toggle = (k) => setOpen(o => ({ ...o, [k]: !o[k] }))
 
   // El Operador General no elige tipo de cliente (el campo va oculto para él):
@@ -159,7 +173,8 @@ export default function OrdenEdit() {
             nit: d.clienteNit || '',
           })
           clienteId = newCliente.id
-          set({ clienteId: newCliente.id })
+          set({ cliente: newCliente.nombre, clienteId: newCliente.id,
+            clienteEmail: newCliente.email || '', clienteTelefono: newCliente.telefono || '', clienteNit: newCliente.nit || '' })
         } else {
           await updateCliente(clienteId, {
             email: d.clienteEmail || '',
@@ -396,7 +411,7 @@ export default function OrdenEdit() {
                   {isAdmin && <><span>· Costo procesos:</span> <span className="v mono">{fmtCOP(calc.totalProcesos)}</span></>}
                 </>}
               >
-                <SectionProcesos procesos={procesos} setProc={setProc} autoValues={calc.autoValues} cantidadProduccion={calc.cantidadProduccion} showMoney={isAdmin} />
+                <SectionProcesos procesos={procesos} setProc={setProc} autoValues={calc.autoValues} cantidadProduccion={calc.cantidadProduccion} showMoney={isAdmin} allowMultipleOtros onAddOther={addOtherProcess} onRemoveOther={removeOtherProcess} />
               </Section>
 
               <Section

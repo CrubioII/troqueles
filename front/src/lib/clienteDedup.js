@@ -1,4 +1,13 @@
-import { createCliente } from '../api'
+import { createCliente, getCliente } from '../api'
+
+export const sameClientName = (left, right) => {
+  const normalize = value => (value || '').normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '').toLowerCase().trim().replace(/\s+/g, ' ')
+  return !!normalize(left) && normalize(left) === normalize(right)
+}
+
+export const exactClientMatch = (name, clients) =>
+  clients.find(client => sameClientName(name, client.nombre))
 
 // El backend frena el alta de un cliente cuyo nombre se parece a uno que ya
 // existe (409 cliente_similar, ver ClienteViewSet.create): un typo como
@@ -8,17 +17,17 @@ import { createCliente } from '../api'
 // pero tiene que ser una decisión, no el efecto de no haber elegido la
 // sugerencia.
 //
-// Este helper es el camino rápido para las pantallas de Admin (cotización,
-// documento, OP), que crean el cliente dentro de un "Guardar" ya en curso. La
-// pantalla del Operador (NuevaTareaTroquelModal) resuelve el 409 con UI propia:
-// ahí es donde nacieron los duplicados de producción y un confirm() se acepta
-// sin leer.
+// Si el nombre coincide con uno existente, usar ese cliente directamente.
+// Para nombres solo parecidos, las pantallas de Admin piden una decisión; el
+// modal de troquel resuelve ese caso con su propia interfaz.
 export async function crearClienteConGuard(data) {
   try {
     return await createCliente(data)
   } catch (e) {
     if (e?.code !== 'cliente_similar') throw e
     const candidatos = e.body?.candidatos || []
+    const exact = exactClientMatch(data.nombre, candidatos)
+    if (exact) return getCliente(exact.id)
     const lista = candidatos.map(c => `  • ${c.nombre}`).join('\n')
     const seguir = window.confirm(
       `Ya existe un cliente con un nombre casi igual:\n\n${lista}\n\n` +

@@ -109,9 +109,8 @@ export function RegistroProcesoForm({ estacion, orden, onCreated }) {
     const realizada = Number(form.cantidad_realizada || 0)
     if (!realizada) { setError('Indica la cantidad realizada.'); return }
 
-    if (cfg.campos.includes('tamano')) {
-      if (!form.tamano) { setError('Selecciona el tamaño del papel.'); return }
-      if (form.tamano === 'otro' && !form.tamano_otro.trim()) { setError('Describe el tamaño del papel.'); return }
+    if (cfg.campos.includes('tamano') && form.tamano === 'otro' && !form.tamano_otro.trim()) {
+      setError('Describe el tamaño del papel.'); return
     }
 
     // Tiro/retiro: el único par de campos opcional, pero no ambos vacíos —
@@ -188,7 +187,7 @@ export function RegistroProcesoForm({ estacion, orden, onCreated }) {
       </FieldGroup>
 
       {cfg.campos.includes('tamano') && (
-        <FieldGroup title="Tamaño del papel *">
+        <FieldGroup title="Tamaño del papel (opcional)">
           <Field label="Medida">
             <select className="input" value={form.tamano} onChange={e => set('tamano', e.target.value)}>
               <option value="">Seleccionar…</option>

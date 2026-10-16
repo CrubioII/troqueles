@@ -1,10 +1,12 @@
 from datetime import date, timedelta
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from cotizaciones.models import Cliente, OrdenProduccion, OpProceso
+from cotizaciones.models import Cliente, OrdenCambio, OrdenProduccion, OpProceso
+from cotizaciones.serializers import OrdenSerializer
 from cotizaciones.troquel_prioridades import (
     _procesos_en_cola,
     reordenar_cola_troquel_por_clientes,
@@ -98,3 +100,67 @@ class TroquelClientePrioridadTests(TestCase):
         # añade ``orden__remision__isnull``. El endpoint debe bloquear solo
         # OpProceso, que es además la única tabla que actualiza.
         self.assertEqual(_procesos_en_cola(lock=True).query.select_for_update_of, ("self",))
+
+    def test_put_cambia_cliente_y_reagrupa_troquel_sin_error(self):
+        a_primero = self.crear_troquel(self.cliente_a, 0)
+        a_segundo = self.crear_troquel(self.cliente_a, 1)
+        b_primero = self.crear_troquel(self.cliente_b, 2)
+        reordenar_cola_troquel_por_clientes()
+
+        respuesta = self.api.put(
+            f"/api/ordenes/{a_segundo.id}/",
+            {
+                "fecha": "2026-09-02", "cliente": self.cliente_b.id,
+                "referencia": a_segundo.referencia, "cantidad": 1,
+                "procesos": [{"proceso_id": "troquel", "active": True}],
+            },
+            format="json",
+        )
+        self.assertEqual(respuesta.status_code, 200, respuesta.data)
+        self.assertEqual(respuesta.data["cliente"], self.cliente_b.id)
+        a_segundo.refresh_from_db()
+        self.assertEqual(a_segundo.cliente_id, self.cliente_b.id)
+        self.assertEqual(
+            [p.orden_id for p in _procesos_en_cola().order_by("prioridad")],
+            [a_primero.id, a_segundo.id, b_primero.id],
+        )
+        self.assertTrue(OrdenCambio.objects.filter(
+            orden=a_segundo, campo="cliente",
+            valor_anterior=self.cliente_a.nombre,
+            valor_nuevo=self.cliente_b.nombre,
+        ).exists())
+
+    def test_put_sin_troquel_no_recalcula_cola(self):
+        orden = OrdenProduccion.objects.create(
+            fecha=date(2026, 9, 1), cliente=self.cliente_a,
+            referencia="SIN-TROQUEL", cantidad=1,
+        )
+        with patch("cotizaciones.serializers.reordenar_cola_troquel_por_clientes") as reordenar:
+            respuesta = self.api.put(
+                f"/api/ordenes/{orden.id}/",
+                {"fecha": "2026-09-01", "cliente": self.cliente_b.id,
+                 "referencia": "SIN-TROQUEL", "cantidad": 1},
+                format="json",
+            )
+        reordenar.assert_not_called()
+        self.assertEqual(respuesta.status_code, 200, respuesta.data)
+        orden.refresh_from_db()
+        self.assertEqual(orden.cliente_id, self.cliente_b.id)
+
+    def test_fallo_al_reordenar_revierte_cambio_de_cliente(self):
+        orden = self.crear_troquel(self.cliente_a, 0)
+        serializer = OrdenSerializer(
+            orden,
+            data={"fecha": "2026-09-01", "cliente": self.cliente_b.id,
+                  "referencia": "CAMBIADA", "cantidad": 1,
+                  "procesos": [{"proceso_id": "troquel", "active": True}]},
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        with patch("cotizaciones.serializers.reordenar_cola_troquel_por_clientes", side_effect=RuntimeError("queue failed")):
+            with self.assertRaisesMessage(RuntimeError, "queue failed"):
+                serializer.save()
+        orden.refresh_from_db()
+        self.assertEqual(orden.cliente_id, self.cliente_a.id)
+        self.assertNotEqual(orden.referencia, "CAMBIADA")
+        self.assertFalse(OrdenCambio.objects.filter(orden=orden).exists())
+        self.assertTrue(OpProceso.objects.filter(orden=orden, proceso_id="troquel", active=True).exists())
