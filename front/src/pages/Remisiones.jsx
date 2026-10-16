@@ -22,10 +22,7 @@ function StatusBadge({ estado }) {
 }
 
 function displayRemisionNumbers(rem) {
-  const included = (rem.consolidated_numbers || []).map(number =>
-    number.startsWith('REM-') ? number.slice(4) : number
-  )
-  return [rem.numero || '—', ...included].join(' & ')
+  return rem.numero || '—'
 }
 
 function Skeleton() {

@@ -392,6 +392,8 @@ class OrdenSerializer(serializers.ModelSerializer):
     valor_total_efectivo = serializers.SerializerMethodField()
     saldo = serializers.SerializerMethodField()
     progreso = serializers.SerializerMethodField()
+    remision_id = serializers.SerializerMethodField()
+    remision_generada = serializers.SerializerMethodField()
 
     class Meta:
         model = OrdenProduccion
@@ -412,6 +414,7 @@ class OrdenSerializer(serializers.ModelSerializer):
             "creado", "modificado",
             "procesos",
             "valor_unitario_efectivo", "valor_total_efectivo", "saldo", "progreso",
+            "remision_id", "remision_generada",
         ]
         read_only_fields = ["id", "numero", "cotizacion", "creado", "modificado"]
 
@@ -429,6 +432,18 @@ class OrdenSerializer(serializers.ModelSerializer):
 
     def get_progreso(self, obj):
         return _orden_progreso(obj)
+
+    def _visible_remission(self, obj):
+        rem = getattr(obj, "remision", None)
+        return rem.consolidada_en_remision if rem and rem.estado == "consolidada" else rem
+
+    def get_remision_id(self, obj):
+        rem = self._visible_remission(obj)
+        return rem.id if rem else None
+
+    def get_remision_generada(self, obj):
+        rem = self._visible_remission(obj)
+        return bool(rem and (rem.generada_en or rem.enviada_en or rem.estado == "liquidada"))
 
     @property
     def _sin_plata(self):
@@ -923,11 +938,23 @@ class RemisionGeneradaOperadorSerializer(serializers.ModelSerializer):
     generada_por_username = serializers.CharField(
         source="generada_por.username", read_only=True, default="")
     ops = serializers.SerializerMethodField()
+    is_production = serializers.SerializerMethodField()
 
     class Meta:
         model = Remision
         fields = ["id", "numero", "fecha", "estado", "generada_en",
-                  "cliente_nombre", "generada_por_username", "ops", "tiene_troquel"]
+                  "cliente_nombre", "generada_por_username", "ops", "tiene_troquel",
+                  "is_production"]
+
+    def get_is_production(self, obj):
+        orders = [obj.orden] + [source.orden for source in obj.remisiones_consolidadas.all()]
+        return any(
+            order.procesos.filter(proceso_id__in=chain.CHAIN_PROCESOS, active=True).exists()
+            or (order.cotizacion_id is None and order.procesos.filter(
+                proceso_id="terminado", active=True
+            ).exists())
+            for order in orders
+        )
 
     def get_ops(self, obj):
         # La OP propia + las de sus remisiones consolidadas (mismo criterio que
@@ -995,13 +1022,8 @@ class RemisionSerializer(serializers.ModelSerializer):
 class RemisionListSerializer(serializers.ModelSerializer):
     cliente_nombre = serializers.CharField(source="cliente.nombre", read_only=True)
     orden_numero = serializers.CharField(source="orden.numero", read_only=True, default="")
-    consolidated_numbers = serializers.SerializerMethodField()
-
-    def get_consolidated_numbers(self, obj):
-        return sorted((source.numero for source in obj.remisiones_consolidadas.all()), reverse=True)
 
     class Meta:
         model = Remision
         fields = ["id", "numero", "fecha", "cliente_nombre", "orden_numero",
-                  "estado", "mostrar_valores", "tiene_troquel", "creado", "modificado",
-                  "consolidated_numbers"]
+                  "estado", "mostrar_valores", "tiene_troquel", "creado", "modificado"]

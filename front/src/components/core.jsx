@@ -179,7 +179,7 @@ export const PROCESS_GROUPS = [
     id: 'terminado',
     titulo: 'Terminado y entrega',
     procesos: [
-      { id: 'terminado', nombre: 'Terminado', desc: 'Pegado, plegado, conteo', defaultCost: 120000 },
+      { id: 'terminado', nombre: 'Terminado', defaultCost: 120000 },
       { id: 'diseno',    nombre: 'Diseño',    defaultCost: 180000, extras: { disenador: 'Oscar' } },
       { id: 'pegante',   nombre: 'Pegante',   defaultCost: 35000 },
       { id: 'tinta',     nombre: 'Tinta',     defaultCost: 65000 },

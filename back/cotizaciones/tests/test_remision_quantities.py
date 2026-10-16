@@ -7,8 +7,8 @@ from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from cotizaciones.models import Cliente, OpProceso, OrdenProduccion, RegistroProceso, Remision
-from cotizaciones.views import _consolidar_remisiones, _remision_operador_pdf_ctx, _remision_pdf_ctx
+from cotizaciones.models import Cliente, FormatoCuchillas, OpProceso, OrdenProduccion, RegistroProceso, Remision
+from cotizaciones.views import _consolidar_remisiones, _crear_remision, _remision_operador_pdf_ctx, _remision_pdf_ctx
 
 
 class RemisionQuantitiesTests(TestCase):
@@ -84,6 +84,32 @@ class RemisionQuantitiesTests(TestCase):
         mixed = self.make_remission(die=True)
         self.assert_documents(mixed, [(mixed.orden.numero, "1.200")], die_count=1)
 
+    def test_only_die_observations_appear_in_generated_documents(self):
+        op = OrdenProduccion.objects.create(
+            cliente=self.customer, fecha=timezone.localdate(), referencia="Die work",
+            cantidad=1, observaciones="Original email message should stay internal",
+        )
+        OpProceso.objects.create(orden=op, proceso_id="troquel", active=True)
+        FormatoCuchillas.objects.create(
+            orden=op, observaciones="Actual die note", estado="aprobado",
+        )
+        rem = _crear_remision(op)
+        self.assertEqual(rem.observaciones, "")
+        rem.observaciones = "Legacy general note"
+        rem.save(update_fields=["observaciones"])
+        for template in ("pdf_remision_operador.html", "pdf_remision_admin.html", "pdf_remision.html"):
+            with self.subTest(template=template):
+                context = (_remision_pdf_ctx(rem) if template == "pdf_remision.html"
+                           else _remision_operador_pdf_ctx(rem, admin=template == "pdf_remision_admin.html"))
+                html = render_to_string("cotizaciones/" + template, context)
+                self.assertIn("Actual die note", html)
+                self.assertNotIn("Original email message", html)
+                self.assertNotIn("Legacy general note", html)
+                self.assertLess(html.index("Entregado por"), html.index("Recibido conforme"))
+        email = render_to_string("cotizaciones/email_remision.html", _remision_pdf_ctx(rem))
+        self.assertIn("Actual die note", email)
+        self.assertNotIn("Legacy general note", email)
+
     def test_custom_processes_appear_without_changing_delivered_quantity(self):
         rem = self.make_remission(production=False)
         OpProceso.objects.create(orden=rem.orden, proceso_id="troquelado", active=True, completado=True)
@@ -113,10 +139,12 @@ class RemisionQuantitiesTests(TestCase):
                 context = (_remision_pdf_ctx(rem) if template == "pdf_remision.html"
                            else _remision_operador_pdf_ctx(rem, admin=template == "pdf_remision_admin.html"))
                 html = render_to_string("cotizaciones/" + template, context)
-                self.assertIn("Procesos complementarios", html)
+                self.assertEqual(html.count('class="complementary-title">Procesos complementarios'), 1)
                 self.assertIn("Ensanduichado", html)
                 self.assertIn("Plegado final", html)
                 self.assertNotIn("No realizado", html)
+                self.assertNotIn("<td>Procesos complementarios</td>", html)
+                self.assertGreater(html.index('class="complementary-title"'), html.index('</table>'))
                 self.assertIn("Cantidad entregada:</strong> 123", html)
 
     def test_die_only_custom_processes_appear_in_die_block(self):
@@ -134,5 +162,50 @@ class RemisionQuantitiesTests(TestCase):
                 context = (_remision_pdf_ctx(rem) if template == "pdf_remision.html"
                            else _remision_operador_pdf_ctx(rem, admin=template == "pdf_remision_admin.html"))
                 html = render_to_string("cotizaciones/" + template, context)
-                self.assertIn("Procesos complementarios", html)
+                self.assertEqual(html.count('class="complementary-title">Procesos complementarios'), 1)
                 self.assertIn("Ensanduichado", html)
+
+    def test_merged_orders_share_one_complementary_section(self):
+        first = self.make_remission()
+        second = self.make_remission()
+        OpProceso.objects.create(
+            orden=first.orden, proceso_id="otros", active=True,
+            extras={"descripcion": "Armado manual"},
+        )
+        OpProceso.objects.create(
+            orden=second.orden, proceso_id="otros", active=True,
+            extras={"descripcion": "Inspección final"},
+        )
+        _consolidar_remisiones(first, [second])
+        context = _remision_operador_pdf_ctx(first)
+        self.assertEqual(len(context["complementary_processes"]), 2)
+        for template in ("pdf_remision_operador.html", "pdf_remision_admin.html", "pdf_remision.html"):
+            with self.subTest(template=template):
+                template_context = (_remision_pdf_ctx(first) if template == "pdf_remision.html"
+                                    else _remision_operador_pdf_ctx(first, admin=template == "pdf_remision_admin.html"))
+                html = render_to_string("cotizaciones/" + template, template_context)
+                self.assertEqual(html.count('class="complementary-title">Procesos complementarios'), 1)
+                self.assertIn("Armado manual", html)
+                self.assertIn("Inspección final", html)
+                self.assertIn(first.orden.numero, html)
+                self.assertIn(second.orden.numero, html)
+
+    def test_station_observations_stay_with_their_process(self):
+        rem = self.make_remission()
+        record = rem.orden.registros_proceso.get(proceso_id="uvTotal")
+        record.observaciones = "Revisar brillo antes de entregar"
+        record.save(update_fields=["observaciones"])
+        rem.orden.observaciones = "Original customer email"
+        rem.orden.save(update_fields=["observaciones"])
+        rem.observaciones = "Legacy general observation"
+        rem.save(update_fields=["observaciones"])
+
+        for template in ("pdf_remision_operador.html", "pdf_remision_admin.html", "pdf_remision.html"):
+            with self.subTest(template=template):
+                context = (_remision_pdf_ctx(rem) if template == "pdf_remision.html"
+                           else _remision_operador_pdf_ctx(rem, admin=template == "pdf_remision_admin.html"))
+                html = render_to_string("cotizaciones/" + template, context)
+                self.assertIn("Revisar brillo antes de entregar", html)
+                self.assertIn('<div class="process-note"><strong>Observaciones:</strong>', html)
+                self.assertNotIn("Original customer email", html)
+                self.assertNotIn("Legacy general observation", html)

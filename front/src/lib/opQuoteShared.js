@@ -165,6 +165,8 @@ export function docToState(doc, papelCatalog, kind = 'cot') {
       abono: doc.abono != null ? parseFloat(doc.abono) : 0,
       cotizacionId: doc.cotizacion || null,
       cotizacionNumero: doc.cotizacion_numero || '',
+      remisionId: doc.remision_id || null,
+      remisionGenerada: !!doc.remision_generada,
     }
   }
   return {

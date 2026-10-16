@@ -482,11 +482,17 @@ def _crear_remision(op):
             cliente=op.cliente,
             direccion=op.cliente.direccion,
             ciudad=op.cliente.ciudad,
-            observaciones=op.observaciones,
+            observaciones="",
             tiene_troquel=op.procesos.filter(proceso_id="troquel", active=True).exists(),
         )
         _seed_remision_item(rem, op)
     return rem
+
+
+def _is_direct_finished(op):
+    return op.cotizacion_id is None and op.procesos.filter(
+        proceso_id="terminado", active=True
+    ).exists()
 
 
 def _maybe_crear_remision(op):
@@ -531,6 +537,7 @@ def _remision_pdf_ctx(rem, admin=False):
     ctx["troqueles"] = det["troqueles"]
     ctx["total_general"] = det["total_general"]
     ctx["procesos"] = det["procesos"]
+    ctx["complementary_processes"] = det["complementary_processes"]
     if admin:
         modelo = TroquelModelo.objects.filter(orden=rem.orden).first() if rem.orden_id else None
         costos = list(modelo.costos_items) if modelo else []
@@ -570,9 +577,10 @@ def _consolidar_remisiones(target, fuentes, now=None):
                 )
                 next_orden += 1
             f.estado = "consolidada"
+            f.numero = None
             f.consolidada_en = now
             f.consolidada_en_remision = target
-            f.save(update_fields=["estado", "consolidada_en", "consolidada_en_remision", "modificado"])
+            f.save(update_fields=["numero", "estado", "consolidada_en", "consolidada_en_remision", "modificado"])
     target.refresh_from_db()
     return target
 
@@ -692,7 +700,7 @@ def _remision_procesos_ctx(op):
     """Production details and delivered quantity for one OP.
 
     Delivery uses the latest record from the last recorded active process in
-    chain order, rather than planned units or a sum of intermediate results.
+    chain order. A direct finished OP without records uses its planned units.
     """
     proceso_ids = sorted(
         op.procesos.filter(proceso_id__in=chain.CHAIN_PROCESOS, active=True)
@@ -707,8 +715,17 @@ def _remision_procesos_ctx(op):
         items.append({
             "proceso_label": chain.PROCESO_LABELS.get(proceso_id, proceso_id),
             "detalle": _registro_detalle(registro),
+            "observaciones": (registro.observaciones or "").strip(),
             "cantidad_realizada": registro.cantidad_realizada,
             "fecha_hora": registro.fecha_hora,
+        })
+    if not items and _is_direct_finished(op):
+        items.append({
+            "proceso_label": "Terminado",
+            "detalle": [],
+            "observaciones": "",
+            "cantidad_realizada": op.cantidad or 0,
+            "fecha_hora": None,
         })
     if not items:
         return None
@@ -732,9 +749,10 @@ def _remision_operador_pdf_ctx(rem, admin=False, con_desperdicio=False):
     `con_desperdicio` solo lo activan los documentos internos del Admin (PDF
     admin y desglose de la pantalla de liquidación); en todo lo demás la línea
     de cuchilla muestra únicamente el total en cm."""
+    ops = _remision_operador_ops(rem)
     troqueles = []
     total_general = 0.0
-    for op in _remision_operador_ops(rem):
+    for op in ops:
         if not op.procesos.filter(proceso_id="troquel", active=True).exists():
             # OP de cadena sin troquel: su resultado va en `procesos`, no aquí.
             continue
@@ -792,7 +810,12 @@ def _remision_operador_pdf_ctx(rem, admin=False, con_desperdicio=False):
             total_general += troquel_total
         troqueles.append(troquel)
 
-    procesos = [p for p in (_remision_procesos_ctx(op) for op in _remision_operador_ops(rem)) if p]
+    procesos = [p for p in (_remision_procesos_ctx(op) for op in ops) if p]
+    complementary_processes = [
+        {"op_numero": op.numero, "items": descriptions}
+        for op in ops
+        if (descriptions := _additional_processes(op))
+    ]
 
     # Preserve the aggregate for API compatibility. Documents display the
     # delivered quantity on each OP instead of combining different products.
@@ -802,6 +825,7 @@ def _remision_operador_pdf_ctx(rem, admin=False, con_desperdicio=False):
         "rem": rem,
         "troqueles": troqueles,
         "procesos": procesos,
+        "complementary_processes": complementary_processes,
         "cantidad_entregada": _fmt_num(cantidad_entregada),
         "logo_uri": _logo_data_uri(),
     }
@@ -1368,7 +1392,9 @@ class DocumentoClienteViewSet(viewsets.ModelViewSet):
 class OrdenProduccionViewSet(viewsets.ModelViewSet):
     """Órdenes de producción. Módulo admin-only, sin estados."""
 
-    queryset = OrdenProduccion.objects.select_related("cliente", "cotizacion", "papel").prefetch_related("procesos")
+    queryset = OrdenProduccion.objects.select_related(
+        "cliente", "cotizacion", "papel", "remision", "remision__consolidada_en_remision"
+    ).prefetch_related("procesos")
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ["numero", "cliente__nombre", "referencia"]
     ordering_fields = ["creado", "fecha"]
@@ -2042,22 +2068,23 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
     def remisionables_produccion(self, request):
         """GET /api/ordenes/remisionables_produccion/ — Operador o Admin.
 
-        OPs con al menos un proceso de cadena (impresora/laminadora/
-        barnizadora/troqueladora) que ya completaron todas sus estaciones
-        activas y por eso tienen una remisión pendiente de generar (creada
-        sola al llegar al 100%, ver `_maybe_crear_remision`). Incluye las que
-        además tienen troquel activo (molde + producción completa: es un solo
-        trabajo, se remisiona junto — el desglose de cuchilla sale igual en el
-        PDF, ver `_remision_operador_pdf_ctx`). Solo excluye troquel *puro*
-        (sin cadena): esas viven en `remisionables_operador` / la pantalla de
-        Troqueles. Vista sanitizada (sin valores). El front agrupa por
-        cliente.
+        Completed chain orders and direct orders with an active `terminado`
+        process. The latter can be remitted without station records. Pure die
+        tasks stay in `remisionables_operador`.
         """
         qs = (
             OrdenProduccion.objects
             .filter(remision_descartada_operador_en__isnull=True)
-            .filter(procesos__proceso_id__in=chain.CHAIN_PROCESOS, procesos__active=True)
-            .filter(remision__estado="pendiente", remision__generada_en__isnull=True)
+            .filter(
+                Q(procesos__proceso_id__in=chain.CHAIN_PROCESOS,
+                  procesos__active=True, remision__estado="pendiente",
+                  remision__generada_en__isnull=True)
+                | Q(cotizacion__isnull=True, procesos__proceso_id="terminado",
+                    procesos__active=True, remision__isnull=True)
+                | Q(cotizacion__isnull=True, procesos__proceso_id="terminado",
+                    procesos__active=True, remision__estado="pendiente",
+                    remision__generada_en__isnull=True)
+            )
             .select_related("cliente", "remision")
             .distinct()
             .order_by("cliente__nombre", F("fecha_entrega").asc(nulls_last=True), "creado")
@@ -2066,17 +2093,14 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         return Response(data)
 
     @action(detail=False, methods=["post"], url_path="consolidar_remision_operador")
+    @transaction.atomic
     def consolidar_remision_operador(self, request):
         """POST /api/ordenes/consolidar_remision_operador/ — Operador o Admin.
 
-        Body { "orden_ids": [int, ...], "observaciones": str? }. Asegura una
+        Body { "orden_ids": [int, ...] }. Asegura una
         remisión pendiente para cada OP (mismo cliente), fusiona todas en la
         primera y devuelve { remision_id, remision_numero }. No exige precios
         del troquel.
-
-        `observaciones` es la nota general que el Operador escribe al generar:
-        se imprime al pie del documento. Vacía no borra la que ya traía la
-        remisión (heredada de la OP).
 
         La remisión queda marcada como generada: sus OPs salen de la cola del
         Operador y pasan al historial.
@@ -2093,11 +2117,11 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         if len(cliente_ids) > 1:
             return Response({"error": "Todas las OP deben ser del mismo cliente."}, status=400)
 
-        # Solo a las OP con troquel les exige el formato de cuchillas enviado
-        # (ni borrador ni devuelto); las de cadena pura ya llegan aquí completas.
+        # A direct finished order can skip the die form and station records.
         sin_formato = [
             op.numero for op in ops
             if op.procesos.filter(proceso_id="troquel", active=True).exists()
+            and not _is_direct_finished(op)
             and not op.formatos_cuchillas.filter(estado__in=["pendiente", "aprobado"]).exists()
         ]
         if sin_formato:
@@ -2109,12 +2133,24 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         ops.sort(key=lambda op: ids.index(op.id))
         remisiones = []
         for op in ops:
-            rem = Remision.objects.filter(orden=op).first() or _crear_remision(op)
-            if rem.estado != "pendiente":
-                return Response({
-                    "error": f"La remisión {rem.numero} ya fue enviada o consolidada.",
-                }, status=409)
+            rem = Remision.objects.filter(orden=op).first()
+            if rem is not None:
+                if rem.estado != "pendiente" or rem.generada_en or rem.enviada_en:
+                    return Response({
+                        "error": f"La remisión {rem.numero or 'de esta OP'} ya fue generada o consolidada.",
+                    }, status=409)
+            else:
+                has_chain = op.procesos.filter(
+                    proceso_id__in=chain.CHAIN_PROCESOS, active=True
+                ).exists()
+                has_die = op.procesos.filter(proceso_id="troquel", active=True).exists()
+                if not _is_direct_finished(op) and (has_chain or not has_die):
+                    return Response({
+                        "error": f"La OP {op.numero} aún no está lista para remisionar.",
+                    }, status=409)
             remisiones.append(rem)
+
+        remisiones = [rem or _crear_remision(op) for op, rem in zip(ops, remisiones)]
 
         target = remisiones[0]
         fuentes = remisiones[1:]
@@ -2125,10 +2161,6 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         campos = ["generada_en", "generada_por", "modificado"]
         target.generada_en = timezone.now()
         target.generada_por = request.user if request.user.is_authenticated else None
-        observaciones = (request.data.get("observaciones") or "").strip()
-        if observaciones:
-            target.observaciones = observaciones
-            campos.append("observaciones")
         target.save(update_fields=campos)
         return Response({"remision_id": target.id, "remision_numero": target.numero})
 
@@ -2341,7 +2373,7 @@ class RemisionViewSet(viewsets.ModelViewSet):
         "items", "remisiones_consolidadas"
     )
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ["numero", "remisiones_consolidadas__numero", "cliente__nombre", "orden__numero"]
+    search_fields = ["numero", "cliente__nombre", "orden__numero"]
     ordering_fields = ["creado", "fecha", "estado"]
     http_method_names = ["get", "patch", "put", "post", "delete", "head", "options"]
 

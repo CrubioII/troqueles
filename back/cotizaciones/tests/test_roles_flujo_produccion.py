@@ -12,6 +12,7 @@ terminar) — no toca db.sqlite3 de desarrollo. Ver back/scripts/test_flujo_role
 para la variante manual que sí deja usuarios/datos reales para inspección.
 """
 from django.contrib.auth import get_user_model
+from django.template.loader import render_to_string
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -20,6 +21,7 @@ from cotizaciones.models import (
     Cliente, FormatoCuchillas, OrdenProduccion, PerfilOperador, Remision,
 )
 from cotizaciones.serializers import _orden_progreso
+from cotizaciones.views import _remision_operador_pdf_ctx
 
 User = get_user_model()
 
@@ -211,6 +213,78 @@ class RolesProduccionTestCase(TestCase):
             self.assertEqual(resp.status_code, 403)
         resp = self.c_general.get("/api/ordenes/remisionables_produccion/")
         self.assertEqual(resp.status_code, 200)
+
+    def test_direct_finished_order_can_generate_without_station_records(self):
+        created = self.c_general.post("/api/ordenes/", {
+            "fecha": "2026-09-03", "cliente": self.cliente.id,
+            "referencia": "Ready to deliver", "cantidad": 480,
+            "procesos": [
+                {"proceso_id": "impresion", "active": True},
+                {"proceso_id": "terminado", "active": True},
+            ],
+        }, format="json")
+        self.assertEqual(created.status_code, 201, created.data)
+        order_id = created.data["id"]
+        self.assertFalse(Remision.objects.filter(orden_id=order_id).exists())
+
+        queue = self.c_general.get("/api/ordenes/remisionables_produccion/")
+        self.assertEqual(queue.status_code, 200)
+        self.assertIn(order_id, [order["id"] for order in queue.data])
+        detail = self.c_general.get(f"/api/ordenes/{order_id}/")
+        self.assertIsNone(detail.data["remision_id"])
+        self.assertFalse(detail.data["remision_generada"])
+
+        generated = self.c_general.post("/api/ordenes/consolidar_remision_operador/", {
+            "orden_ids": [order_id],
+        }, format="json")
+        self.assertEqual(generated.status_code, 200, generated.data)
+        rem = Remision.objects.get(pk=generated.data["remision_id"])
+        self.assertEqual(rem.items.first().cantidad, 480)
+        context = _remision_operador_pdf_ctx(rem)
+        self.assertEqual(context["procesos"][0]["cantidad_entregada"], "480")
+        html = render_to_string("cotizaciones/pdf_remision_operador.html", context)
+        self.assertIn("Cantidad entregada:</strong> 480", html)
+        self.assertIn("Terminado", html)
+        detail = self.c_general.get(f"/api/ordenes/{order_id}/")
+        self.assertEqual(detail.data["remision_id"], rem.id)
+        self.assertTrue(detail.data["remision_generada"])
+
+        queue = self.c_general.get("/api/ordenes/remisionables_produccion/")
+        self.assertNotIn(order_id, [order["id"] for order in queue.data])
+
+    def test_finished_only_order_is_remittable(self):
+        created = self.c_general.post("/api/ordenes/", {
+            "fecha": "2026-09-03", "cliente": self.cliente.id,
+            "referencia": "Already finished", "cantidad": 25,
+            "procesos": [{"proceso_id": "terminado", "active": True}],
+        }, format="json")
+        self.assertEqual(created.status_code, 201, created.data)
+        second = self.c_general.post("/api/ordenes/", {
+            "fecha": "2026-09-03", "cliente": self.cliente.id,
+            "referencia": "Another finished product", "cantidad": 30,
+            "procesos": [{"proceso_id": "terminado", "active": True}],
+        }, format="json")
+        self.assertEqual(second.status_code, 201, second.data)
+        queue = self.c_general.get("/api/ordenes/remisionables_produccion/")
+        self.assertIn(created.data["id"], [order["id"] for order in queue.data])
+        self.assertIn(second.data["id"], [order["id"] for order in queue.data])
+        generated = self.c_general.post("/api/ordenes/consolidar_remision_operador/", {
+            "orden_ids": [created.data["id"], second.data["id"]],
+        }, format="json")
+        self.assertEqual(generated.status_code, 200, generated.data)
+        rem = Remision.objects.get(pk=generated.data["remision_id"])
+        self.assertEqual(_remision_operador_pdf_ctx(rem)["procesos"][0]["cantidad_entregada"], "25")
+        self.assertEqual(rem.items.count(), 2)
+        self.assertEqual(Remision.objects.filter(numero__isnull=False).count(), 1)
+        self.assertIsNone(Remision.objects.get(orden_id=second.data["id"]).numero)
+
+        another_order = OrdenProduccion.objects.create(
+            cliente=self.cliente, fecha=timezone.localdate(), referencia="Later order", cantidad=1,
+        )
+        available = Remision.objects.create(
+            orden=another_order, cliente=self.cliente, fecha=timezone.localdate(),
+        )
+        self.assertEqual(available.numero, "REM-0002")
 
     def test_ordenes_crud_solo_general_y_troquelador(self):
         op_id = self._crear_op("TEST-SEG-003")

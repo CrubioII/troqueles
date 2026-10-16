@@ -150,6 +150,14 @@
     letter-spacing: 0.1em; color: #b08a6a; margin-bottom: 2px;
   }
   .troquel-nota-text { font-size: 10px; color: #555; line-height: 1.5; white-space: pre-wrap; }
+  table.consumos tbody td.process-name { font-size: 13px; font-weight: 700; color: #1B1816; }
+  .process-note { margin-top: 4px; color: #555; white-space: pre-wrap; line-height: 1.5; }
+  .process-note strong { color: #777; font-size: 9px; }
+  .complementary-section { padding: 11px 18px 12px; border-top: 1px solid #e8e8e8; }
+  .complementary-title { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: #777; margin-bottom: 5px; }
+  .complementary-list { margin: 0 0 0 16px; padding: 0; color: #1B1816; font-size: 12px; font-weight: 700; line-height: 1.6; }
+  .complementary-list li { padding: 1px 0; break-inside: avoid; }
+  .complementary-op { margin-left: 7px; color: #888; font: 9px monospace; }
   .no-consumo { padding: 8px 18px; font-size: 10px; color: #aaa; font-style: italic; }
 
   tr.subtotal-row td {
@@ -288,12 +296,6 @@
     {% else %}
     <div class="no-consumo">Sin formato de cuchillas registrado.</div>
     {% endif %}
-    {% if t.additional_processes %}
-    <div class="troquel-nota">
-      <div class="troquel-nota-lbl">Procesos complementarios</div>
-      <div class="troquel-nota-text">{% for description in t.additional_processes %}<div>{{ description|capfirst }}</div>{% endfor %}</div>
-    </div>
-    {% endif %}
     {% if t.observaciones %}
     <div class="troquel-nota">
       <div class="troquel-nota-lbl">Observaciones del troquel</div>
@@ -323,22 +325,30 @@
       <tbody>
         {% for it in p.items %}
         <tr>
-          <td>{{ it.proceso_label }}</td>
+          <td class="process-name">{{ it.proceso_label }}</td>
           <td class="col-detalle">
             {% for line in it.detalle %}<div>{{ line }}</div>{% endfor %}
+            {% if it.observaciones %}<div class="process-note"><strong>Observaciones:</strong> {{ it.observaciones }}</div>{% endif %}
           </td>
         </tr>
         {% endfor %}
-        {% if p.additional_processes %}
-        <tr>
-          <td>Procesos complementarios</td>
-          <td class="col-detalle">{% for description in p.additional_processes %}<div>{{ description|capfirst }}</div>{% endfor %}</td>
-        </tr>
-        {% endif %}
       </tbody>
     </table>
   </div>
   {% endfor %}
+
+  {% if complementary_processes %}
+  <div class="complementary-section">
+    <div class="complementary-title">Procesos complementarios</div>
+    <ul class="complementary-list">
+      {% for group in complementary_processes %}
+        {% for description in group.items %}
+        <li>{{ description|capfirst }}{% if complementary_processes|length > 1 %}<span class="complementary-op">{{ group.op_numero }}</span>{% endif %}</li>
+        {% endfor %}
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
 
   <!-- Total general -->
   <div class="total-general">
@@ -346,29 +356,22 @@
     <span class="val">{{ total_general }}</span>
   </div>
 
-  {% if rem.observaciones %}
-  <div class="nota-section">
-    <div class="nota-lbl">Observaciones</div>
-    <div class="nota-text">{{ rem.observaciones }}</div>
-  </div>
-  {% endif %}
-
   <!-- Firmas -->
   <div class="signatures">
+    <div class="sig-col">
+      <div class="sig-line">
+        <div class="sig-title">Entregado por</div>
+        <div class="sig-fields">
+          <span class="sig-brand">Troqueles ink</span>
+        </div>
+      </div>
+    </div>
     <div class="sig-col">
       <div class="sig-line">
         <div class="sig-title">Recibido conforme</div>
         <div class="sig-fields">
           Nombre: ______________________<br>
           C.C. / NIT: ___________________
-        </div>
-      </div>
-    </div>
-    <div class="sig-col">
-      <div class="sig-line">
-        <div class="sig-title">Entregado por</div>
-        <div class="sig-fields">
-          <span class="sig-brand">Troqueles ink</span>
         </div>
       </div>
     </div>

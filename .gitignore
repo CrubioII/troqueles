@@ -11,3 +11,7 @@ back/media/
 
 # macOS
 .DS_Store
+
+# Generated local build and preview files
+front/node_modules/.vite/
+output/

@@ -2,7 +2,7 @@ import re
 import unicodedata
 
 from django.conf import settings
-from django.db import models, transaction
+from django.db import IntegrityError, models, transaction
 
 
 def normalizar_nombre_cliente(nombre):
@@ -753,7 +753,7 @@ class Remision(models.Model):
         ("consolidada", "Consolidada"),
     ]
 
-    numero = models.CharField(max_length=20, unique=True, blank=True)
+    numero = models.CharField(max_length=20, unique=True, blank=True, null=True)
     fecha = models.DateField()
     orden = models.OneToOneField(
         OrdenProduccion, on_delete=models.PROTECT, related_name="remision"
@@ -794,12 +794,28 @@ class Remision(models.Model):
         ordering = ["-creado"]
 
     def save(self, *args, **kwargs):
-        is_new = not self.pk
         with transaction.atomic():
             super().save(*args, **kwargs)
-            if is_new and not self.numero:
-                self.numero = f"REM-{self.pk:04d}"
-                Remision.objects.filter(pk=self.pk).update(numero=self.numero)
+            if not self.numero and self.estado != "consolidada":
+                # A merged source has no document number. Continue after the
+                # highest issued number when creating or restoring a document.
+                for _ in range(100):
+                    issued = [
+                        int(number[4:]) for number in Remision.objects
+                        .filter(numero__startswith="REM-").values_list("numero", flat=True)
+                        if number[4:].isdigit()
+                    ]
+                    next_number = max(issued, default=0) + 1
+                    candidate = f"REM-{next_number:04d}"
+                    try:
+                        with transaction.atomic():
+                            Remision.objects.filter(pk=self.pk).update(numero=candidate)
+                        self.numero = candidate
+                        break
+                    except IntegrityError:
+                        continue
+                else:
+                    raise IntegrityError("Could not allocate a remission number")
 
     def __str__(self):
         return f"{self.numero} · {self.cliente}"

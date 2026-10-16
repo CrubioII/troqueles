@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { useParams } from 'react-router-dom'
 import { Icon } from '../components/Icons'
-import { fmtCOP, fmtNum, CONDICIONES_PAGO_OP, TIPOS_FACTURACION, Section, SaveStatus } from '../components/core'
+import { fmtCOP, fmtNum, CONDICIONES_PAGO_OP, TIPOS_FACTURACION, Section, SaveStatus, ESTACION_DE_PROCESO } from '../components/core'
 import { SectionGenerales, SectionPapel, SectionCortes, SectionProcesos, SectionCondicionesOP } from '../components/sections'
 import LiquidationPanel from '../components/LiquidationPanel'
 import { ModeloTroquelGestion } from '../components/Troquel'
@@ -10,6 +10,7 @@ import {
   getOrden, getPapeles, createOrden, updateOrden,
   getNextNumeroOrden, updateCliente,
   pdfOpAdmin, pdfOpProduccion,
+  consolidarRemisionOperador, pdfRemisionOperadorConsolidada,
 } from '../api'
 import { crearClienteConGuard } from '../lib/clienteDedup'
 import { useAuth } from '../context/AuthContext'
@@ -88,6 +89,8 @@ export default function OrdenEdit() {
   // estado al llegar el catálogo de papel: esto marca el fin de ese arranque.
   const [bootstrapped, setBootstrapped] = useState(false)
   const [saveError, setSaveError] = useState(null)
+  const [remissionBusy, setRemissionBusy] = useState(false)
+  const [remissionError, setRemissionError] = useState(null)
 
   const locked = !!d.cotizacionId
 
@@ -201,6 +204,8 @@ export default function OrdenEdit() {
         ...prev,
         id: result.id,
         numero: result.numero || prev.numero,
+        remisionId: result.remision_id || prev.remisionId || null,
+        remisionGenerada: !!result.remision_generada || prev.remisionGenerada,
       }))
       return result.id
     } catch (e) {
@@ -216,12 +221,47 @@ export default function OrdenEdit() {
 
   const { status: saveStatus, retry: retrySave, dirty, markPristine } = useAutosave(
     useMemo(() => {
-      const { id, numero, ...dComparable } = d
+      const { id, numero, remisionId, remisionGenerada, ...dComparable } = d
       return { d: dComparable, procesos }
     }, [d, procesos]),
     () => save(),
     { enabled: false, isValid: () => puedeGuardar }
   )
+
+  const canRemitFinished = !isAdmin && !locked && !!procesos.terminado?.active
+    && (user?.remisionesGenerales || !Object.entries(procesos).some(
+      ([processId, process]) => process.active && ESTACION_DE_PROCESO[processId]
+    ))
+
+  const handleFinishedRemission = async () => {
+    if (remissionBusy || !puedeGuardar) return
+    setRemissionBusy(true)
+    setRemissionError(null)
+    try {
+      let orderId = d.id
+      if (!orderId || dirty) {
+        orderId = await save()
+        markPristine()
+      }
+      let remissionId = d.remisionId
+      if (!d.remisionGenerada) {
+        const generated = await consolidarRemisionOperador([orderId])
+        remissionId = generated.remision_id
+        setData(prev => ({ ...prev, remisionId: remissionId, remisionGenerada: true }))
+      }
+      const response = await pdfRemisionOperadorConsolidada(remissionId)
+      if (!response.ok) {
+        const body = await response.json().catch(() => null)
+        throw new Error(body?.error || `HTTP ${response.status}`)
+      }
+      const filename = (response.headers.get('Content-Disposition') || '').match(/filename="(.+?)"/)?.[1]
+      await downloadBlob(response, filename || 'Remision.pdf')
+    } catch (error) {
+      setRemissionError(error.message || 'No se pudo generar la remisión')
+    } finally {
+      setRemissionBusy(false)
+    }
+  }
 
   // La carga inicial (orden, catálogo de papel, tipo de cliente por defecto)
   // también mueve el estado: esa siembra es la línea base, no una edición.
@@ -446,7 +486,13 @@ export default function OrdenEdit() {
 
               {!isAdmin && (
                 <div className="section" style={{ marginTop: 16, padding: '14px 16px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10 }}>
+                  {remissionError && <span style={{ color: 'var(--danger, #c0392b)', fontSize: 12 }}>{remissionError}</span>}
                   <SaveStatus status={saveStatus} onRetry={retrySave} />
+                  {canRemitFinished && (
+                    <button className="btn" onClick={handleFinishedRemission} disabled={remissionBusy || saveStatus === 'saving' || !puedeGuardar}>
+                      {remissionBusy ? 'Generando…' : d.remisionGenerada ? 'Descargar remisión' : 'Guardar y generar remisión'}
+                    </button>
+                  )}
                   <button className="btn primary" onClick={retrySave} disabled={saveStatus === 'saving'}>
                     {saveStatus === 'saving' ? 'Guardando…' : 'Guardar'}
                   </button>

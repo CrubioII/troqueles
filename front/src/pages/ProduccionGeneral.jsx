@@ -162,9 +162,7 @@ function ExpandedDetail({ ordId, onProgresoChange, isAdmin }) {
   )
 }
 
-// Avisa antes de generar: si hace falta una observación general para toda la
-// remisión, este es el momento de escribirla — sale impresa en el documento.
-function ConfirmarRemisionModal({ cantidad, cliente, observaciones, onObservaciones, busy, error, onClose, onConfirm }) {
+function ConfirmarRemisionModal({ cantidad, cliente, busy, error, onClose, onConfirm }) {
   return (
     <div style={{
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 9999,
@@ -176,17 +174,9 @@ function ConfirmarRemisionModal({ cantidad, cliente, observaciones, onObservacio
         </div>
         <div style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5, marginBottom: 14 }}>
           Vas a generar una remisión de <strong>{cliente || 'este cliente'}</strong> con{' '}
-          <strong>{cantidad}</strong> {cantidad === 1 ? 'OP' : 'OPs'}. Si necesitas dejar una{' '}
-          <strong>observación general</strong> para toda la remisión, escríbela aquí:{' '}
-          <strong>aparecerá impresa en el documento generado</strong>.
+          <strong>{cantidad}</strong> {cantidad === 1 ? 'OP' : 'OPs'}.
+          Las observaciones del troquel, si las hay, aparecerán bajo cada troquel.
         </div>
-        <textarea
-          className="input"
-          style={{ width: '100%', minHeight: 70, resize: 'vertical', fontFamily: 'inherit', fontSize: 13 }}
-          placeholder="Observación general (opcional)…"
-          value={observaciones}
-          onChange={e => onObservaciones(e.target.value)}
-        />
         {error && <div style={{ marginTop: 10, fontSize: 12, color: 'var(--danger, #c0392b)' }}>✗ {error}</div>}
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
           <button className="btn sm" disabled={busy} onClick={onClose}>Cancelar</button>
@@ -214,7 +204,6 @@ function RemisionesProduccion() {
   const [genError, setGenError] = useState(null)
   const [genOk, setGenOk] = useState(null)
   const [confirmGen, setConfirmGen] = useState(false)
-  const [obsRem, setObsRem] = useState('')
 
   const [historial, setHistorial] = useState([])
   const [loadingHist, setLoadingHist] = useState(true)
@@ -234,7 +223,7 @@ function RemisionesProduccion() {
   const loadHistorial = (silent = false) => {
     if (!silent) setLoadingHist(true)
     getRemisionesGeneradasOperador()
-      .then(d => setHistorial(asList(d).filter(r => !r.tiene_troquel)))
+      .then(d => setHistorial(asList(d).filter(r => r.is_production)))
       .catch(() => setHistorial([]))
       .finally(() => setLoadingHist(false))
   }
@@ -331,10 +320,10 @@ function RemisionesProduccion() {
     setGenError(null)
     setGenOk(null)
     try {
-      const { remision_id, remision_numero } = await consolidarRemisionOperador(selRem, obsRem.trim())
+      const { remision_id, remision_numero } = await consolidarRemisionOperador(selRem)
       await descargarPdfRemision(remision_id)
       setSelRem([]); setSelCliente(null)
-      setConfirmGen(false); setObsRem('')
+      setConfirmGen(false)
       setGenOk(remision_numero)
       loadRemisionables()
       loadHistorial()
@@ -392,7 +381,7 @@ function RemisionesProduccion() {
           </button>
         </div>
         <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', fontSize: 12, color: 'var(--ink-3)' }}>
-          Marca varias OPs del <strong>mismo cliente</strong> ya completas (todas sus estaciones) para reunirlas en una sola remisión de entrega. Incluye OPs con troquel si además tienen procesos de cadena; el troquel puro (sin cadena) se gestiona en Producción › Troqueles.
+          Marca varias OPs del <strong>mismo cliente</strong> para reunirlas en una sola remisión. Aparecen las OPs completas y las OPs directas con <strong>Terminado</strong> activo, listas para remisionar sin registros de estación.
         </div>
         <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)' }}>
           <div style={{ position: 'relative', maxWidth: 420 }}>
@@ -530,8 +519,6 @@ function RemisionesProduccion() {
         <ConfirmarRemisionModal
           cantidad={selRem.length}
           cliente={remisionables.find(op => op.cliente_id === selCliente)?.cliente_nombre}
-          observaciones={obsRem}
-          onObservaciones={setObsRem}
           busy={genBusy}
           error={genError}
           onClose={() => { if (!genBusy) { setConfirmGen(false); setGenError(null) } }}

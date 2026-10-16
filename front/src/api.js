@@ -516,13 +516,12 @@ export const getRemisionablesProduccion = () =>
   apiFetch(`${BASE}/ordenes/remisionables_produccion/`).then(json)
 
 // Crea/consolida una remisión del Operador a partir de varias OP del mismo cliente.
-// `observaciones`: nota general que se imprime al pie del documento (vacía no
-// borra la que ya traía la remisión). Devuelve { remision_id, remision_numero }.
-export const consolidarRemisionOperador = (ordenIds, observaciones = '') =>
+// Devuelve { remision_id, remision_numero }.
+export const consolidarRemisionOperador = (ordenIds) =>
   apiFetch(`${BASE}/ordenes/consolidar_remision_operador/`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ orden_ids: ordenIds, observaciones }),
+    body: JSON.stringify({ orden_ids: ordenIds }),
   }).then(jsonConCodigo)
 
 // Descarga el PDF de remisión del Operador (consumo en cm + firma del cliente).
