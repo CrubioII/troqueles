@@ -246,9 +246,16 @@ export default function CotizacionEdit() {
     try {
       await flushSave()
       const saved = await save()
-      const vu = Math.round(calc.valorUnitario || 0)
-      const vt = Math.round(calc.valorTotal || 0)
-      navigate(`/documentos/nuevo?cotizacion=${saved.id}&vu=${vu}&vt=${vt}`)
+      const sessionIds = Array.from(new Set(
+        tabs.map(tab => (tab.key === activeTab ? saved.id : tab.id)).filter(Boolean)
+      ))
+      if (sessionIds.length > 1) {
+        navigate(`/documentos/nuevo?cotizaciones=${sessionIds.join(',')}`)
+      } else {
+        const vu = Math.round(calc.valorUnitario || 0)
+        const vt = Math.round(calc.valorTotal || 0)
+        navigate(`/documentos/nuevo?cotizacion=${saved.id}&vu=${vu}&vt=${vt}`)
+      }
     } catch (e) {
       // el error ya quedó reflejado en saveError vía save()
     } finally {

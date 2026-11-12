@@ -48,6 +48,21 @@ function newItem(overrides = {}) {
   }
 }
 
+function cotToItem(cot, fallbackVu = 0, fallbackVt = 0) {
+  const ancho = parseFloat(cot.molde_ancho) || 0
+  const alto = parseFloat(cot.molde_alto) || 0
+  return newItem({
+    cotizacion: cot.id,
+    cotizacionNumero: cot.numero || '',
+    referencia: cot.referencia || '',
+    descripcion: cot.observaciones || '',
+    tamanoDisplay: ancho > 0 && alto > 0 ? `${ancho} × ${alto} cm` : '',
+    cantidad: cot.cantidad || 0,
+    valorUnitario: parseFloat(cot.valor_unitario_efectivo ?? cot.valor_unitario_override) || fallbackVu,
+    valorTotal: parseFloat(cot.valor_total_efectivo ?? cot.valor_total_override) || fallbackVt,
+  })
+}
+
 function apiToState(doc) {
   return {
     id: doc.id,
@@ -377,8 +392,14 @@ export default function DocumentoClienteEdit() {
     setData(prev => ({ ...prev, ...patch }))
   }
 
+  const cotIdsParam = searchParams.get('cotizaciones') || searchParams.get('cotizacion')
+  const cotIds = useMemo(
+    () => (cotIdsParam ? cotIdsParam.split(',').map(s => s.trim()).filter(Boolean) : []),
+    [cotIdsParam]
+  )
+
   // Source cotización: from URL param (new doc) or first item (existing doc)
-  const sourceCotId = searchParams.get('cotizacion') || d.items.find(i => i.cotizacion)?.cotizacion
+  const sourceCotId = cotIds[0] || d.items.find(i => i.cotizacion)?.cotizacion
 
   useEffect(() => {
     if (!isNew) {
@@ -388,31 +409,25 @@ export default function DocumentoClienteEdit() {
         .finally(() => setLoading(false))
       return
     }
-    const cotId = searchParams.get('cotizacion')
-    if (cotId) {
+    if (cotIds.length > 0) {
       const vuParam = parseFloat(searchParams.get('vu')) || 0
       const vtParam = parseFloat(searchParams.get('vt')) || 0
-      getCotizacion(cotId).then(cot => {
-        const ancho = parseFloat(cot.molde_ancho) || 0
-        const alto = parseFloat(cot.molde_alto) || 0
+      Promise.all(cotIds.map(cid => getCotizacion(cid))).then(cots => {
+        if (!cots.length) return
+        const primary = cots[0]
         set({
-          cliente: cot.cliente_nombre || '',
-          clienteId: cot.cliente || null,
-          clienteEmail: cot.cliente_email || '',
-          clienteTelefono: cot.cliente_telefono || '',
-          clienteNit: cot.cliente_nit || '',
-          condicionPago: cot.condicion_pago || '30',
-          condicionCustom: cot.condicion_custom || '',
-          items: [newItem({
-            cotizacion: cot.id,
-            cotizacionNumero: cot.numero || '',
-            referencia: cot.referencia || '',
-            descripcion: cot.observaciones || '',
-            tamanoDisplay: ancho > 0 && alto > 0 ? `${ancho} × ${alto} cm` : '',
-            cantidad: cot.cantidad || 0,
-            valorUnitario: parseFloat(cot.valor_unitario_efectivo ?? cot.valor_unitario_override) || vuParam,
-            valorTotal: parseFloat(cot.valor_total_efectivo ?? cot.valor_total_override) || vtParam,
-          })],
+          cliente: primary.cliente_nombre || '',
+          clienteId: primary.cliente || null,
+          clienteEmail: primary.cliente_email || '',
+          clienteTelefono: primary.cliente_telefono || '',
+          clienteNit: primary.cliente_nit || '',
+          condicionPago: primary.condicion_pago || '30',
+          condicionCustom: primary.condicion_custom || '',
+          items: cots.map((cot, idx) => cotToItem(
+            cot,
+            cots.length === 1 && idx === 0 ? vuParam : 0,
+            cots.length === 1 && idx === 0 ? vtParam : 0,
+          )),
         })
       }).catch(console.error)
     }
@@ -441,18 +456,7 @@ export default function DocumentoClienteEdit() {
     setShowImport(false)
     try {
       const cot = await getCotizacion(cotId)
-      const ancho = parseFloat(cot.molde_ancho) || 0
-      const alto = parseFloat(cot.molde_alto) || 0
-      const imported = newItem({
-        cotizacion: cot.id,
-        cotizacionNumero: cot.numero || '',
-        referencia: cot.referencia || '',
-        descripcion: cot.observaciones || '',
-        tamanoDisplay: ancho > 0 && alto > 0 ? `${ancho} × ${alto} cm` : '',
-        cantidad: cot.cantidad || 0,
-        valorUnitario: parseFloat(cot.valor_unitario_efectivo ?? cot.valor_unitario_override) || 0,
-        valorTotal: parseFloat(cot.valor_total_efectivo ?? cot.valor_total_override) || 0,
-      })
+      const imported = cotToItem(cot)
       if (importTarget !== null) {
         setData(prev => ({
           ...prev,
