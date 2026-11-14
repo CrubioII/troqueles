@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { fmtNum, ESTACIONES_CONFIG } from '../components/core'
+import { fmtNum, ESTACIONES_CONFIG, LibreBadge } from '../components/core'
 import { Icon } from '../components/Icons'
 import { RegistroProcesoForm, RegistroProcesoHistory } from '../components/RegistroProceso'
 import { getOrdenesEstacion, getRegistrosProceso, setEstacionPrioridades } from '../api'
@@ -88,6 +88,7 @@ export default function EstacionMaquina({ estacion, estaciones, embedded = false
   const [busquedaHist, setBusquedaHist] = useState('')
   const [aviso, setAviso] = useState(null)      // { tipo, texto } tras registrar
   const [ordenError, setOrdenError] = useState(null)  // fallo al guardar prioridades
+  const [libreAbierto, setLibreAbierto] = useState(false)  // "+ Registro libre" form
 
   const loadLista = (silent = false) => {
     if (!silent) setLoadingLista(true)
@@ -107,7 +108,7 @@ export default function EstacionMaquina({ estacion, estaciones, embedded = false
 
   // Al cambiar de estación (misma pantalla, otra ruta) se reinicia todo.
   useEffect(() => {
-    setTab('pendientes'); setOrden(null); setBusqueda(''); setAviso(null)
+    setTab('pendientes'); setOrden(null); setBusqueda(''); setAviso(null); setLibreAbierto(false)
     loadLista()
   }, [idsKey])
 
@@ -167,7 +168,21 @@ export default function EstacionMaquina({ estacion, estaciones, embedded = false
     loadLista(true)
   }
 
-  const abrir = (op) => { setOrden(op); setAviso(null) }
+  // Free record: the backend created the OP; tell the worker where it went.
+  const handleLibreCreated = (data) => {
+    const sig = data.siguiente_estacion
+    setAviso({
+      tipo: 'ok',
+      texto: sig
+        ? `${data.orden_numero} registrada (registro libre). Pasó a la cola de ${sig.label}.`
+        : `${data.orden_numero} registrada (registro libre). Quedó lista para remisión.`,
+    })
+    setLibreAbierto(false)
+    loadLista(true)
+    if (tab === 'historial') loadHistorial()
+  }
+
+  const abrir = (op) => { setOrden(op); setAviso(null); setLibreAbierto(false) }
 
   const body = (
       <div style={{ maxWidth: 1200, margin: '0 auto', padding: embedded ? '4px 0 0' : 'clamp(12px, 4vw, 28px) clamp(12px, 4vw, 24px)', width: '100%' }}>
@@ -185,7 +200,20 @@ export default function EstacionMaquina({ estacion, estaciones, embedded = false
           </div>
         )}
 
-        {orden ? (
+        {libreAbierto ? (
+          <>
+            <button className="btn" style={{ marginBottom: 4 }} onClick={() => setLibreAbierto(false)}>
+              <Icon.ArrowLeft /> Volver a la cola
+            </button>
+            <Section title={`Registro libre · ${cfg.label}`}>
+              <div style={{ padding: '10px 16px 0', fontSize: 12, color: 'var(--ink-3)' }}>
+                Para trabajos que no tienen OP cargada. Indica el cliente, la referencia y lo que salió;
+                al terminar se te preguntará si el trabajo sigue a otra máquina.
+              </div>
+              <RegistroProcesoForm libre estacion={estacion} onCreated={handleLibreCreated} />
+            </Section>
+          </>
+        ) : orden ? (
           <>
             {embedded && (
               <button className="btn" style={{ marginBottom: 4 }} onClick={() => setOrden(null)}>
@@ -201,7 +229,7 @@ export default function EstacionMaquina({ estacion, estaciones, embedded = false
           </>
         ) : (
           <>
-            <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+            <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
               {[['pendientes', 'En cola'], ['historial', 'Historial']].map(([id, label]) => (
                 <button
                   key={id}
@@ -212,6 +240,15 @@ export default function EstacionMaquina({ estacion, estaciones, embedded = false
                   {id === 'pendientes' && lista.length > 0 ? ` (${lista.length})` : ''}
                 </button>
               ))}
+              {!combinado && (
+                <button
+                  className="btn accent"
+                  style={{ marginLeft: 'auto' }}
+                  onClick={() => { setLibreAbierto(true); setAviso(null) }}
+                >
+                  + Registro libre
+                </button>
+              )}
             </div>
 
             {tab === 'pendientes' ? (
@@ -284,6 +321,7 @@ export default function EstacionMaquina({ estacion, estaciones, embedded = false
                               )}
                               <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 12 }}>
                                 {op.numero}
+                                {op.origen === 'registro_libre' && <LibreBadge />}
                               </td>
                               <td style={{ padding: '10px 12px', fontSize: 12, color: ent.color }}>{ent.txt}</td>
                               <td style={{ padding: '10px 12px', fontWeight: 600 }}>{op.cliente_nombre}</td>
@@ -343,8 +381,8 @@ export default function EstacionMaquina({ estacion, estaciones, embedded = false
           <div className="mod">{cfg.label}</div>
         </div>
         <div className="topbar-right">
-          <button className="btn" onClick={() => (orden ? setOrden(null) : navigate('/produccion'))}>
-            <Icon.ArrowLeft /> {orden ? 'Volver a la cola' : 'Volver'}
+          <button className="btn" onClick={() => (orden ? setOrden(null) : libreAbierto ? setLibreAbierto(false) : navigate('/produccion'))}>
+            <Icon.ArrowLeft /> {orden || libreAbierto ? 'Volver a la cola' : 'Volver'}
           </button>
         </div>
       </div>

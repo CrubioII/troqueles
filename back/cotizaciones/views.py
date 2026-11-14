@@ -2784,7 +2784,11 @@ class RegistroProcesoViewSet(viewsets.ModelViewSet):
         return qs
 
     def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
+        return self._registrar(request, request.data)
+
+    def _registrar(self, request, data):
+        """Shared by `create` and `libre`: validates and stores one station record."""
+        serializer = self.get_serializer(data=data)
         serializer.is_valid(raise_exception=True)
         datos = serializer.validated_data
         if not request.user.is_staff:
@@ -2846,7 +2850,7 @@ class RegistroProcesoViewSet(viewsets.ModelViewSet):
         # un faltante dentro de ese margen no bloquea el registro ni avisa al
         # Admin, solo lo que quede por debajo de (requerida - margen).
         faltante = realizada < (requerida - margen)
-        if faltante and not request.data.get("confirmar_faltante"):
+        if faltante and not data.get("confirmar_faltante"):
             # El servidor es la autoridad: sin confirmación explícita no se
             # registra, para que el aviso al Admin no se pueda saltar.
             return Response(
@@ -2899,6 +2903,79 @@ class RegistroProcesoViewSet(viewsets.ModelViewSet):
             status=201,
         )
 
+    @action(detail=False, methods=["post"], url_path="libre")
+    def libre(self, request):
+        """POST /api/registros-proceso/libre/ — free record at a station.
+
+        For jobs the Admin never loaded as an OP. The worker gives the client
+        (an existing one), the reference, the quantity that came out, the
+        station's technical data and, optionally, the processes still ahead
+        (`procesos_adicionales`). A direct OP (origen=registro_libre, no
+        prices, cantidad = what came out) is created on the fly and the record
+        goes through the same path as `create`:
+          · no extra processes → the OP is complete, its remisión is created
+            and it shows up in Producción General for remission;
+          · with extra processes → the OP enters the next station's queue.
+        """
+        data = request.data
+        estacion_id = data.get("estacion")
+        proceso_id = data.get("proceso_id")
+        est = chain.ESTACION_POR_ID.get(estacion_id)
+        if est is None or proceso_id not in est["procesos"]:
+            return Response(
+                {"error": f"El proceso '{proceso_id}' no pertenece a esta estación."}, status=400,
+            )
+        _require_estacion(request, estacion_id)
+
+        try:
+            cliente = Cliente.objects.get(pk=data.get("cliente"))
+        except (Cliente.DoesNotExist, ValueError, TypeError):
+            return Response({"error": "Selecciona un cliente registrado."}, status=400)
+        referencia = str(data.get("referencia") or "").strip()
+        if not referencia:
+            return Response({"error": "La referencia es obligatoria."}, status=400)
+        try:
+            cantidad = int(data.get("cantidad_realizada") or 0)
+        except (ValueError, TypeError):
+            cantidad = 0
+        if cantidad <= 0:
+            return Response({"error": "La cantidad debe ser mayor a cero."}, status=400)
+
+        adicionales = data.get("procesos_adicionales") or []
+        if not isinstance(adicionales, list):
+            return Response({"error": "procesos_adicionales debe ser una lista."}, status=400)
+        adicionales = list(dict.fromkeys(adicionales))
+        for pid in adicionales:
+            siguiente = chain.PROCESO_A_ESTACION.get(pid)
+            if siguiente is None or siguiente["orden"] <= est["orden"]:
+                return Response(
+                    {"error": f"'{pid}' no es un proceso posterior a {est['label']}."}, status=400,
+                )
+
+        with transaction.atomic():
+            op = OrdenProduccion.objects.create(
+                fecha=timezone.localdate(),
+                cliente=cliente,
+                referencia=referencia[:300],
+                cantidad=cantidad,
+                tipo_cliente=cliente.tipo or "final",
+                origen="registro_libre",
+                corte_final_active="corteFinal" in adicionales,
+            )
+            for pid in [proceso_id, *adicionales]:
+                OpProceso.objects.create(orden=op, proceso_id=pid, active=True)
+            registro_data = {
+                k: v for k, v in data.items()
+                if k not in ("cliente", "referencia", "procesos_adicionales", "monto_cobrado")
+            }
+            registro_data.update(orden=op.pk, cantidad_realizada=cantidad)
+            response = self._registrar(request, registro_data)
+            if response.status_code != 201:
+                transaction.set_rollback(True)
+                return response
+        response.data["orden_numero"] = op.numero
+        return response
+
     @action(detail=True, methods=["post"], url_path="anular")
     def anular(self, request, pk=None):
         """POST /api/registros-proceso/{id}/anular/ — deshace un registro.
@@ -2934,6 +3011,9 @@ class RegistroProcesoViewSet(viewsets.ModelViewSet):
             )
             Notificacion.objects.filter(registro=registro).delete()
             registro.delete()
+            # A free record created its own OP: undoing it leaves nothing behind.
+            if op.origen == "registro_libre" and not op.registros_proceso.exists():
+                op.delete()
         return Response({"ok": True})
 
     def update(self, request, *args, **kwargs):

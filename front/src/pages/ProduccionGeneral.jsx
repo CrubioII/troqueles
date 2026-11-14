@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Icon } from '../components/Icons'
-import { fmtNum, ProgressBar, Checkbox, ESTACIONES_CONFIG, ESTACION_DE_PROCESO, REMISION_STATUS_DEFS } from '../components/core'
+import { fmtNum, ProgressBar, Checkbox, ESTACIONES_CONFIG, ESTACION_DE_PROCESO, REMISION_STATUS_DEFS, LibreBadge } from '../components/core'
 import {
   getOrdenes, getOrden, toggleProcesoCompletado,
   getRemisionablesProduccion, consolidarRemisionOperador, pdfRemisionOperadorConsolidada,
@@ -423,7 +423,10 @@ function RemisionesProduccion() {
                             <input type="checkbox" checked={checked} onChange={() => toggleRem(op)} onClick={e => e.stopPropagation()} />
                           </td>
                           <td style={{ padding: '10px 12px', width: 90, fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 13 }}>{op.numero}</td>
-                          <td style={{ padding: '10px 12px', color: 'var(--ink-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{op.referencia}</td>
+                          <td style={{ padding: '10px 12px', color: 'var(--ink-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {op.referencia}
+                            {op.origen === 'registro_libre' && <LibreBadge />}
+                          </td>
                           <td style={{ padding: '10px 12px', width: 90, textAlign: 'right' }} onClick={e => e.stopPropagation()}>
                             <button
                               className="btn sm"

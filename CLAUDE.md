@@ -70,6 +70,13 @@ RegistroProceso model (back/cotizaciones/models.py): append-only log, one row pe
   — Queue order = `OpProceso.prioridad` (1 = first, null last). Reordered by dragging rows in the UI (`front/src/hooks/useDragOrder.js`), persisted via POST /api/ordenes/procesos/{proceso_id}/prioridades/ or /api/ordenes/estaciones/{estacion_id}/prioridades/ (body `{orden_ids: [...]}`) — admin-only (403 for Operador); the Operador's queue screens (EstacionMaquina.jsx, Troqueles.jsx) render read-only order, no drag handle or priority buttons
   — Frontend: pages/EstacionMaquina.jsx (shared screen for all 4 stations, driven by an `estacion` prop), components/RegistroProceso.jsx (form + history)
 
+Free station record ("+ Registro libre" in EstacionMaquina.jsx, Impresora/Laminadora/Barnizadora/Troqueladora)
+  — For jobs the Admin never loaded as an OP. Worker picks an existing client (components/ClientePicker.jsx — no client creation), reference, quantity and the station's technical data
+  — On "Terminar tarea" asks "¿Esta actividad tiene algún proceso adicional?" listing only the later chain processes (core.jsx `procesosPosteriores`)
+  — POST /api/registros-proceso/libre/ (RegistroProcesoViewSet.libre) creates a direct OP with `origen="registro_libre"` (no prices, cantidad = what came out) + its OpProcesos, then reuses the normal record path (`_registrar`)
+  — No extras → OP complete → remisión pendiente → shows in Producción General › Remisiones (es_general / Admin) with the "Registro libre" badge; with extras → OP enters the next station's queue
+  — Anular the only record of a free OP deletes that OP too
+
 Operador's remisiones queue (Troqueles.jsx › tab "Remisiones", the pre-generation OP picker — NOT the Historial tab, which stays an unmutable log): each OP has a "Descartar" button
   — `OrdenProduccion.remision_descartada_operador_en` — not a delete: the OP stays intact with its formato de cuchillas aprobado, it just drops out of the Operador's `remisionables_operador` queue; the Admin keeps managing it same as always (unaffected by this flag)
   — GET /api/ordenes/remisionables_operador/ filters it out; POST .../descartar_remisionable_operador/ (body `{orden_id}`) sets the discard timestamp — open to Operador and Admin

@@ -2,9 +2,11 @@ import { useState, useEffect, useMemo } from 'react'
 import {
   fmtNum, NumField, ChipToggle,
   ESTACIONES_CONFIG, TAMANOS_REGISTRO, TIPOS_LAMINADO_REGISTRO, TIPOS_METALIZADO_REGISTRO,
+  PROCESO_LABELS, procesosPosteriores,
 } from './core'
-import { createRegistroProceso, anularRegistroProceso } from '../api'
+import { createRegistroProceso, createRegistroLibre, anularRegistroProceso } from '../api'
 import GroupedIntegerInput from './GroupedIntegerInput'
+import ClientePicker from './ClientePicker'
 
 const fmtFecha = (iso) => new Date(iso).toLocaleString('es-CO', {
   day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
@@ -47,12 +49,20 @@ const EMPTY = {
 //
 // `orden` es la fila que devuelve la cola (?estacion=), con cantidad_esperada y
 // estacion_procesos ya calculados por el backend.
-export function RegistroProcesoForm({ estacion, orden, onCreated }) {
+//
+// `libre`: free record with no OP (the Admin never loaded the job). The worker
+// also gives client + reference, and on submit is asked whether the job still
+// has processes ahead; the backend creates the OP (see RegistroProcesoViewSet.libre).
+export function RegistroProcesoForm({ estacion, orden, onCreated, libre = false }) {
   const cfg = ESTACIONES_CONFIG[estacion]
+  const estacionProcesos = orden?.estacion_procesos
   const pendientes = useMemo(
-    () => (orden.estacion_procesos || []).filter(p => !p.completado),
-    [orden.estacion_procesos],
+    () => (libre
+      ? cfg.procesos.map(p => ({ proceso_id: p, label: PROCESO_LABELS[p] || p }))
+      : (estacionProcesos || []).filter(p => !p.completado)),
+    [libre, cfg, estacionProcesos],
   )
+  const posteriores = useMemo(() => (libre ? procesosPosteriores(estacion) : []), [libre, estacion])
 
   const [form, setForm] = useState(EMPTY)
   const [procesoId, setProcesoId] = useState('')
@@ -61,6 +71,12 @@ export function RegistroProcesoForm({ estacion, orden, onCreated }) {
   // Confirmación de faltante: guarda lo esperado que reportó el servidor, para
   // que el aviso diga la cifra correcta aunque el front tuviera datos viejos.
   const [confirmando, setConfirmando] = useState(null)
+  // Free record only: client, reference and the "any extra process?" step.
+  const [cliente, setCliente] = useState(null)
+  const [referencia, setReferencia] = useState('')
+  const [clienteKey, setClienteKey] = useState(0)   // remounts the picker to clear it
+  const [preguntando, setPreguntando] = useState(false)
+  const [adicionales, setAdicionales] = useState([])
 
   // Al cambiar de OP se limpia todo y se preselecciona el único proceso pendiente.
   useEffect(() => {
@@ -68,28 +84,48 @@ export function RegistroProcesoForm({ estacion, orden, onCreated }) {
     setError(null)
     setConfirmando(null)
     setProcesoId(pendientes.length === 1 ? pendientes[0].proceso_id : '')
-  }, [orden.id, pendientes])
+  }, [orden?.id, pendientes])
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
-  const esperada = Number(orden.cantidad_esperada || 0)
-  const requerida = Number(orden.cantidad || 0)
+  const esperada = Number(orden?.cantidad_esperada || 0)
+  const requerida = Number(orden?.cantidad || 0)
   // El sobrante es margen de error que la empresa asume: solo por debajo de
   // (requerida - margen) se pide confirmación y se avisa al Admin.
-  const margen = Number(orden.sobrante || 0)
+  const margen = Number(orden?.sobrante || 0)
 
-  const enviar = async (confirmarFaltante) => {
+  const toggleAdicional = (id) =>
+    setAdicionales(a => (a.includes(id) ? a.filter(x => x !== id) : [...a, id]))
+
+  const enviar = async (confirmarFaltante, procesosAdicionales = []) => {
     setSaving(true)
     setError(null)
     try {
-      const data = await createRegistroProceso({
-        orden: orden.id,
-        estacion,
-        proceso_id: procesoId,
-        ...form,
-        confirmar_faltante: !!confirmarFaltante,
-      })
+      const data = libre
+        ? await createRegistroLibre({
+          cliente: cliente.id,
+          referencia: referencia.trim(),
+          estacion,
+          proceso_id: procesoId,
+          ...form,
+          procesos_adicionales: procesosAdicionales,
+        })
+        : await createRegistroProceso({
+          orden: orden.id,
+          estacion,
+          proceso_id: procesoId,
+          ...form,
+          confirmar_faltante: !!confirmarFaltante,
+        })
       setConfirmando(null)
       setForm(EMPTY)
+      if (libre) {
+        setPreguntando(false)
+        setAdicionales([])
+        setCliente(null)
+        setReferencia('')
+        setClienteKey(k => k + 1)
+        if (pendientes.length !== 1) setProcesoId('')
+      }
       onCreated && onCreated(data)
     } catch (e) {
       if (e.code === 'cantidad_faltante') {
@@ -105,6 +141,10 @@ export function RegistroProcesoForm({ estacion, orden, onCreated }) {
 
   const handleSubmit = (e) => {
     e.preventDefault()
+    if (libre) {
+      if (!cliente) { setError('Selecciona el cliente de la lista de clientes registrados.'); return }
+      if (!referencia.trim()) { setError('Indica la referencia del trabajo.'); return }
+    }
     if (!procesoId) { setError('Selecciona qué proceso estás registrando.'); return }
     const realizada = Number(form.cantidad_realizada || 0)
     if (!realizada) { setError('Indica la cantidad realizada.'); return }
@@ -142,6 +182,14 @@ export function RegistroProcesoForm({ estacion, orden, onCreated }) {
       }
     }
 
+    if (libre) {
+      // Last step: ask whether the job still goes through other machines.
+      setAdicionales([])
+      setPreguntando(posteriores.length > 0)
+      if (!posteriores.length) enviar(false)
+      return
+    }
+
     if (requerida && realizada < (requerida - margen)) {
       setConfirmando({ esperada: requerida, realizada })
       return
@@ -151,6 +199,23 @@ export function RegistroProcesoForm({ estacion, orden, onCreated }) {
 
   return (
     <form className="section" onSubmit={handleSubmit} style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {libre && (
+        <FieldGroup title="Trabajo">
+          <div style={{ flex: '1 1 240px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-3)' }}>Cliente *</span>
+            <ClientePicker key={clienteKey} value={cliente} onChange={setCliente} />
+          </div>
+          <Field label="Referencia *">
+            <input
+              className="input"
+              placeholder="Ej. Caja plegadiza 12x8"
+              value={referencia}
+              onChange={e => setReferencia(e.target.value)}
+            />
+          </Field>
+        </FieldGroup>
+      )}
+
       {/* Qué proceso se cierra — la estación cubre varios (Barnizadora): con uno
           solo pendiente se muestra fijo, con varios se elige entre ellos. */}
       {cfg.multiproceso && pendientes.length > 0 && (
@@ -180,10 +245,12 @@ export function RegistroProcesoForm({ estacion, orden, onCreated }) {
             placeholder="0"
           />
         </Field>
-        <span style={{ fontSize: 12, color: 'var(--ink-3)', alignSelf: 'flex-end', paddingBottom: 8 }}>
-          Esperadas: <strong style={{ color: 'var(--ink-2)' }}>{fmtNum(esperada)}</strong>
-          {margen > 0 && ` (margen de error: ${fmtNum(margen)})`}
-        </span>
+        {!libre && (
+          <span style={{ fontSize: 12, color: 'var(--ink-3)', alignSelf: 'flex-end', paddingBottom: 8 }}>
+            Esperadas: <strong style={{ color: 'var(--ink-2)' }}>{fmtNum(esperada)}</strong>
+            {margen > 0 && ` (margen de error: ${fmtNum(margen)})`}
+          </span>
+        )}
       </FieldGroup>
 
       {cfg.campos.includes('tamano') && (
@@ -327,9 +394,57 @@ export function RegistroProcesoForm({ estacion, orden, onCreated }) {
 
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <button className="btn accent" type="submit" disabled={saving}>
-          {saving ? 'Registrando…' : `Registrar en ${cfg.label}`}
+          {saving ? 'Registrando…' : (libre ? 'Terminar tarea' : `Registrar en ${cfg.label}`)}
         </button>
       </div>
+
+      {preguntando && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 9999,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+        }}>
+          <div style={{ background: 'var(--surface)', borderRadius: 12, maxWidth: 480, width: '100%', maxHeight: '90vh', overflowY: 'auto', padding: 24, boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
+            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>
+              ¿Esta actividad tiene algún proceso adicional?
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5, marginBottom: 14 }}>
+              Marca lo que todavía le falta al trabajo. Pasará solo a la cola de esa máquina.
+              Si no le falta nada, queda listo para que el jefe de producción haga la remisión.
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 18 }}>
+              {posteriores.map(g => (
+                <div key={g.estacion}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
+                    {g.label}
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {g.procesos.map(p => (
+                      <ChipToggle key={p.id} active={adicionales.includes(p.id)} onClick={() => toggleAdicional(p.id)}>
+                        {adicionales.includes(p.id) ? `✓ ${p.label}` : p.label}
+                      </ChipToggle>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {error && <div style={{ color: 'var(--danger, #c0392b)', fontSize: 12, marginBottom: 10 }}>{error}</div>}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
+              <button className="btn" type="button" onClick={() => setPreguntando(false)} disabled={saving}>
+                Volver
+              </button>
+              {adicionales.length > 0 ? (
+                <button className="btn primary" type="button" onClick={() => enviar(false, adicionales)} disabled={saving}>
+                  {saving ? 'Registrando…' : `Registrar y enviar a ${adicionales.length === 1 ? 'ese proceso' : 'esos procesos'}`}
+                </button>
+              ) : (
+                <button className="btn primary" type="button" onClick={() => enviar(false, [])} disabled={saving}>
+                  {saving ? 'Registrando…' : 'No, terminar'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {confirmando && (
         <div style={{
@@ -494,6 +609,12 @@ export function RegistroProcesoHistory({ registros, loading, showOrden = true, o
                       <>
                         <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 12 }}>
                           {r.orden_numero}
+                          {r.orden_origen === 'registro_libre' && (
+                            <span title="Creada desde un registro libre en planta" style={{
+                              marginLeft: 6, fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 999,
+                              background: 'var(--warn-soft, #fef6e7)', color: 'var(--ink-2)', fontFamily: 'inherit',
+                            }}>Libre</span>
+                          )}
                         </td>
                         <td style={{ padding: '10px 12px', fontWeight: 600 }}>{r.orden_cliente}</td>
                       </>

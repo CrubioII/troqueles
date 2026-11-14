@@ -297,7 +297,7 @@ class OrdenListSerializer(serializers.ModelSerializer):
         fields = [
             "id", "numero", "fecha", "fecha_entrega", "cliente", "cliente_nombre", "referencia",
             "cantidad", "valor_total_efectivo", "abono", "saldo",
-            "cotizacion", "cotizacion_numero", "creado", "modificado",
+            "cotizacion", "cotizacion_numero", "origen", "creado", "modificado",
             "progreso", "prioridad_troquel",
         ]
 
@@ -411,12 +411,12 @@ class OrdenSerializer(serializers.ModelSerializer):
             "total_costos_override", "subtotal_override",
             "margen", "abono",
             "condicion_pago", "condicion_custom", "tipo_facturacion", "observaciones",
-            "creado", "modificado",
+            "origen", "creado", "modificado",
             "procesos",
             "valor_unitario_efectivo", "valor_total_efectivo", "saldo", "progreso",
             "remision_id", "remision_generada",
         ]
-        read_only_fields = ["id", "numero", "cotizacion", "creado", "modificado"]
+        read_only_fields = ["id", "numero", "cotizacion", "origen", "creado", "modificado"]
 
     def get_valor_unitario_efectivo(self, obj):
         return _orden_valor_unitario_efectivo(obj)
@@ -725,7 +725,8 @@ class OrdenOperadorSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = OrdenProduccion
-        fields = ["id", "numero", "fecha_entrega", "creado", "cliente", "cliente_nombre", "referencia", "tamano", "cantidad", "pliego_tipo", "pliego_w", "pliego_h", "procesos", "troquel_modelo", "remision_enviada", "prioridad_troquel", "desde_cotizacion", "formato_estado", "formato_devolucion_motivo"]
+        fields = ["id", "numero", "fecha_entrega", "creado", "cliente", "cliente_nombre", "referencia", "tamano", "cantidad", "pliego_tipo", "pliego_w", "pliego_h", "procesos", "troquel_modelo", "remision_enviada", "prioridad_troquel", "desde_cotizacion", "formato_estado", "formato_devolucion_motivo", "origen"]
+        read_only_fields = ["origen"]
 
     def _ultimo_formato(self, obj):
         formatos = list(obj.formatos_cuchillas.all())
@@ -782,6 +783,7 @@ class RegistroProcesoSerializer(serializers.ModelSerializer):
     orden_numero = serializers.CharField(source="orden.numero", read_only=True, default="")
     orden_cliente = serializers.CharField(source="orden.cliente.nombre", read_only=True, default="")
     orden_referencia = serializers.CharField(source="orden.referencia", read_only=True, default="")
+    orden_origen = serializers.CharField(source="orden.origen", read_only=True, default="")
     operador_username = serializers.CharField(source="operador.username", read_only=True, default="")
     estacion_label = serializers.SerializerMethodField()
     proceso_label = serializers.SerializerMethodField()
@@ -790,7 +792,7 @@ class RegistroProcesoSerializer(serializers.ModelSerializer):
     class Meta:
         model = RegistroProceso
         fields = [
-            "id", "orden", "orden_numero", "orden_cliente", "orden_referencia",
+            "id", "orden", "orden_numero", "orden_cliente", "orden_referencia", "orden_origen",
             "estacion", "estacion_label", "proceso_id", "proceso_label",
             "cantidad_realizada", "cantidad_esperada", "faltante",
             "tamano", "tamano_label", "tamano_otro",
@@ -915,7 +917,7 @@ class RemisionableOperadorSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = OrdenProduccion
-        fields = ["id", "numero", "referencia", "cantidad", "fecha_entrega",
+        fields = ["id", "numero", "referencia", "cantidad", "fecha_entrega", "origen",
                   "cliente_id", "cliente_nombre", "remision_numero", "remision_estado"]
 
     def _remision(self, obj):

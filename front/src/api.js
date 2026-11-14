@@ -558,6 +558,16 @@ export const createRegistroProceso = (data) =>
     body: JSON.stringify(data),
   }).then(jsonConCodigo)
 
+// Free record: no OP yet — the backend creates one (origen=registro_libre)
+// with { cliente, referencia, estacion, proceso_id, cantidad_realizada,
+// procesos_adicionales, ...station fields }.
+export const createRegistroLibre = (data) =>
+  apiFetch(`${BASE}/registros-proceso/libre/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  }).then(jsonConCodigo)
+
 export const anularRegistroProceso = (id) =>
   apiFetch(`${BASE}/registros-proceso/${id}/anular/`, { method: 'POST' }).then(jsonConError)
 

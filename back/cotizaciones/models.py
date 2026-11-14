@@ -303,8 +303,15 @@ class OrdenProduccion(models.Model):
         ("custom", "Personalizado"),  # solo heredada desde COT
     ]
     TIPO_FACTURACION_CHOICES = Cotizacion.TIPO_FACTURACION_CHOICES
+    ORIGEN_CHOICES = [
+        ("normal", "Normal"),
+        # Created on the fly by a station worker ("+ Registro libre") when the
+        # Admin never loaded the job: no prices, quantity = what came out.
+        ("registro_libre", "Registro libre"),
+    ]
 
     numero = models.CharField(max_length=20, unique=True, blank=True)
+    origen = models.CharField(max_length=20, choices=ORIGEN_CHOICES, default="normal")
     fecha = models.DateField()
     fecha_entrega = models.DateField(null=True, blank=True)
     cotizacion = models.ForeignKey(

@@ -118,6 +118,45 @@ export const ESTACIONES_CONFIG = {
 // es un paso intermedio del recorrido, sino la entrada y la salida de la OP.
 export const ESTACIONES_ORDEN = ['impresora', 'laminadora', 'barnizadora', 'troqueladora']
 
+// Marks OPs a station worker created on the fly (no Admin OP behind them).
+export function LibreBadge() {
+  return (
+    <span title="Creada desde un registro libre en planta" style={{
+      marginLeft: 6, fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 999,
+      background: 'var(--warn-soft, #fef6e7)', color: 'var(--ink-2)', whiteSpace: 'nowrap',
+      fontFamily: 'inherit',
+    }}>
+      Registro libre
+    </span>
+  )
+}
+
+// Full chain order (mirror of back/cotizaciones/chain.py ESTACIONES). Used by
+// the free record to offer only the processes that come after a station.
+export const CADENA_ESTACIONES = ['guillotina', 'impresora', 'laminadora', 'barnizadora', 'troqueladora', 'guillotina_final']
+
+// proceso_id → readable label (mirror of chain.PROCESO_LABELS).
+export const PROCESO_LABELS = {
+  corteInicial: 'Corte inicial',
+  impresion: 'Impresión',
+  laminado: 'Laminado',
+  uvTotal: 'UV total',
+  uvParcial: 'UV parcial',
+  uvReserva: 'UV reserva',
+  troquelado: 'Troquelado',
+  corteFinal: 'Corte final',
+}
+
+// Processes that can still follow `estacion` in the chain, grouped by station.
+export function procesosPosteriores(estacion) {
+  const idx = CADENA_ESTACIONES.indexOf(estacion)
+  return CADENA_ESTACIONES.slice(idx + 1).map(id => ({
+    estacion: id,
+    label: ESTACIONES_CONFIG[id].label,
+    procesos: ESTACIONES_CONFIG[id].procesos.map(p => ({ id: p, label: PROCESO_LABELS[p] || p })),
+  }))
+}
+
 // proceso_id → label de la estación que normalmente lo registra. Se arma de
 // TODO ESTACIONES_CONFIG (no solo ESTACIONES_ORDEN) para que Guillotina
 // también aparezca acá.
