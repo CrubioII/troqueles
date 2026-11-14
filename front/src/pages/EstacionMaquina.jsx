@@ -289,7 +289,7 @@ export default function EstacionMaquina({ estacion, estaciones, embedded = false
                     <table style={{ width: '100%', minWidth: 720, borderCollapse: 'collapse' }}>
                       <thead>
                         <tr style={{ borderBottom: '2px solid var(--line)' }}>
-                          {['', '#', ...(combinado ? ['Tipo'] : []), 'OP #', 'Entrega', 'Cliente', 'Referencia', ...(cfg.multiproceso ? ['Trabajo'] : []), 'Esperadas', ''].map((h, i) => (
+                          {['', '#', ...(combinado ? ['Tipo'] : []), 'OP #', 'Entrega', 'Cliente', 'Referencia', ...(cfg.multiproceso ? ['Trabajo'] : []), 'Cantidad OP', ''].map((h, i) => (
                             <th key={i} style={TH}>{h}</th>
                           ))}
                         </tr>
@@ -475,7 +475,7 @@ function DetalleOP({ estacion, orden, onCreated, onCambio }) {
             ['Referencia', orden.referencia || '—'],
             ['Entrega', ent.txt],
             ...(cfg.multiproceso ? [['Trabajo', (orden.estacion_procesos || []).filter(p => !p.completado).map(p => p.label).join(' + ') || '—']] : []),
-            ['Cantidad esperada', `${fmtNum(orden.cantidad_esperada)} unidades`],
+            ['Cantidad de la OP', `${fmtNum(orden.cantidad_esperada)} unidades`],
           ].map(([label, valor]) => (
             <div key={label} style={{ minWidth: 140 }}>
               <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-3)' }}>{label}</div>

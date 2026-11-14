@@ -71,7 +71,7 @@ RegistroProceso model (back/cotizaciones/models.py): append-only log, one row pe
   — Frontend: pages/EstacionMaquina.jsx (shared screen for all 4 stations, driven by an `estacion` prop), components/RegistroProceso.jsx (form + history)
 
 Free station record ("+ Registro libre" in EstacionMaquina.jsx, Impresora/Laminadora/Barnizadora/Troqueladora)
-  — For jobs the Admin never loaded as an OP. Worker picks an existing client (components/ClientePicker.jsx — no client creation), reference, quantity and the station's technical data
+  — For jobs the Admin never loaded as an OP. Worker picks or creates the client (components/ClientePicker.jsx — creation goes through the 409 cliente_similar near-duplicate guard), reference, quantity and the station's technical data
   — On "Terminar tarea" asks "¿Esta actividad tiene algún proceso adicional?" listing only the later chain processes (core.jsx `procesosPosteriores`)
   — POST /api/registros-proceso/libre/ (RegistroProcesoViewSet.libre) creates a direct OP with `origen="registro_libre"` (no prices, cantidad = what came out) + its OpProcesos, then reuses the normal record path (`_registrar`)
   — No extras → OP complete → remisión pendiente → shows in Producción General › Remisiones (es_general / Admin) with the "Registro libre" badge; with extras → OP enters the next station's queue

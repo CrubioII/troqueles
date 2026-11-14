@@ -246,9 +246,17 @@ export function RegistroProcesoForm({ estacion, orden, onCreated, libre = false 
           />
         </Field>
         {!libre && (
+          // Reference only, never a target: what actually came out of the
+          // previous machine (or the OP quantity at the first one). Output
+          // always varies a little, so it's not framed as "expected".
           <span style={{ fontSize: 12, color: 'var(--ink-3)', alignSelf: 'flex-end', paddingBottom: 8 }}>
-            Esperadas: <strong style={{ color: 'var(--ink-2)' }}>{fmtNum(esperada)}</strong>
-            {margen > 0 && ` (margen de error: ${fmtNum(margen)})`}
+            {orden?.registro_previo ? (
+              <>Salieron de {orden.registro_previo.estacion_label}:{' '}
+                <strong style={{ color: 'var(--ink-2)' }}>{fmtNum(orden.registro_previo.cantidad_realizada)}</strong></>
+            ) : (
+              <>Cantidad de la OP: <strong style={{ color: 'var(--ink-2)' }}>{fmtNum(esperada)}</strong></>
+            )}
+            {' · referencia, puede variar'}
           </span>
         )}
       </FieldGroup>
