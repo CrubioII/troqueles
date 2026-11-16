@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Icon } from '../components/Icons'
-import { REMISION_STATUS_DEFS } from '../components/core'
 import { getRemisiones } from '../api'
 import { useSyncPolling } from '../lib/useSyncPolling'
 
@@ -10,19 +9,34 @@ const TAB_DEFS = [
   { id: 'liquidada', label: 'Historial' },
 ]
 
-function StatusBadge({ estado }) {
-  const def = REMISION_STATUS_DEFS.find(s => s.id === estado)
-  if (!def) return null
-  return (
-    <span className={'badge ' + def.cls}>
-      <span className="dot"></span>
-      {def.label}
-    </span>
-  )
+function displayRemisionNumbers(rem) {
+  // Pending remissions only get their REM- number once issued (generated,
+  // printed or sent), so the sequence never skips.
+  return rem.numero || 'Sin emitir'
 }
 
-function displayRemisionNumbers(rem) {
-  return rem.numero || '—'
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`
+
+function ContenidoBadge({ rem }) {
+  const productos = rem.num_productos || 0
+  const troqueles = rem.num_troqueles || 0
+  const procesos = rem.num_procesos || 0
+  const multiple = productos > 1 || procesos > 1
+  const parts = [plural(productos, 'producto', 'productos')]
+  if (troqueles > 1) parts.push(plural(troqueles, 'troquel', 'troqueles'))
+  parts.push(plural(procesos, 'proceso', 'procesos'))
+  return (
+    <span
+      title={multiple ? 'Incluye más de un producto o proceso' : 'Un solo producto y proceso'}
+      style={{
+        fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999, whiteSpace: 'nowrap',
+        background: multiple ? 'var(--accent-soft)' : 'var(--surface-2)',
+        color: multiple ? 'var(--accent)' : 'var(--ink-2)',
+      }}
+    >
+      {multiple ? 'Varios · ' : 'Único · '}{parts.join(' · ')}
+    </span>
+  )
 }
 
 function Skeleton() {
@@ -98,8 +112,10 @@ export default function Remisiones() {
 
   const fmtFecha = (str) => {
     if (!str) return '—'
-    const d = new Date(str)
-    return d.toLocaleString('es-CO', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+    // `fecha` is a plain date (YYYY-MM-DD): parse it as local, not UTC, or
+    // it shows the previous day in Colombia.
+    const [y, m, d] = str.split('-').map(Number)
+    return new Date(y, m - 1, d).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })
   }
 
   return (
@@ -204,9 +220,9 @@ export default function Remisiones() {
               <table style={{ width: '100%', minWidth: 560, borderCollapse: 'collapse', fontSize: 13 }}>
                 <thead>
                   <tr style={{ background: 'var(--surface-2)', borderBottom: '1px solid var(--border)' }}>
-                    {['N°', 'Enviada a Remisión', 'Cliente', 'OP', 'Estado', ''].map((h, i) => (
+                    {['N°', 'Fecha', 'Cliente', 'Referencia OP', 'Productos / procesos', ''].map((h, i) => (
                       <th key={i} style={{
-                        padding: '10px 16px', textAlign: i >= 3 ? 'center' : 'left',
+                        padding: '10px 16px', textAlign: i === 4 ? 'center' : 'left',
                         fontWeight: 600, fontSize: 11, color: 'var(--ink-3)',
                         textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap',
                       }}>{h}</th>
@@ -232,28 +248,22 @@ export default function Remisiones() {
                         </span>
                       </td>
                       <td style={{ padding: '12px 16px', whiteSpace: 'nowrap', color: 'var(--ink-3)', fontSize: 12 }}>
-                        {fmtFecha(rem.creado)}
+                        {fmtFecha(rem.fecha)}
                       </td>
                       <td style={{ padding: '12px 16px', fontWeight: 500, color: 'var(--ink)', maxWidth: 220 }}>
                         <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {rem.cliente_nombre || '—'}
                         </div>
                       </td>
-                      <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                        <span className="mono" style={{ fontSize: 12, color: 'var(--ink-2)' }}>{rem.orden_numero || '—'}</span>
+                      <td style={{ padding: '12px 16px', color: 'var(--ink-2)', maxWidth: 260 }}>
+                        {(rem.referencias || []).length === 0 ? '—' : (
+                          <div title={rem.referencias.join('\n')} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {rem.referencias.join(' · ')}
+                          </div>
+                        )}
                       </td>
                       <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                        <div style={{ display: 'flex', gap: 4, justifyContent: 'center', flexWrap: 'wrap' }}>
-                          <StatusBadge estado={rem.estado} />
-                          {rem.tiene_troquel && (
-                            <span
-                              title="Esta remisión incluye trabajo de troquel"
-                              style={{ fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 999, background: 'var(--surface-2)', color: 'var(--ink-2)', whiteSpace: 'nowrap' }}
-                            >
-                              🔧 Troquel
-                            </span>
-                          )}
-                        </div>
+                        <ContenidoBadge rem={rem} />
                       </td>
                       <td style={{ padding: '12px 8px', whiteSpace: 'nowrap', width: 1 }}>
                         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>

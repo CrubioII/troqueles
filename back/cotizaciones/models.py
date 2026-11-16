@@ -800,29 +800,35 @@ class Remision(models.Model):
     class Meta:
         ordering = ["-creado"]
 
-    def save(self, *args, **kwargs):
+    def asignar_numero(self):
+        """Give this remission its REM- number the first time it is issued
+        (Operador generates it, a PDF is produced, or it is sent/liquidated).
+
+        A pending remission is created automatically when its OP hits 100%, and
+        many of those are later merged into another one or deleted before
+        anyone prints them. Numbering them at creation burnt a number each time
+        and left gaps in the sequence, so the number is only taken here, once a
+        document actually exists. Idempotent: an issued number never changes.
+        """
+        if self.numero or self.estado == "consolidada":
+            return self.numero
         with transaction.atomic():
-            super().save(*args, **kwargs)
-            if not self.numero and self.estado != "consolidada":
-                # A merged source has no document number. Continue after the
-                # highest issued number when creating or restoring a document.
-                for _ in range(100):
-                    issued = [
-                        int(number[4:]) for number in Remision.objects
-                        .filter(numero__startswith="REM-").values_list("numero", flat=True)
-                        if number[4:].isdigit()
-                    ]
-                    next_number = max(issued, default=0) + 1
-                    candidate = f"REM-{next_number:04d}"
-                    try:
-                        with transaction.atomic():
-                            Remision.objects.filter(pk=self.pk).update(numero=candidate)
-                        self.numero = candidate
-                        break
-                    except IntegrityError:
-                        continue
-                else:
-                    raise IntegrityError("Could not allocate a remission number")
+            for _ in range(100):
+                issued = [
+                    int(number[4:]) for number in Remision.objects
+                    .filter(numero__startswith="REM-").values_list("numero", flat=True)
+                    if number[4:].isdigit()
+                ]
+                next_number = max(issued, default=0) + 1
+                candidate = f"REM-{next_number:04d}"
+                try:
+                    with transaction.atomic():
+                        Remision.objects.filter(pk=self.pk).update(numero=candidate)
+                    self.numero = candidate
+                    return candidate
+                except IntegrityError:
+                    continue
+        raise IntegrityError("Could not allocate a remission number")
 
     def __str__(self):
         return f"{self.numero} · {self.cliente}"

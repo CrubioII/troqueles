@@ -1024,8 +1024,41 @@ class RemisionSerializer(serializers.ModelSerializer):
 class RemisionListSerializer(serializers.ModelSerializer):
     cliente_nombre = serializers.CharField(source="cliente.nombre", read_only=True)
     orden_numero = serializers.CharField(source="orden.numero", read_only=True, default="")
+    # What the remission covers: its own OP plus the ones merged into it. Uses
+    # the prefetched relations (RemisionViewSet.queryset), so .all() — never
+    # .filter() — to stay at a fixed number of queries.
+    referencias = serializers.SerializerMethodField()
+    num_productos = serializers.SerializerMethodField()
+    num_troqueles = serializers.SerializerMethodField()
+    num_procesos = serializers.SerializerMethodField()
 
     class Meta:
         model = Remision
         fields = ["id", "numero", "fecha", "cliente_nombre", "orden_numero",
+                  "referencias", "num_productos", "num_troqueles", "num_procesos",
                   "estado", "mostrar_valores", "tiene_troquel", "creado", "modificado"]
+
+    @staticmethod
+    def _ops(obj):
+        ops = [obj.orden] if obj.orden_id else []
+        ops += [src.orden for src in obj.remisiones_consolidadas.all() if src.orden_id]
+        return ops
+
+    @staticmethod
+    def _procesos_activos(op):
+        return [p for p in op.procesos.all() if p.active]
+
+    def get_referencias(self, obj):
+        return [op.referencia for op in self._ops(obj) if op.referencia]
+
+    def get_num_productos(self, obj):
+        return len(self._ops(obj))
+
+    def get_num_troqueles(self, obj):
+        return sum(
+            1 for op in self._ops(obj)
+            if any(p.proceso_id == "troquel" for p in self._procesos_activos(op))
+        )
+
+    def get_num_procesos(self, obj):
+        return sum(len(self._procesos_activos(op)) for op in self._ops(obj))

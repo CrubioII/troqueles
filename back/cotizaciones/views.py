@@ -855,6 +855,7 @@ def _liquidar_remision(rem, email=None, extra_emails=None):
     if not recipients:
         return {"error": "No hay destinatarios (cliente sin email y CONTADURIA_EMAIL vacío)."}, 400
 
+    rem.asignar_numero()
     ctx = _remision_pdf_ctx(rem)
     try:
         html_pdf = render_to_string("cotizaciones/pdf_remision.html", ctx)
@@ -1994,6 +1995,7 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
             return error
 
         rem = Remision.objects.filter(orden=op).first() or _crear_remision(op)
+        rem.asignar_numero()
         ctx = _remision_pdf_ctx(rem)
         try:
             html_pdf = render_to_string("cotizaciones/pdf_remision.html", ctx)
@@ -2162,6 +2164,7 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         target.generada_en = timezone.now()
         target.generada_por = request.user if request.user.is_authenticated else None
         target.save(update_fields=campos)
+        target.asignar_numero()
         return Response({"remision_id": target.id, "remision_numero": target.numero})
 
     @action(detail=False, methods=["post"], url_path="remision_operador_pdf")
@@ -2178,6 +2181,7 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         if rem is None:
             return Response({"error": "Remisión no encontrada."}, status=404)
         self._solo_troquel_puro_para_no_general(request, _remision_operador_ops(rem))
+        rem.asignar_numero()
         ctx = _remision_operador_pdf_ctx(rem)
         try:
             html_pdf = render_to_string("cotizaciones/pdf_remision_operador.html", ctx)
@@ -2370,10 +2374,11 @@ class RemisionViewSet(viewsets.ModelViewSet):
     """
 
     queryset = Remision.objects.select_related("cliente", "orden").prefetch_related(
-        "items", "remisiones_consolidadas"
+        "items", "orden__procesos",
+        "remisiones_consolidadas__orden__procesos",
     )
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ["numero", "cliente__nombre", "orden__numero"]
+    search_fields = ["numero", "cliente__nombre", "orden__numero", "orden__referencia"]
     ordering_fields = ["creado", "fecha", "estado"]
     http_method_names = ["get", "patch", "put", "post", "delete", "head", "options"]
 
@@ -2444,6 +2449,7 @@ class RemisionViewSet(viewsets.ModelViewSet):
         """
         rem = self.get_object()
         es_admin = (request.data.get("tipo") or request.query_params.get("tipo")) == "admin"
+        rem.asignar_numero()
         # El desglose de la cuchilla con el desperdicio solo va en el documento interno.
         ctx = _remision_operador_pdf_ctx(rem, admin=es_admin, con_desperdicio=es_admin)
         template = "cotizaciones/pdf_remision_admin.html" if es_admin else "cotizaciones/pdf_remision_operador.html"

@@ -263,7 +263,7 @@ function EliminarModal({ rem, liquidada, agrupadas, busy, error, onClose, onConf
         </div>
         <div className="cot-modal-body">
           <div style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5, marginBottom: 12 }}>
-            Se eliminará la remisión <strong className="mono">{rem.numero}</strong> de{' '}
+            Se eliminará la remisión <strong className="mono">{rem.numero || 'sin emitir'}</strong> de{' '}
             <strong>{rem.cliente_nombre}</strong> con todos sus ítems. <strong>Esta acción no se
             puede deshacer.</strong> Sus OPs vuelven a la cola de remisiones del operador, que podrá
             generarla de nuevo.
@@ -332,7 +332,7 @@ function SendModal({ rem, items, total, desglose, onClose, onSend }) {
             <img src={logo} alt="Troqueles INK" style={{ width: 32, height: 32, objectFit: 'contain' }} />
             <div className="biz">Troqueles INK</div>
             <span className="div">/</span>
-            <div className="mod mono">{rem.numero}</div>
+            <div className="mod mono">{rem.numero || 'Sin emitir'}</div>
           </div>
           <button className="btn cot-modal-close" style={{ padding: '4px 8px', fontSize: 13 }} onClick={onClose}>
             <Icon.X /> Cerrar
@@ -341,7 +341,7 @@ function SendModal({ rem, items, total, desglose, onClose, onSend }) {
 
         <div className="cot-modal-body">
           <div className="cot-doc-section">
-            <div className="cot-doc-section-title">Remisión {rem.numero}</div>
+            <div className="cot-doc-section-title">Remisión {rem.numero || '(sin emitir)'}</div>
             <table className="cot-doc-table">
               <tbody>
                 <tr><td style={{ color: 'var(--ink-3)', width: 160 }}>Cliente</td><td style={{ fontWeight: 600 }}>{rem.cliente_nombre}</td></tr>
@@ -448,7 +448,7 @@ function ImportRemisionModal({ rem, onClose, onImport }) {
         <div className="cot-modal-header">
           <div className="brand" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <img src={logo} alt="Troqueles INK" style={{ width: 32, height: 32, objectFit: 'contain' }} />
-            <div className="biz">Importar a {rem.numero}</div>
+            <div className="biz">Importar a {rem.numero || 'esta remisión'}</div>
           </div>
           <button className="btn cot-modal-close" style={{ padding: '4px 8px', fontSize: 13 }} onClick={onClose}>
             <Icon.X /> Cerrar
@@ -712,10 +712,15 @@ export default function RemisionEdit() {
       const r = await pdfRemision(id, tipo)
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       const blob = await r.blob()
+      // The first PDF issues the REM- number server-side: take the filename
+      // (and the number) from the response instead of the stale state.
+      const filename = (r.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/)?.[1]
+      const numero = filename?.match(/Remision_(REM-\d+)/)?.[1]
+      if (numero && numero !== rem.numero) setRem(prev => prev && { ...prev, numero })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = tipo === 'admin' ? `Remision_${rem.numero}_admin.pdf` : `Remision_${rem.numero}.pdf`
+      a.download = filename || `Remision_${numero || rem.numero}${tipo === 'admin' ? '_admin' : ''}.pdf`
       a.click()
       URL.revokeObjectURL(url)
     } catch (e) {
@@ -738,7 +743,7 @@ export default function RemisionEdit() {
           <button className="btn" style={{ padding: '4px 10px' }} onClick={() => navigate('/remisiones')}>
             <Icon.ArrowLeft /> Remisiones
           </button>
-          <div className="mod mono">{rem.numero}</div>
+          <div className="mod mono">{rem.numero || 'Sin emitir'}</div>
           {estadoDef && (
             <span className={'badge ' + estadoDef.cls}><span className="dot"></span>{estadoDef.label}</span>
           )}

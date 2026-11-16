@@ -284,7 +284,8 @@ class RolesProduccionTestCase(TestCase):
         available = Remision.objects.create(
             orden=another_order, cliente=self.cliente, fecha=timezone.localdate(),
         )
-        self.assertEqual(available.numero, "REM-0002")
+        self.assertIsNone(available.numero)
+        self.assertEqual(available.asignar_numero(), "REM-0002")
 
     def test_ordenes_crud_solo_general_y_troquelador(self):
         op_id = self._crear_op("TEST-SEG-003")
