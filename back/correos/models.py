@@ -15,6 +15,7 @@ class CorreoProcesado(models.Model):
         ("omitido_cotizacion", "Omitido — cotización"),
         ("omitido_sin_adjuntos", "Omitido — sin adjuntos válidos"),
         ("omitido_orden", "Omitido — todos los adjuntos eran 'orden'"),
+        ("omitido_duplicado", "Omitido — cotización ya convertida en orden"),
         ("alerta_sin_regla", "Alerta — sin regla de cliente"),
         ("error", "Error"),
     ]

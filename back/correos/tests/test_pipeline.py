@@ -1,13 +1,14 @@
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from django.test import TestCase, override_settings
 
 from cotizaciones.models import Cliente, OpProceso, OrdenProduccion, TroquelModelo
 from correos import pipeline
 from correos.models import CorreoProcesado
+from correos.reglas.adjuntos import Adjunto
 
 
 def _pdf_valido(paginas=1):
@@ -113,6 +114,195 @@ class ProcesarCorreoCotizacionTests(TestCase):
         self.assertTrue(resultado.mover_a_cotizar)
         self.assertEqual(OrdenProduccion.objects.count(), 0)
         self.assertEqual(CorreoProcesado.objects.get(message_id="<cot@x.com>").resultado, "omitido_cotizacion")
+
+
+@override_settings(TELEGRAM_TOKEN="", TELEGRAM_CHAT_ID="")
+class GrupoEstelarApprovalTests(TestCase):
+    def _cotizacion(self):
+        mensaje = _mensaje(
+            "Carlos A. Bernal <compras@estelarimpresores.com>",
+            "Fwd: OP 88003 TROQUEL DE TAPA",
+            "Por favor nos colaboran con la cotizacion de la linea de troquel adjunta.",
+            adjuntos=[("OP 88003 TROQUEL DE TAPA.pdf", _pdf_valido())],
+            message_id="<cotizacion-estelar@x.com>",
+        )
+        resultado = pipeline.procesar_correo(mensaje, "<cotizacion-estelar@x.com>")
+        self.assertEqual(resultado.resultado, "omitido_cotizacion")
+        self.assertEqual(OrdenProduccion.objects.count(), 0)
+
+    def _aprobacion(self, message_id):
+        mensaje = _mensaje(
+            "Carlos A. Bernal <compras@estelarimpresores.com>",
+            "Re: OP 88003 TROQUEL DE TAPA",
+            "Buen día. Por favor dar proceso a la fabricación del troquel en referencia.\n"
+            "Atentamente, Carlos\n\nEl lunes escribió:\n"
+            "> Por favor nos colaboran con la cotizacion de la linea de troquel adjunta.",
+            message_id=message_id,
+        )
+        mensaje["References"] = "<cotizacion-estelar@x.com> <respuesta-precio@x.com>"
+        mensaje["In-Reply-To"] = "<respuesta-precio@x.com>"
+        return mensaje
+
+    def test_aprobacion_recupera_pdf_de_cotizacion_sin_notificar_telefono(self):
+        self._cotizacion()
+        pdf = _pdf_valido()
+        with patch("correos.imap_client.cargar_adjuntos_cotizacion", return_value=[
+            Adjunto("OP 88003 TROQUEL DE TAPA.pdf", pdf),
+        ]) as cargar:
+            resultado = pipeline.procesar_correo(
+                self._aprobacion("<aprobacion-estelar@x.com>"),
+                "<aprobacion-estelar@x.com>",
+                cargar_adjuntos_cotizacion=cargar,
+            )
+
+        self.assertEqual(resultado.resultado, "ok")
+        self.assertEqual(len(resultado.ordenes), 1)
+        self.assertEqual(resultado.mensajes_telegram, [])
+        self.assertEqual(OrdenProduccion.objects.count(), 1)
+        orden = OrdenProduccion.objects.get(numero=resultado.ordenes[0])
+        self.assertEqual(orden.cliente.nombre, "Grupo Estelar")
+        self.assertEqual(orden.referencia, "OP 88003 TROQUEL DE TAPA")
+        self.assertTrue(orden.troquel_modelo.archivo.name.endswith(".pdf"))
+        self.assertEqual(
+            CorreoProcesado.objects.get(message_id="<cotizacion-estelar@x.com>").ordenes,
+            resultado.ordenes,
+        )
+        cargar.assert_called_once_with(
+            "<cotizacion-estelar@x.com>", "compras@estelarimpresores.com",
+        )
+
+    def test_segunda_aprobacion_del_mismo_hilo_no_duplica_tarea(self):
+        self._cotizacion()
+        with patch("correos.imap_client.cargar_adjuntos_cotizacion", return_value=[
+            Adjunto("OP 88003 TROQUEL DE TAPA.pdf", _pdf_valido()),
+        ]) as cargar:
+            pipeline.procesar_correo(
+                self._aprobacion("<aprobacion-1@x.com>"), "<aprobacion-1@x.com>",
+                cargar_adjuntos_cotizacion=cargar,
+            )
+            segundo = pipeline.procesar_correo(
+                self._aprobacion("<aprobacion-2@x.com>"), "<aprobacion-2@x.com>",
+                cargar_adjuntos_cotizacion=cargar,
+            )
+
+        self.assertEqual(segundo.resultado, "omitido_duplicado")
+        self.assertEqual(OrdenProduccion.objects.count(), 1)
+        self.assertEqual(cargar.call_count, 1)
+
+    def test_aprobacion_sin_archivo_de_origen_queda_reintentable(self):
+        self._cotizacion()
+        with patch("correos.imap_client.cargar_adjuntos_cotizacion", return_value=[]) as cargar:
+            resultado = pipeline.procesar_correo(
+                self._aprobacion("<sin-archivo@x.com>"), "<sin-archivo@x.com>",
+                cargar_adjuntos_cotizacion=cargar,
+            )
+
+        self.assertEqual(resultado.resultado, "error")
+        self.assertFalse(resultado.marcar_procesado)
+        self.assertEqual(resultado.mensajes_telegram, [])
+        self.assertFalse(pipeline.correo_ya_procesado("<sin-archivo@x.com>"))
+        self.assertEqual(OrdenProduccion.objects.count(), 0)
+
+
+    def test_reenvio_con_archivo_final_se_liga_por_asunto(self):
+        """Hilo real 88039 - 88104: Carlos reenvía la cotización y luego
+        reenvía otra vez el correo del diseñador con "trabajar con este
+        archivo". Las References apuntan a correos internos de Estelar, no a
+        la cotización registrada, así que el vínculo es el asunto."""
+        estelar = "Carlos A. Bernal <compras@estelarimpresores.com>"
+        asunto = "Fwd: 88039 - 88104 TROQUEL STICKERS - ESTELAR IMPRESORES"
+        cotizacion = _mensaje(
+            estelar, asunto,
+            "Buen día\n\nPor favor nos colaboran con al cotizacion de las 2 lineas de troquel",
+            adjuntos=[("STICKERS v1.pdf", _pdf_valido(2))],
+            message_id="<cot-hilo@x.com>",
+        )
+        cotizacion["References"] = "<diseno-1@gmail.com>"
+        self.assertEqual(
+            pipeline.procesar_correo(cotizacion, "<cot-hilo@x.com>").resultado, "omitido_cotizacion",
+        )
+
+        aprobacion = _mensaje(
+            estelar, asunto,
+            "Buen dia\n\nPor favor trabajar con este archivo, tiene un pequeño cambio\n\n"
+            "Atentamente,\nCarlos Bernal\n\n---------- Forwarded message ---------\n"
+            "De: Misael Garay <diseno7estelar@gmail.com>\nenvío pdf final para realizar troquel",
+            adjuntos=[("STICKERS final.pdf", _pdf_valido(2))],
+            message_id="<final-hilo@x.com>",
+        )
+        aprobacion["References"] = "<diseno-1@gmail.com>"
+        aprobacion["In-Reply-To"] = "<diseno-2@gmail.com>"
+        cargar = MagicMock()
+        resultado = pipeline.procesar_correo(
+            aprobacion, "<final-hilo@x.com>", cargar_adjuntos_cotizacion=cargar,
+        )
+
+        self.assertEqual(resultado.resultado, "ok")
+        cargar.assert_not_called()  # the approval's own (corrected) file wins
+        # Two die lines in one PDF -> one task per page.
+        ordenes = [OrdenProduccion.objects.get(numero=n) for n in resultado.ordenes]
+        self.assertEqual(
+            [o.referencia for o in ordenes],
+            ["TROQUEL 1 - STICKERS final", "TROQUEL 2 - STICKERS final"],
+        )
+        for orden in ordenes:
+            self.assertEqual(orden.cliente.nombre, "Grupo Estelar")
+            self.assertTrue(orden.troquel_modelo.archivo.name.endswith(".pdf"))
+            self.assertTrue(OpProceso.objects.filter(orden=orden, proceso_id="troquel", active=True).exists())
+        self.assertEqual(
+            CorreoProcesado.objects.get(message_id="<cot-hilo@x.com>").ordenes, resultado.ordenes,
+        )
+
+    def test_respuesta_que_cita_cotizacion_con_instruccion_crea_tarea(self):
+        self._cotizacion()
+        respuesta = _mensaje(
+            "Carlos A. Bernal <compras@estelarimpresores.com>",
+            "Re: OP 88003 TROQUEL DE TAPA",
+            "Por favor trabajar con este archivo.\n\nEl mar, 3 nov 2026 escribió:\n"
+            "> Por favor nos colaboran con la cotizacion de la linea de troquel adjunta.",
+            message_id="<re-trabajar@x.com>",
+        )
+        respuesta["References"] = "<cotizacion-estelar@x.com>"
+        cargar = MagicMock(return_value=[Adjunto("OP 88003 TROQUEL DE TAPA.pdf", _pdf_valido())])
+        resultado = pipeline.procesar_correo(
+            respuesta, "<re-trabajar@x.com>", cargar_adjuntos_cotizacion=cargar,
+        )
+
+        self.assertEqual(resultado.resultado, "ok")
+        self.assertEqual(OrdenProduccion.objects.count(), 1)
+        self.assertFalse(resultado.mover_a_cotizar)
+
+    def test_pedido_directo_multipagina_crea_una_tarea_por_pagina(self):
+        mensaje = _mensaje(
+            "Carlos A. Bernal <compras@estelarimpresores.com>",
+            "Fwd: OP 88600 STICKERS",
+            "Buenos días, envío pdf para realizar troquel, son 3 líneas de troquel.",
+            adjuntos=[("OP 88600 STICKERS.pdf", _pdf_valido(3))],
+            message_id="<directo-3p@x.com>",
+        )
+        resultado = pipeline.procesar_correo(mensaje, "<directo-3p@x.com>")
+
+        self.assertEqual(resultado.resultado, "ok")
+        self.assertEqual(
+            sorted(OrdenProduccion.objects.values_list("referencia", flat=True)),
+            [f"TROQUEL {n} - OP 88600 STICKERS" for n in (1, 2, 3)],
+        )
+        self.assertEqual(len(resultado.mensajes_telegram), 3)
+
+    def test_pedido_directo_sin_cotizacion_previa_sigue_flujo_estandar(self):
+        mensaje = _mensaje(
+            "Carlos A. Bernal <compras@estelarimpresores.com>",
+            "Fwd: OP 88500 TROQUEL ETIQUETA",
+            "Buenos días, envío pdf para realizar troquel.",
+            adjuntos=[("OP 88500 TROQUEL ETIQUETA.pdf", _pdf_valido())],
+            message_id="<directo@x.com>",
+        )
+        resultado = pipeline.procesar_correo(mensaje, "<directo@x.com>")
+
+        self.assertEqual(resultado.resultado, "ok")
+        self.assertEqual(len(resultado.ordenes), 1)
+        # Standard path keeps its Telegram confirmation.
+        self.assertEqual(len(resultado.mensajes_telegram), 1)
 
 
 @override_settings(TELEGRAM_TOKEN="", TELEGRAM_CHAT_ID="")

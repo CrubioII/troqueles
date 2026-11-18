@@ -29,6 +29,7 @@ function userFromClaims(data) {
     estaciones: data.estaciones || [],
     troqueles: !!data.troqueles,
     remisionesGenerales: !!data.remisiones_generales,
+    facturacion: !!data.facturacion,
   }
 }
 

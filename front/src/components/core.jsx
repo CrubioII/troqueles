@@ -53,6 +53,16 @@ export const TIPOS_LAMINADO_REGISTRO = [
   { id: 'metalizado', label: 'Metalizado' },
 ]
 
+// Troqueladora: tipo de trabajo realizado. Espeja RegistroProceso.TIPO_TRABAJO_CHOICES.
+export const TIPOS_TRABAJO_REGISTRO = [
+  { id: 'troquelado',  label: 'Troquelado' },
+  { id: 'medio_corte', label: 'Medio corte' },
+  { id: 'perforado',   label: 'Perforado' },
+  { id: 'grapado',     label: 'Grapado' },
+  { id: 'repujado',    label: 'Repujado' },
+  { id: 'otro',        label: 'Otro (especificar)' },
+]
+
 // Mate/brillante no tienen color; metalizado sí — un tono, nunca un número de
 // tintas (eso es cosa de Impresora, ver tiro/retiro_colores_num).
 export const TIPOS_METALIZADO_REGISTRO = [
@@ -93,8 +103,8 @@ export const ESTACIONES_CONFIG = {
   },
   troqueladora: {
     label: 'Troqueladora', ruta: '/produccion/troqueladora',
-    desc: 'Último proceso: registra la cantidad troquelada que sale de la máquina.',
-    color: '#2E7D5B', soft: '#DCEFE3', campos: [],
+    desc: 'Último proceso: registra la cantidad que sale de la máquina, el tamaño y el tipo de trabajo.',
+    color: '#2E7D5B', soft: '#DCEFE3', campos: ['tamano', 'tipoTrabajo'],
     procesos: ['troquelado'],
   },
   guillotina_final: {

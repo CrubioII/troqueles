@@ -788,6 +788,7 @@ class RegistroProcesoSerializer(serializers.ModelSerializer):
     estacion_label = serializers.SerializerMethodField()
     proceso_label = serializers.SerializerMethodField()
     tamano_label = serializers.CharField(source="get_tamano_display", read_only=True, default="")
+    tipo_trabajo_label = serializers.CharField(source="get_tipo_trabajo_display", read_only=True, default="")
 
     class Meta:
         model = RegistroProceso
@@ -798,7 +799,8 @@ class RegistroProcesoSerializer(serializers.ModelSerializer):
             "tamano", "tamano_label", "tamano_otro",
             "tiro_active", "tiro_colores_num", "tiro_colores_desc",
             "retiro_active", "retiro_colores_num", "retiro_colores_desc",
-            "tipo_laminado", "tipo_metalizado", "tipo_metalizado_otro", "observaciones",
+            "tipo_laminado", "tipo_metalizado", "tipo_metalizado_otro",
+            "tipo_trabajo", "tipo_trabajo_label", "tipo_trabajo_otro", "observaciones",
             "operador", "operador_username", "fecha_hora", "monto_cobrado",
         ]
         read_only_fields = ["cantidad_esperada", "faltante", "operador", "fecha_hora"]

@@ -362,6 +362,21 @@ def _reabrir_troquel(formato, motivo="", revisor=None):
         )
 
 
+def _error_facturada(*remisiones):
+    """Error message if any of these remissions is on an active invoice
+    (Facturación). Deleting, merging or undoing it would leave the accountant's
+    invoice pointing at a document that no longer matches."""
+    for rem in remisiones:
+        factura = rem.factura_activa() if rem is not None and rem.pk else None
+        if factura:
+            nombre = f"La remisión {rem.numero}" if rem.numero else "La remisión"
+            return (
+                f"{nombre} ya está en la factura {factura.codigo}. "
+                "Para cambiarla, contabilidad debe cancelar esa factura primero."
+            )
+    return None
+
+
 def _borrar_remision_de_op(op):
     """Elimina la remisión pendiente de la OP para que su troquel pueda volver a
     la cola del Operador. Devuelve un mensaje de error si ya no se puede deshacer.
@@ -379,6 +394,9 @@ def _borrar_remision_de_op(op):
             f"La remisión {destino.numero} ya fue liquidada; "
             "no se puede devolver este troquel al operador."
         )
+    error = _error_facturada(rem, destino)
+    if error:
+        return error
     if destino is not None and destino.pk != rem.pk and not destino.items.filter(op=op).exists():
         # Consolidación anterior a la columna `op`: no se sabe qué ítems de la
         # remisión destino salieron de esta OP y borrar de más cobraría mal.
@@ -640,6 +658,7 @@ def _sin_desperdicio(detalle):
 _TAMANO_LABELS = dict(RegistroProceso.TAMANO_CHOICES)
 _TIPO_LAMINADO_LABELS = dict(RegistroProceso.TIPO_LAMINADO_CHOICES)
 _TIPO_METALIZADO_LABELS = dict(RegistroProceso.TIPO_METALIZADO_CHOICES)
+_TIPO_TRABAJO_LABELS = dict(RegistroProceso.TIPO_TRABAJO_CHOICES)
 
 
 def _registro_detalle(registro):
@@ -677,6 +696,11 @@ def _registro_detalle(registro):
                 lineas.append(registro.tipo_metalizado_otro or "Otros")
             else:
                 lineas.append(_TIPO_METALIZADO_LABELS.get(registro.tipo_metalizado, registro.tipo_metalizado))
+    if registro.tipo_trabajo:
+        if registro.tipo_trabajo == "otro":
+            lineas.append(registro.tipo_trabajo_otro or "Otro")
+        else:
+            lineas.append(_TIPO_TRABAJO_LABELS.get(registro.tipo_trabajo, registro.tipo_trabajo))
     return lineas
 
 
@@ -2025,6 +2049,9 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
             return Response({
                 "error": f"La remisión {rem.numero} ya fue enviada o consolidada.",
             }, status=409)
+        error = _error_facturada(rem)
+        if error:
+            return Response({"error": error}, status=409)
         rem.delete()  # cascada: borra también sus RemisionItem
         return Response({"ok": True})
 
@@ -2152,6 +2179,10 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
                     }, status=409)
             remisiones.append(rem)
 
+        if len(ops) > 1:
+            error = _error_facturada(*remisiones)
+            if error:
+                return Response({"error": error}, status=409)
         remisiones = [rem or _crear_remision(op) for op, rem in zip(ops, remisiones)]
 
         target = remisiones[0]
@@ -2260,6 +2291,9 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
             return Response({
                 "error": f"La remisión {rem.numero} ya fue liquidada; no se puede devolver.",
             }, status=409)
+        error = _error_facturada(rem)
+        if error:
+            return Response({"error": error}, status=409)
         _desconsolidar_remision(rem)
         return Response({"ok": True})
 
@@ -2429,6 +2463,9 @@ class RemisionViewSet(viewsets.ModelViewSet):
                     "elimina esa remisión."
                 ),
             }, status=409)
+        error = _error_facturada(rem)
+        if error:
+            return Response({"error": error}, status=409)
         numero = rem.numero
         with transaction.atomic():
             if rem.remisiones_consolidadas.exists():
@@ -2566,6 +2603,9 @@ class RemisionViewSet(viewsets.ModelViewSet):
                 return Response({"error": "Todas las remisiones deben ser del mismo cliente."}, status=400)
             if f.estado != "pendiente":
                 return Response({"error": f"La remisión {f.numero} ya fue enviada o consolidada."}, status=409)
+        error = _error_facturada(target, *fuentes)
+        if error:
+            return Response({"error": error}, status=409)
 
         _consolidar_remisiones(target, fuentes)
         return Response(RemisionSerializer(target).data)

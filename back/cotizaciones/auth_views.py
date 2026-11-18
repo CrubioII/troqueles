@@ -14,6 +14,7 @@ def _claims_rol(user):
         "estaciones": sorted(roles.estaciones_permitidas(user)),
         "troqueles": roles.puede_troqueles(user),
         "remisiones_generales": roles.puede_remisiones_generales(user),
+        "facturacion": roles.puede_facturacion(user),
     }
 
 

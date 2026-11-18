@@ -27,7 +27,8 @@ from email.utils import parseaddr, parsedate_to_datetime
 
 from django.conf import settings
 
-from correos.reglas.adjuntos import Adjunto
+from correos.reglas.adjuntos import Adjunto, filtrar_validos, preferir_pdf
+from correos.reglas.aprobaciones import es_remitente_estelar
 
 logger = logging.getLogger(__name__)
 
@@ -40,19 +41,46 @@ class ImapError(Exception):
     pass
 
 
-def conectar():
+def conectar(carpeta="INBOX", readonly=False):
     # Bound reads as well as connection setup: a stalled FETCH must not hold
     # the batch's database lock forever. IDLE waits separately with select().
     conn = imaplib.IMAP4_SSL(settings.IMAP_HOST, settings.IMAP_PORT, timeout=60)
     try:
         conn.login(settings.IMAP_USER, settings.IMAP_PASSWORD)
-        status, _ = conn.select("INBOX")
+        status, _ = conn.select(carpeta, readonly=readonly)
         if status != "OK":
-            raise ImapError("No se pudo seleccionar INBOX")
+            raise ImapError(f"No se pudo seleccionar {carpeta}")
     except Exception:
         conn.shutdown()
         raise
     return conn
+
+
+def cargar_adjuntos_cotizacion(message_id, remitente_email):
+    """Read the original Estelar quotation from Cotizar without changing flags."""
+    if not es_remitente_estelar(remitente_email) or not re.fullmatch(r"<[^<>\s]+>", message_id or ""):
+        return []
+    conn = conectar(settings.IMAP_CARPETA_COTIZAR, readonly=True)
+    try:
+        status, data = conn.uid("SEARCH", None, "HEADER", "Message-ID", f'"{message_id}"')
+        if status != "OK":
+            raise ImapError(f"No se pudo buscar la cotización {message_id}: {status}")
+        for uid in (data[0].split() if data and data[0] else []):
+            mensaje, _ = descargar_correo(conn, uid)
+            if extraer_message_id(mensaje) != message_id:
+                continue
+            _, origen_email = extraer_remitente(mensaje)
+            if not es_remitente_estelar(origen_email):
+                continue
+            adjuntos = preferir_pdf(filtrar_validos(extraer_adjuntos(mensaje)))
+            if adjuntos:
+                return adjuntos
+        return []
+    finally:
+        try:
+            conn.logout()
+        except Exception:
+            logger.warning("No se pudo cerrar la consulta de Cotizar limpiamente", exc_info=True)
 
 
 def acepta_keywords_personalizados(conn):

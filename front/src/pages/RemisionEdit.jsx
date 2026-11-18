@@ -18,7 +18,7 @@ function fmtFechaHora(iso) {
   return new Date(iso).toLocaleString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
-function DesgloseTroqueles({ desglose }) {
+export function DesgloseTroqueles({ desglose }) {
   if (!desglose || !desglose.troqueles?.length) return null
   return (
     <>
@@ -77,7 +77,7 @@ function DesgloseTroqueles({ desglose }) {
 }
 
 // Read-only production details, with delivered quantity per OP.
-function DesgloseProcesos({ desglose }) {
+export function DesgloseProcesos({ desglose }) {
   if (!desglose || !desglose.procesos?.length) return null
   return (
     <>
@@ -119,7 +119,14 @@ function DesgloseProcesos({ desglose }) {
 // Esta es la única pantalla donde se cotiza el troquel: el Operador registra el
 // consumo en su formato de cuchillas y aquí se le pone precio. Al guardar, el
 // backend recalcula el Vr. Total del ítem que esa OP aporta a la remisión.
-function PreciosTroqueles({ desglose, onSaved, onDevolver, registerRef, onDirtyChange }) {
+function PreciosTroqueles({ desglose, items, total, onSaved, onDevolver, registerRef, onDirtyChange }) {
+  // Lo que de verdad se cobra es el Vr. Total del ítem de cada OP (puede
+  // escribirse a mano arriba): se muestra aquí para que el Admin vea que el
+  // precio que puso es el que queda, aunque los conceptos sigan en cero.
+  const precioOp = (opId) => items
+    .filter(it => it.op === opId)
+    .reduce((s, it) => s + (Number(it.valor_total) || 0), 0)
+  const varias = desglose.troqueles.length > 1
   return (
     <>
       {desglose.troqueles.map(t => (
@@ -158,13 +165,25 @@ function PreciosTroqueles({ desglose, onSaved, onDevolver, registerRef, onDirtyC
               Sin formato de cuchillas registrado.
             </div>
           )}
+          {varias && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'baseline', gap: 10, padding: '10px 12px', borderTop: '1px solid var(--line)', background: 'var(--surface-2)' }}>
+              <span style={{ fontSize: 12, fontWeight: 700 }}>Vr. Total en la remisión</span>
+              <span className="mono" style={{ fontSize: 14, fontWeight: 800, color: 'var(--accent)' }}>{fmtCOP(precioOp(t.op_id))}</span>
+            </div>
+          )}
         </div>
       ))}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'baseline', gap: 10 }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'baseline', gap: 10, marginBottom: 6 }}>
         <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--ink-3)' }}>
           Total general del desglose
         </span>
-        <span className="mono" style={{ fontSize: 15, fontWeight: 800, color: 'var(--accent)' }}>{desglose.total_general}</span>
+        <span className="mono" style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink-2)' }}>{desglose.total_general}</span>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'baseline', gap: 10 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--ink-3)' }}>
+          Vr. Total en la remisión
+        </span>
+        <span className="mono" style={{ fontSize: 15, fontWeight: 800, color: 'var(--accent)' }}>{fmtCOP(total)}</span>
       </div>
     </>
   )
@@ -861,7 +880,7 @@ export default function RemisionEdit() {
             </div>
             <div className="table-scroll">
               {editable
-                ? <PreciosTroqueles desglose={desglose} onSaved={recargarTrasPrecios} onDevolver={t => { setMotivo(''); setDevError(null); setDevolviendo(t) }} registerRef={registerTroquelRef} onDirtyChange={handleTroquelDirtyChange} />
+                ? <PreciosTroqueles desglose={desglose} items={items} total={total} onSaved={recargarTrasPrecios} onDevolver={t => { setMotivo(''); setDevError(null); setDevolviendo(t) }} registerRef={registerTroquelRef} onDirtyChange={handleTroquelDirtyChange} />
                 : <DesgloseTroqueles desglose={desglose} />}
             </div>
           </div>

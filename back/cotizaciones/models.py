@@ -529,6 +529,14 @@ class RegistroProceso(models.Model):
         ("rosado", "Rosado"),
         ("otros", "Otros"),
     ]
+    TIPO_TRABAJO_CHOICES = [
+        ("troquelado", "Troquelado"),
+        ("medio_corte", "Medio corte"),
+        ("perforado", "Perforado"),
+        ("grapado", "Grapado"),
+        ("repujado", "Repujado"),
+        ("otro", "Otro"),
+    ]
 
     orden = models.ForeignKey(
         OrdenProduccion, on_delete=models.CASCADE, related_name="registros_proceso"
@@ -564,6 +572,13 @@ class RegistroProceso(models.Model):
         max_length=20, choices=TIPO_METALIZADO_CHOICES, blank=True, default=""
     )
     tipo_metalizado_otro = models.CharField(max_length=120, blank=True, default="")
+
+    # Troqueladora: qué tipo de trabajo salió de la máquina. "otro" se describe
+    # a mano en tipo_trabajo_otro.
+    tipo_trabajo = models.CharField(
+        max_length=20, choices=TIPO_TRABAJO_CHOICES, blank=True, default=""
+    )
+    tipo_trabajo_otro = models.CharField(max_length=120, blank=True, default="")
 
     observaciones = models.TextField(blank=True, default="")
     operador = models.ForeignKey(
@@ -830,6 +845,11 @@ class Remision(models.Model):
                     continue
         raise IntegrityError("Could not allocate a remission number")
 
+    def factura_activa(self):
+        """The non-cancelled invoice that covers this remission, if any. While
+        it exists the remission must not be deleted, merged or undone."""
+        return self.facturas.exclude(estado="cancelada").first()
+
     def __str__(self):
         return f"{self.numero} · {self.cliente}"
 
@@ -924,6 +944,56 @@ class PerfilOperador(models.Model):
         "Estaciones (Impresora, Laminadora, Barnizadora, Troqueladora)", default=False,
     )
     es_guillotina = models.BooleanField("Guillotina", default=False)
+    # Not a production role: the accountant only works in the Facturación module.
+    es_contadora = models.BooleanField("Contadora (módulo Facturación)", default=False)
 
     def __str__(self):
         return f"Perfil de {self.user.username}"
+
+
+class Factura(models.Model):
+    """Invoice the accountant registers against one or more liquidated remissions.
+
+    The invoice itself is issued outside this system; here the accountant only
+    records its number and grand total (no per-item or per-troquel values).
+
+    `numero` is assigned by the server, starting at 1 and never skipping
+    (max + 1); it is shown as `codigo` = FAC-0001, like REM-/OP-/COT-.
+    A voided invoice is kept as estado=cancelada so its number stays in the
+    sequence, and its remissions go back to the pending list.
+    """
+
+    ESTADO_CHOICES = [
+        ("por_cobrar", "Por cobrar"),
+        ("pagada", "Pagada"),
+        ("cancelada", "Cancelada"),
+    ]
+
+    numero = models.PositiveIntegerField(unique=True)
+    fecha = models.DateField()
+    cliente = models.ForeignKey(Cliente, on_delete=models.PROTECT, related_name="facturas")
+    total = models.DecimalField(max_digits=14, decimal_places=2)
+    estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default="por_cobrar")
+    remisiones = models.ManyToManyField(Remision, related_name="facturas")
+    observaciones = models.TextField(blank=True, default="")
+    estado_cambiado_en = models.DateTimeField(null=True, blank=True)
+    creada_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="facturas_creadas",
+    )
+    creada = models.DateTimeField(auto_now_add=True)
+    modificada = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-numero"]
+
+    @property
+    def codigo(self):
+        return codigo_factura(self.numero)
+
+    def __str__(self):
+        return f"{self.codigo} · {self.cliente}"
+
+
+def codigo_factura(numero):
+    return f"FAC-{numero:04d}" if numero is not None else ""

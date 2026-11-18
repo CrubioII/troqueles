@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import {
   fmtNum, NumField, ChipToggle,
-  ESTACIONES_CONFIG, TAMANOS_REGISTRO, TIPOS_LAMINADO_REGISTRO, TIPOS_METALIZADO_REGISTRO,
+  ESTACIONES_CONFIG, TAMANOS_REGISTRO, TIPOS_LAMINADO_REGISTRO, TIPOS_METALIZADO_REGISTRO, TIPOS_TRABAJO_REGISTRO,
   PROCESO_LABELS, procesosPosteriores,
 } from './core'
 import { createRegistroProceso, createRegistroLibre, anularRegistroProceso } from '../api'
@@ -39,6 +39,7 @@ const EMPTY = {
   tiro_active: false, tiro_colores_num: 0, tiro_colores_desc: '',
   retiro_active: false, retiro_colores_num: 0, retiro_colores_desc: '',
   tipo_laminado: '', tipo_metalizado: '', tipo_metalizado_otro: '',
+  tipo_trabajo: '', tipo_trabajo_otro: '',
   observaciones: '',
 }
 
@@ -179,6 +180,13 @@ export function RegistroProcesoForm({ estacion, orden, onCreated, libre = false 
         if (form.tipo_metalizado === 'otros' && !form.tipo_metalizado_otro.trim()) {
           setError('Especifica el color del metalizado.'); return
         }
+      }
+    }
+
+    if (cfg.campos.includes('tipoTrabajo')) {
+      if (!form.tipo_trabajo) { setError('Selecciona el tipo de trabajo.'); return }
+      if (form.tipo_trabajo === 'otro' && !form.tipo_trabajo_otro.trim()) {
+        setError('Especifica el tipo de trabajo.'); return
       }
     }
 
@@ -358,6 +366,27 @@ export function RegistroProcesoForm({ estacion, orden, onCreated, libre = false 
                 </Field>
               )}
             </>
+          )}
+        </FieldGroup>
+      )}
+
+      {cfg.campos.includes('tipoTrabajo') && (
+        <FieldGroup title="Tipo de trabajo *">
+          <Field label="Trabajo realizado">
+            <select className="input" value={form.tipo_trabajo} onChange={e => set('tipo_trabajo', e.target.value)}>
+              <option value="">Seleccionar…</option>
+              {TIPOS_TRABAJO_REGISTRO.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+            </select>
+          </Field>
+          {form.tipo_trabajo === 'otro' && (
+            <Field label="¿Cuál?">
+              <input
+                className="input"
+                placeholder="Describe el trabajo"
+                value={form.tipo_trabajo_otro}
+                onChange={e => set('tipo_trabajo_otro', e.target.value)}
+              />
+            </Field>
           )}
         </FieldGroup>
       )}
@@ -551,6 +580,9 @@ export function RegistroProcesoHistory({ registros, loading, showOrden = true, o
     } else {
       if (r.tiro_active) partes.push(`Tiro${r.tiro_colores_num ? ` ${r.tiro_colores_num}c` : ''}${r.tiro_colores_desc ? ` (${r.tiro_colores_desc})` : ''}`)
       if (r.retiro_active) partes.push(`Retiro${r.retiro_colores_num ? ` ${r.retiro_colores_num}c` : ''}${r.retiro_colores_desc ? ` (${r.retiro_colores_desc})` : ''}`)
+    }
+    if (r.tipo_trabajo) {
+      partes.push(r.tipo_trabajo === 'otro' ? (r.tipo_trabajo_otro || 'Otro') : (r.tipo_trabajo_label || r.tipo_trabajo))
     }
     if (r.observaciones) partes.push(r.observaciones)
     return partes.join(' · ') || '—'

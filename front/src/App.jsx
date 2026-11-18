@@ -20,7 +20,9 @@ import Guillotina from './pages/Guillotina'
 import ProduccionGeneral from './pages/ProduccionGeneral'
 import EstacionMaquina from './pages/EstacionMaquina'
 import Login from './pages/Login'
-import { puedeEstacion, puedeTroqueles, puedeRemisionesGenerales } from './lib/accesoProduccion'
+import Facturacion from './pages/Facturacion'
+import FacturaDetalle from './pages/FacturaDetalle'
+import { puedeEstacion, puedeTroqueles, puedeRemisionesGenerales, puedeFacturacion, soloFacturacion } from './lib/accesoProduccion'
 
 function ProtectedRoute({ children }) {
   const { user, ready } = useAuth()
@@ -34,7 +36,7 @@ function AdminRoute({ children }) {
   const { user, ready } = useAuth()
   if (!ready) return null
   if (!user) return <Navigate to="/login" replace />
-  if (user.role !== 'admin') return <Navigate to="/produccion" replace />
+  if (user.role !== 'admin') return <Navigate to={soloFacturacion(user) ? '/facturacion' : '/produccion'} replace />
   return children
 }
 
@@ -45,7 +47,7 @@ function RolRoute({ children, check }) {
   const { user, ready } = useAuth()
   if (!ready) return null
   if (!user) return <Navigate to="/login" replace />
-  if (!check(user)) return <Navigate to="/produccion" replace />
+  if (!check(user)) return <Navigate to={soloFacturacion(user) ? '/facturacion' : '/produccion'} replace />
   return children
 }
 
@@ -67,7 +69,9 @@ function AppRoutes() {
         <Route path="/remisiones/:id" element={<AdminRoute><RemisionEdit /></AdminRoute>} />
         <Route path="/clientes" element={<AdminRoute><ClienteList /></AdminRoute>} />
         <Route path="/clientes/:id" element={<AdminRoute><ClienteDetail /></AdminRoute>} />
-        <Route path="/produccion" element={<ProduccionHub />} />
+        <Route path="/facturacion" element={<RolRoute check={puedeFacturacion}><Facturacion /></RolRoute>} />
+        <Route path="/facturacion/:id" element={<RolRoute check={puedeFacturacion}><FacturaDetalle /></RolRoute>} />
+        <Route path="/produccion" element={<RolRoute check={u => !soloFacturacion(u)}><ProduccionHub /></RolRoute>} />
         {/* Cadena de producción: una sola pantalla, cuatro estaciones */}
         <Route path="/produccion/impresora" element={<RolRoute check={u => puedeEstacion(u, 'impresora')}><EstacionMaquina estacion="impresora" /></RolRoute>} />
         <Route path="/produccion/laminadora" element={<RolRoute check={u => puedeEstacion(u, 'laminadora')}><EstacionMaquina estacion="laminadora" /></RolRoute>} />

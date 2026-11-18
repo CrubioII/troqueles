@@ -9,7 +9,10 @@ ejecuta el command, no este módulo.
 """
 import os
 import re
+import logging
 from dataclasses import dataclass, field
+from datetime import timedelta
+from email.utils import parseaddr
 from zoneinfo import ZoneInfo
 
 from django.core.files.base import ContentFile
@@ -26,11 +29,22 @@ from correos.pdf_utils import (
     truncar_nombre_archivo,
 )
 from correos.reglas.adjuntos import es_archivo_orden, filtrar_validos, preferir_pdf
+from correos.reglas.aprobaciones import (
+    ESTELAR_DOMAIN,
+    asunto_normalizado,
+    es_aprobacion_estelar,
+    es_remitente_estelar,
+    ids_referenciados,
+)
 from correos.reglas.clientes import resolver_cliente
 from correos.reglas.cotizacion import es_cotizacion
 from correos.reglas.cuerpo import cuerpo_visible, html_a_texto
 
 BOGOTA = ZoneInfo("America/Bogota")
+# TroquelModelo.archivo is varchar(100) and includes "troquel_modelos/"; a
+# longer page name gets cut by the storage and loses its "_pN" suffix.
+MAX_NOMBRE_ARCHIVO = TroquelModelo._meta.get_field("archivo").max_length - len("troquel_modelos/")
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -77,7 +91,7 @@ def _tareas_richard(adjuntos_validos):
             for numero, contenido_pagina in enumerate(paginas, start=1):
                 tareas.append(Tarea(
                     referencia=referencia_pagina_richard(numero, adjunto.nombre),
-                    nombre_archivo=nombre_archivo_pagina(adjunto.nombre, numero),
+                    nombre_archivo=nombre_archivo_pagina(adjunto.nombre, numero, max_length=MAX_NOMBRE_ARCHIVO),
                     contenido=contenido_pagina,
                 ))
         return tareas
@@ -122,9 +136,33 @@ def _tareas_estandar(adjuntos_validos):
     ]
 
 
+def _tareas_por_pagina(adjuntos_validos):
+    """Grupo Estelar: one task per PDF page (each page is one die line).
+    A single-page PDF keeps the plain file name as its reference; non-PDF
+    files are one task each, unsplit."""
+    tareas = []
+    for adjunto in adjuntos_validos:
+        if os.path.splitext(adjunto.nombre)[1].lower() != ".pdf":
+            tareas.extend(_tareas_estandar([adjunto]))
+            continue
+        paginas = dividir_pdf(adjunto.contenido)  # PdfProcesamientoError se propaga, sin fallback
+        if len(paginas) == 1:
+            tareas.extend(_tareas_estandar([adjunto]))
+            continue
+        for numero, contenido_pagina in enumerate(paginas, start=1):
+            tareas.append(Tarea(
+                referencia=referencia_pagina_richard(numero, adjunto.nombre),
+                nombre_archivo=nombre_archivo_pagina(adjunto.nombre, numero, max_length=MAX_NOMBRE_ARCHIVO),
+                contenido=contenido_pagina,
+            ))
+    return tareas
+
+
 def _construir_tareas(flag, texto_busqueda, adjuntos_validos):
     if flag == "multipagina":
         return _tareas_richard(adjuntos_validos)
+    if flag == "por_pagina":
+        return _tareas_por_pagina(adjuntos_validos)
     if flag == "es_inmcor":
         return _tareas_inmcor(texto_busqueda, adjuntos_validos)
     return _tareas_estandar(adjuntos_validos)
@@ -170,7 +208,108 @@ def _registrar(message_id, asunto, remitente, fecha_correo, resultado, ordenes=N
     )
 
 
-def procesar_correo(mensaje, message_id, dry_run=False):
+VENTANA_HILO_ASUNTO_DIAS = 30
+
+
+def _cotizaciones_estelar_por_asunto(asunto, message_id):
+    """Fallback link when the approval's References don't include the
+    quotation we recorded (Estelar forwards its designer's emails each time,
+    so the headers point at messages that never reached this mailbox)."""
+    clave = asunto_normalizado(asunto)
+    if not clave:
+        return []
+    desde = timezone.now() - timedelta(days=VENTANA_HILO_ASUNTO_DIAS)
+    registros = (
+        CorreoProcesado.objects
+        .filter(
+            resultado__in=("omitido_cotizacion", "ok"),
+            remitente__icontains="@" + ESTELAR_DOMAIN,
+            procesado_en__gte=desde,
+        )
+        .exclude(message_id=message_id)
+        .order_by("-procesado_en")
+    )
+    return [
+        registro for registro in registros
+        if es_remitente_estelar(parseaddr(registro.remitente)[1])
+        and asunto_normalizado(registro.asunto) == clave
+    ]
+
+
+def _procesar_aprobacion_estelar(
+    mensaje, message_id, asunto, remitente, email_remitente, fecha_correo,
+    cuerpo_limpio, dry_run, cargar_adjuntos_cotizacion,
+):
+    """Use the PDF in the referenced quotation when the approval has none.
+
+    Returns None when the email is not tied to any recorded quotation and
+    brings its own file: that is a plain new order, handled by the standard
+    flow (with its usual confirmations)."""
+    referencias = ids_referenciados(mensaje)
+    registros = CorreoProcesado.objects.filter(
+        message_id__in=referencias, resultado__in=("omitido_cotizacion", "ok"),
+    )
+    por_id = {
+        registro.message_id: registro for registro in registros
+        if es_remitente_estelar(parseaddr(registro.remitente)[1])
+    }
+    candidatos = [por_id[referencia] for referencia in referencias if referencia in por_id]
+    if not candidatos:
+        candidatos = _cotizaciones_estelar_por_asunto(asunto, message_id)
+
+    adjuntos = preferir_pdf(filtrar_validos(imap_client.extraer_adjuntos(mensaje)))
+    if not candidatos and adjuntos:
+        return None
+
+    origen = None
+    for candidato in candidatos:
+        referencia = candidato.message_id
+        if candidato.ordenes:
+            if not dry_run:
+                _registrar(
+                    message_id, asunto, remitente, fecha_correo, "omitido_duplicado",
+                    detalle=f"Cotización {referencia} ya originó {', '.join(candidato.ordenes)}",
+                )
+            return ResultadoCorreo(resultado="omitido_duplicado")
+        if candidato.resultado != "omitido_cotizacion":
+            continue
+        if adjuntos:
+            origen = candidato
+            break
+        if cargar_adjuntos_cotizacion is not None:
+            encontrados = cargar_adjuntos_cotizacion(referencia, email_remitente)
+            if encontrados:
+                adjuntos = preferir_pdf(filtrar_validos(encontrados))
+                if adjuntos:
+                    origen = candidato
+                    break
+
+    if not adjuntos:
+        raise ValueError("Aprobación de Grupo Estelar sin adjunto ni cotización referenciada con archivo")
+
+    tareas = _tareas_por_pagina(adjuntos)
+    if dry_run:
+        return ResultadoCorreo(
+            resultado="ok", detalle=f"{len(tareas)} orden(es) simuladas",
+            cliente_nombre="Grupo Estelar",
+        )
+
+    with transaction.atomic():
+        if origen is not None:
+            origen = CorreoProcesado.objects.select_for_update().get(pk=origen.pk)
+            if origen.ordenes:
+                _registrar(message_id, asunto, remitente, fecha_correo, "omitido_duplicado")
+                return ResultadoCorreo(resultado="omitido_duplicado")
+        ordenes, _mensajes = _crear_ordenes("Grupo Estelar", "", tareas, cuerpo_limpio)
+        _registrar(message_id, asunto, remitente, fecha_correo, "ok", ordenes=ordenes)
+        if origen is not None:
+            origen.ordenes = ordenes
+            origen.save(update_fields=["ordenes"])
+
+    return ResultadoCorreo(resultado="ok", ordenes=ordenes, cliente_nombre="Grupo Estelar")
+
+
+def procesar_correo(mensaje, message_id, dry_run=False, cargar_adjuntos_cotizacion=None):
     paso = "extraer_contenido"
     try:
         asunto = imap_client.extraer_asunto(mensaje)
@@ -181,6 +320,15 @@ def procesar_correo(mensaje, message_id, dry_run=False):
         texto_busqueda = "\n".join([asunto, texto_plano, html_a_texto(texto_html)])
         cuerpo_limpio = cuerpo_visible(texto_plano, texto_html)
 
+        paso = "aprobacion_estelar"
+        if es_aprobacion_estelar(email_remitente, cuerpo_limpio):
+            resultado_aprobacion = _procesar_aprobacion_estelar(
+                mensaje, message_id, asunto, remitente_completo, email_remitente,
+                fecha_correo, cuerpo_limpio, dry_run, cargar_adjuntos_cotizacion,
+            )
+            if resultado_aprobacion is not None:
+                return resultado_aprobacion
+
         paso = "cotizacion"
         if es_cotizacion(asunto, texto_busqueda):
             if not dry_run:
@@ -188,7 +336,9 @@ def procesar_correo(mensaje, message_id, dry_run=False):
             return ResultadoCorreo(
                 resultado="omitido_cotizacion",
                 mover_a_cotizar=True,
-                mensajes_telegram=[telegram.msg_omitido_cotizacion(asunto, remitente_completo)],
+                mensajes_telegram=([] if es_remitente_estelar(email_remitente) else [
+                    telegram.msg_omitido_cotizacion(asunto, remitente_completo)
+                ]),
                 omitido_cotizacion_info=(remitente_completo, asunto),
             )
 
@@ -253,6 +403,7 @@ def procesar_correo(mensaje, message_id, dry_run=False):
             mensajes_telegram=mensajes_extra + mensajes_confirmacion,
         )
     except Exception as exc:
+        logger.warning("Error procesando correo en %s: %s", paso, exc, exc_info=True)
         asunto_seguro = locals().get("asunto", "") or ""
         remitente_seguro = locals().get("remitente_completo", "") or ""
         fecha_seguro = locals().get("fecha_correo", None)
@@ -262,5 +413,7 @@ def procesar_correo(mensaje, message_id, dry_run=False):
             resultado="error",
             detalle=str(exc),
             marcar_procesado=False,
-            mensajes_telegram=[telegram.msg_error(paso, asunto_seguro, remitente_seguro, str(exc))],
+            mensajes_telegram=([] if paso == "aprobacion_estelar" else [
+                telegram.msg_error(paso, asunto_seguro, remitente_seguro, str(exc))
+            ]),
         )

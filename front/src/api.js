@@ -657,3 +657,48 @@ export const devolverFormatoCuchillas = (id, motivo = '') =>
 // El Operador cancela un formato enviado (→ borrador) para editarlo
 export const cancelarEnvioFormato = (id) =>
   apiFetch(`${BASE}/formatos-cuchillas/${id}/cancelar_envio/`, { method: 'POST' }).then(jsonConError)
+
+// ─────────────── Facturación (contadora / Admin) ───────────────
+// Filtros combinables: cliente, fecha, fecha_after, fecha_before, proceso,
+// estado (solo historial), numero (solo historial). Ver facturacion_views.py.
+
+const facturacionQuery = (filtros = {}) => {
+  const qs = new URLSearchParams()
+  Object.entries(filtros).forEach(([k, v]) => { if (v !== '' && v != null) qs.set(k, v) })
+  const s = qs.toString()
+  return s ? `?${s}` : ''
+}
+
+export const getFacturacionPendientes = (filtros) =>
+  apiFetch(`${BASE}/facturas/pendientes/${facturacionQuery(filtros)}`).then(jsonConError)
+
+export const getFacturas = (filtros) =>
+  apiFetch(`${BASE}/facturas/${facturacionQuery(filtros)}`).then(jsonConError)
+
+// Factura con los datos del cliente y el desglose completo de sus remisiones
+export const getFactura = (id) =>
+  apiFetch(`${BASE}/facturas/${id}/`).then(jsonConError)
+
+export const getSiguienteNumeroFactura = () =>
+  apiFetch(`${BASE}/facturas/siguiente_numero/`).then(jsonConError)
+
+export const createFactura = (data) =>
+  apiFetch(`${BASE}/facturas/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  }).then(jsonConError)
+
+export const updateFactura = (id, data) =>
+  apiFetch(`${BASE}/facturas/${id}/`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  }).then(jsonConError)
+
+export const deleteFactura = (id) =>
+  apiFetch(`${BASE}/facturas/${id}/`, { method: 'DELETE' }).then(jsonConError)
+
+// Devuelve el Response crudo (blob para descargar).
+export const pdfRemisionFacturacion = (remisionId) =>
+  apiFetch(`${BASE}/facturas/remisiones/${remisionId}/pdf/`)

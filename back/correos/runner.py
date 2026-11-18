@@ -116,7 +116,10 @@ def _ejecutar(dry_run, enviar_resumen, dias_atras):
                 continue  # saltar en silencio — spec 5, paso b
 
             revisados += 1
-            resultado = pipeline.procesar_correo(mensaje, message_id, dry_run=dry_run)
+            resultado = pipeline.procesar_correo(
+                mensaje, message_id, dry_run=dry_run,
+                cargar_adjuntos_cotizacion=imap_client.cargar_adjuntos_cotizacion,
+            )
 
             if not dry_run:
                 if resultado.marcar_procesado:

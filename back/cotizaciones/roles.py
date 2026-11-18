@@ -14,6 +14,7 @@ tiene uno solo, pero nada impide combinarlos):
                      fabrica el molde).
   es_estaciones   → Impresora, Laminadora, Barnizadora, Troqueladora.
   es_guillotina   → Guillotina (corte inicial + corte final).
+  es_contadora    → módulo Facturación únicamente (no es un rol de producción).
 """
 
 ROLES_A_ESTACIONES = {
@@ -61,6 +62,14 @@ def puede_remisiones_generales(user):
         return True
     perfil = _perfil(user)
     return bool(perfil and perfil.es_general)
+
+
+def puede_facturacion(user):
+    """Facturación module: the accountant (es_contadora) and the Admin."""
+    if user.is_staff:
+        return True
+    perfil = _perfil(user)
+    return bool(perfil and perfil.es_contadora)
 
 
 def puede_alguna_remision(user):

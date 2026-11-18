@@ -24,6 +24,29 @@ class ConnectionTests(SimpleTestCase):
                 imap_client.conectar()
         factory.return_value.shutdown.assert_called_once()
 
+    def test_cotizacion_se_lee_sin_cambiar_flags(self):
+        mensaje = MIMEMultipart("mixed")
+        mensaje["From"] = "Carlos <compras@estelarimpresores.com>"
+        mensaje["Message-ID"] = "<cotizacion@estelarimpresores.com>"
+        pdf = MIMEApplication(b"%PDF-1.4 contenido", _subtype="pdf")
+        pdf.add_header("Content-Disposition", "attachment", filename="modelo.pdf")
+        mensaje.attach(pdf)
+        conn = MagicMock()
+        conn.uid.return_value = ("OK", [b"123"])
+        with patch("correos.imap_client.conectar", return_value=conn) as conectar, \
+             patch("correos.imap_client.descargar_correo", return_value=(mensaje, 100)) as descargar:
+            adjuntos = imap_client.cargar_adjuntos_cotizacion(
+                "<cotizacion@estelarimpresores.com>", "compras@estelarimpresores.com",
+            )
+
+        conectar.assert_called_once_with("Cotizar", readonly=True)
+        conn.uid.assert_called_once_with(
+            "SEARCH", None, "HEADER", "Message-ID", '"<cotizacion@estelarimpresores.com>"',
+        )
+        descargar.assert_called_once_with(conn, b"123")
+        conn.logout.assert_called_once()
+        self.assertEqual([a.nombre for a in adjuntos], ["modelo.pdf"])
+
 
 def _mensaje_iphone_partido():
     """Simula el bug real de n8n: el cuerpo llega partido en dos bloques

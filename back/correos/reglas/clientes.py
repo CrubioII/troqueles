@@ -61,6 +61,9 @@ REGLAS_EXCLUSIVAS = (
         dominios=("estelarimpresores.com",),
         correos=("compras@estelarimpresores.com",),
         nombres=(r"carlos\s+a?\.?\s*bernal",),
+        # Estelar sends several die lines in one PDF, one per page, and each
+        # page is quoted and built separately.
+        flag="por_pagina",
     ),
     ReglaCliente(
         "COMPUCOPIAMOS",

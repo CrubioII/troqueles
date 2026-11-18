@@ -7,6 +7,7 @@ from .views import (
     RemisionViewSet, RegistroProcesoViewSet, NotificacionViewSet,
 )
 from .sync_views import SyncView
+from .facturacion_views import FacturaViewSet
 
 router = DefaultRouter()
 router.register("clientes", ClienteViewSet, basename="cliente")
@@ -19,6 +20,7 @@ router.register("registros-maquina", RegistroMaquinaViewSet, basename="registro-
 router.register("troquel-modelos", TroquelModeloViewSet, basename="troquel-modelo")
 router.register("formatos-cuchillas", FormatoCuchillasViewSet, basename="formato-cuchillas")
 router.register("registros-proceso", RegistroProcesoViewSet, basename="registro-proceso")
+router.register("facturas", FacturaViewSet, basename="factura")
 router.register("notificaciones", NotificacionViewSet, basename="notificacion")
 
 urlpatterns = [

@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { useGuardedAction, useGuardedNavigate } from '../context/UnsavedChangesContext'
 import { Icon } from './Icons'
 import { CampanaNotificaciones } from './Notificaciones'
-import { puedeEstacion, puedeTroqueles, puedeRemisionesGenerales } from '../lib/accesoProduccion'
+import { puedeEstacion, puedeTroqueles, puedeRemisionesGenerales, puedeFacturacion, soloFacturacion } from '../lib/accesoProduccion'
 
 // `estacion`/`troqueles`/`remisionesGenerales`: qué le exige este link al rol
 // de producción del Operador (ver back/cotizaciones/roles.py). Sin ninguno de
@@ -56,6 +56,7 @@ const NAV_LINKS = [
   {
     label: 'Producción',
     path: '/produccion',
+    produccion: true,
     icon: (
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
         <rect x="2" y="7" width="20" height="13" rx="2" stroke="currentColor" strokeWidth="1.5"/>
@@ -73,6 +74,17 @@ const NAV_LINKS = [
         <path d="M3 6h18M3 12h12M3 18h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
         <circle cx="18" cy="18" r="3.5" stroke="currentColor" strokeWidth="1.5"/>
         <path d="M16.5 18l1 1 2-2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
+    ),
+  },
+  {
+    label: 'Facturación',
+    path: '/facturacion',
+    facturacion: true,
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+        <path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+        <path d="M9 8h6M9 12h6M9 16h3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
       </svg>
     ),
   },
@@ -154,7 +166,12 @@ export default function Layout() {
   const salir = () => guardedAction(logout)
   const location = useLocation()
   const isAdmin = user?.role === 'admin'
-  const navLinks = NAV_LINKS.filter(l => isAdmin || !l.adminOnly)
+  const navLinks = NAV_LINKS.filter(l => {
+    if (l.facturacion) return puedeFacturacion(user)
+    if (l.produccion) return !soloFacturacion(user)
+    return isAdmin || !l.adminOnly
+  })
+  const rolLabel = isAdmin ? 'Administrador' : soloFacturacion(user) ? 'Contabilidad' : 'Operador'
   const subLinks = PRODUCCION_SUBLINKS.filter(l => (isAdmin || !l.adminOnly) && puedeLink(l, user))
   const [drawerOpen, setDrawerOpen] = useState(false)
 
@@ -229,7 +246,7 @@ export default function Layout() {
                 {user?.username}
               </div>
               <div style={{ fontSize: 10, color: 'var(--ink-3)' }}>
-                {user?.role === 'admin' ? 'Administrador' : 'Operador'}
+                {rolLabel}
               </div>
             </div>
           </div>
@@ -366,7 +383,7 @@ export default function Layout() {
                 {user?.username}
               </div>
               <div style={{ fontSize: 10, color: 'var(--ink-3)' }}>
-                {user?.role === 'admin' ? 'Administrador' : 'Operador'}
+                {rolLabel}
               </div>
             </div>
           </div>

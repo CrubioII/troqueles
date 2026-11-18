@@ -5,7 +5,7 @@ from django.contrib.auth.admin import UserAdmin
 from .models import (
     Cliente, Papel, Cotizacion, CotizacionProceso, OrdenProduccion, OpProceso,
     OrdenCambio, TroquelModelo, FormatoCuchillas, Remision, RemisionItem,
-    RegistroProceso, Notificacion, PerfilOperador,
+    RegistroProceso, Notificacion, PerfilOperador, Factura,
 )
 
 
@@ -145,3 +145,12 @@ class NotificacionAdmin(admin.ModelAdmin):
     list_filter = ["tipo"]
     search_fields = ["titulo", "mensaje", "orden__numero"]
     readonly_fields = ["creada"]
+
+
+@admin.register(Factura)
+class FacturaAdmin(admin.ModelAdmin):
+    list_display = ["numero", "fecha", "cliente", "total", "estado"]
+    list_filter = ["estado"]
+    search_fields = ["numero", "cliente__nombre"]
+    filter_horizontal = ["remisiones"]
+    readonly_fields = ["creada", "modificada", "estado_cambiado_en", "creada_por"]
