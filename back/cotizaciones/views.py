@@ -2313,7 +2313,8 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         self._solo_troquel_puro_para_no_general(request, [orden])
         if orden.remision_descartada_operador_en is None:
             orden.remision_descartada_operador_en = timezone.now()
-            orden.save(update_fields=["remision_descartada_operador_en"])
+            orden.remision_descartada_operador_por = request.user
+            orden.save(update_fields=["remision_descartada_operador_en", "remision_descartada_operador_por"])
         return Response({"ok": True})
 
     @action(detail=False, methods=["get"], url_path="remisiones_solicitadas")

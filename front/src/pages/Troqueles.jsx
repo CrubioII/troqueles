@@ -20,6 +20,7 @@ import {
 import { useSyncPolling } from '../lib/useSyncPolling'
 import { useDragOrder } from '../hooks/useDragOrder'
 import { exactClientMatch } from '../lib/clienteDedup'
+import { saveBlob } from '../lib/download'
 
 const asList = (data) => (Array.isArray(data) ? data : (data?.results || []))
 
@@ -577,6 +578,7 @@ function OperadorTroqueles() {
   const [genBusy, setGenBusy] = useState(false)
   const [genError, setGenError] = useState(null)
   const [genOk, setGenOk] = useState(null)          // número de la última remisión generada
+  const [genSinPdf, setGenSinPdf] = useState(null)  // generada, pero el PDF no se descargó
   const [confirmGen, setConfirmGen] = useState(false) // modal previo a generar
 
   const loadLista = (silent = false) => {
@@ -677,7 +679,7 @@ function OperadorTroqueles() {
   // Admin de ahí en adelante.
   const [descartandoRem, setDescartandoRem] = useState(null)
   const descartarRem = async (op) => {
-    if (!window.confirm(`¿Descartar ${op.numero} de tu cola de remisiones? Quedará a cargo del administrador; ya no la verás aquí.`)) return
+    if (!window.confirm(`¿Descartar ${op.numero}?\n\nEsto NO genera la remisión ni la envía a nadie: solo la quita de tu lista y ya no podrás remisionarla desde aquí.\n\nPara remisionarla, cancela, marca su casilla y usa «Generar remisión».`)) return
     setDescartandoRem(op.id)
     setGenError(null)
     try {
@@ -701,12 +703,7 @@ function OperadorTroqueles() {
     }
     const nombre = (r.headers.get('Content-Disposition') || '').match(/filename="(.+?)"/)?.[1]
     const blob = await r.blob()
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = nombre || 'Remision.pdf'
-    a.click()
-    URL.revokeObjectURL(url)
+    saveBlob(blob, nombre || 'Remision.pdf')
   }
 
   const generarRemision = async () => {
@@ -714,14 +711,21 @@ function OperadorTroqueles() {
     setGenBusy(true)
     setGenError(null)
     setGenOk(null)
+    setGenSinPdf(null)
     try {
       const { remision_id, remision_numero } = await consolidarRemisionOperador(selRem)
-      await descargarPdfRemision(remision_id)
+      // From here on the remisión exists and its OPs are out of the queue
+      // (they live in Historial › Remisiones): a failed download must not
+      // look like a failed generation.
       setSelRem([]); setSelCliente(null); setAvisoCliente(null)
       setConfirmGen(false)
       setGenOk(remision_numero)
-      // Las OPs generadas salen de esta lista y quedan en Historial › Remisiones.
       loadRemisionables()
+      try {
+        await descargarPdfRemision(remision_id)
+      } catch (e) {
+        setGenSinPdf(e?.message || 'error de descarga')
+      }
     } catch (e) {
       setGenError(e.message || 'No se pudo generar la remisión')
     } finally {
@@ -1076,9 +1080,9 @@ function OperadorTroqueles() {
               <button
                 className="btn sm primary"
                 disabled={genBusy || !selRem.length}
-                onClick={() => { setGenError(null); setGenOk(null); setConfirmGen(true) }}
+                onClick={() => { setGenError(null); setGenOk(null); setGenSinPdf(null); setConfirmGen(true) }}
               >
-                {genBusy ? 'Generando…' : `Generar remisión${selRem.length ? ` (${selRem.length})` : ''}`}
+                {genBusy ? 'Generando…' : selRem.length ? `Generar remisión (${selRem.length})` : 'Generar remisión — marca una OP'}
               </button>
             }
           >
@@ -1118,9 +1122,11 @@ function OperadorTroqueles() {
                 </div>
               )}
               {genOk && (
-                <div style={{ marginTop: 8, fontSize: 12, color: 'var(--ok, #2e7d32)' }}>
-                  ✓ Remisión <strong>{genOk}</strong> generada ·{' '}
-                  <button className="btn sm" style={{ padding: '2px 8px' }} onClick={() => { setGenOk(null); setTab('historial'); setHistTab('remisiones') }}>
+                <div style={{ marginTop: 8, fontSize: 12, color: genSinPdf ? 'var(--danger, #c0392b)' : 'var(--ok, #2e7d32)' }}>
+                  {genSinPdf
+                    ? <>Remisión <strong>{genOk}</strong> generada, pero el PDF no se descargó ({genSinPdf}). Descárgalo desde Historial ·{' '}</>
+                    : <>✓ Remisión <strong>{genOk}</strong> generada ·{' '}</>}
+                  <button className="btn sm" style={{ padding: '2px 8px' }} onClick={() => { setGenOk(null); setGenSinPdf(null); setTab('historial'); setHistTab('remisiones') }}>
                     Ver en Historial
                   </button>
                 </div>
@@ -1174,11 +1180,15 @@ function OperadorTroqueles() {
                               <td style={{ padding: '10px 12px', color: 'var(--ink-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{op.referencia}</td>
                               <td style={{ padding: '10px 12px', width: 70, fontFamily: 'JetBrains Mono, monospace', color: 'var(--ink-2)' }} title="Unidades del producto en la OP — no es la cantidad de troqueles (siempre es 1 por tarea)">{op.cantidad} uds</td>
                               <td style={{ padding: '10px 12px', width: 90, textAlign: 'right' }} onClick={e => e.stopPropagation()}>
+                                {/* Deliberately a quiet text link, not a button: as the row's only
+                                    button it read as "send to remisión" and jobs got discarded by
+                                    mistake (OP-1619 / OP-1621 in prod). */}
                                 <button
-                                  className="btn sm"
+                                  className="btn sm ghost"
+                                  style={{ color: 'var(--ink-3)', textDecoration: 'underline', fontWeight: 400 }}
                                   disabled={descartandoRem === op.id}
                                   onClick={() => descartarRem(op)}
-                                  title="Sacarla de tu cola de remisiones; queda a cargo del administrador"
+                                  title="Quitarla de tu lista sin remisionarla (no genera ni envía nada)"
                                 >
                                   Descartar
                                 </button>

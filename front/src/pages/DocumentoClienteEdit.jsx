@@ -10,6 +10,7 @@ import {
   pdfDocumento, enviarDocumento,
 } from '../api'
 import { crearClienteConGuard, exactClientMatch } from '../lib/clienteDedup'
+import { saveBlob } from '../lib/download'
 
 const DEFAULT_NOTA = 'En la presente cotización No incluye el impuesto del IVA, el cliente debe suministrar el diseño de logotipo e impresión.'
 
@@ -117,12 +118,7 @@ function stateToApi(d) {
 }
 
 function triggerBlobDownload(blob, filename) {
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
+  saveBlob(blob, filename)
 }
 
 // ── Client autocomplete ──

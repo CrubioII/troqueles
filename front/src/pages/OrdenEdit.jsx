@@ -16,6 +16,7 @@ import { crearClienteConGuard } from '../lib/clienteDedup'
 import { useAuth } from '../context/AuthContext'
 import { useGuardedNavigate, useUnsavedGuard } from '../context/UnsavedChangesContext'
 import { buildDefaultProcesos, buildBlankState, docToState, stateToDoc, seedProcesosFromApi, computeCalc } from '../lib/opQuoteShared'
+import { saveBlob } from '../lib/download'
 
 // Resumen estático para OP creada desde cotización (datos bloqueados)
 function OrdenResumenLocked({ d, calc, papelCatalog, showMoney = true }) {
@@ -297,10 +298,7 @@ export default function OrdenEdit() {
   const downloadBlob = async (resp, filename) => {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
     const blob = await resp.blob()
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url; a.download = filename; a.click()
-    URL.revokeObjectURL(url)
+    saveBlob(blob, filename)
   }
 
   const handlePdfAdmin = async () => {

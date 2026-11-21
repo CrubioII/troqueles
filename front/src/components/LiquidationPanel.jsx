@@ -3,6 +3,7 @@ import { Icon } from './Icons'
 import { fmtCOP, fmtNum, SaveStatus } from './core'
 import { pdfInterno } from '../api'
 import { computeCalcConTarifas, buildOpcionesPdf } from '../lib/opQuoteShared'
+import { saveBlob } from '../lib/download'
 
 function LiqInput({ value, onChange, isOverridden, onReset, big }) {
   const display = Number(Math.round(value || 0)).toLocaleString('es-CO')
@@ -53,10 +54,7 @@ export default function LiquidationPanel({
       const r = await pdfInterno(d.id, calc, procesos ? buildOpcionesPdf(d, procesos, calc) : null)
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       const blob = await r.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url; a.download = `Interno_${d.numero}.pdf`; a.click()
-      URL.revokeObjectURL(url)
+      saveBlob(blob, `Interno_${d.numero}.pdf`)
     } catch (e) {
       console.error(e)
     } finally {

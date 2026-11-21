@@ -9,6 +9,7 @@ import {
 } from '../api'
 import { useSyncPolling } from '../lib/useSyncPolling'
 import { useAuth } from '../context/AuthContext'
+import { saveBlob } from '../lib/download'
 
 const norm = (s) => (s || '').toString().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
 const asList = (d) => Array.isArray(d) ? d : (d?.results || [])
@@ -203,6 +204,9 @@ function RemisionesProduccion() {
   const [genBusy, setGenBusy] = useState(false)
   const [genError, setGenError] = useState(null)
   const [genOk, setGenOk] = useState(null)
+  // Set when the remisión was generated but its PDF did not download: the OPs
+  // already left this queue, so point the user to Historial for the file.
+  const [genSinPdf, setGenSinPdf] = useState(null)
   const [confirmGen, setConfirmGen] = useState(false)
 
   const [historial, setHistorial] = useState([])
@@ -284,7 +288,7 @@ function RemisionesProduccion() {
   // No borra nada: solo saca la OP de esta cola. Sigue intacta y a cargo del
   // Admin de ahí en adelante (mismo endpoint que usa Troqueles).
   const descartarRem = async (op) => {
-    if (!window.confirm(`¿Descartar ${op.numero} de tu cola de remisiones? Quedará a cargo del administrador; ya no la verás aquí.`)) return
+    if (!window.confirm(`¿Descartar ${op.numero}?\n\nEsto NO genera la remisión ni la envía a nadie: solo la quita de tu lista y ya no podrás remisionarla desde aquí.\n\nPara remisionarla, cancela, marca su casilla y usa «Generar remisión».`)) return
     setDescartandoRem(op.id)
     setGenError(null)
     try {
@@ -306,12 +310,7 @@ function RemisionesProduccion() {
     }
     const nombre = (r.headers.get('Content-Disposition') || '').match(/filename="(.+?)"/)?.[1]
     const blob = await r.blob()
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = nombre || 'Remision.pdf'
-    a.click()
-    URL.revokeObjectURL(url)
+    saveBlob(blob, nombre || 'Remision.pdf')
   }
 
   const generarRemision = async () => {
@@ -319,14 +318,21 @@ function RemisionesProduccion() {
     setGenBusy(true)
     setGenError(null)
     setGenOk(null)
+    setGenSinPdf(null)
     try {
       const { remision_id, remision_numero } = await consolidarRemisionOperador(selRem)
-      await descargarPdfRemision(remision_id)
+      // From here on the remisión exists and its OPs are out of the queue:
+      // a failed download must not look like a failed generation.
       setSelRem([]); setSelCliente(null)
       setConfirmGen(false)
       setGenOk(remision_numero)
       loadRemisionables()
       loadHistorial()
+      try {
+        await descargarPdfRemision(remision_id)
+      } catch (e) {
+        setGenSinPdf(e?.message || 'error de descarga')
+      }
     } catch (e) {
       setGenError(e.message || 'No se pudo generar la remisión')
     } finally {
@@ -375,9 +381,9 @@ function RemisionesProduccion() {
           <button
             className="btn sm primary"
             disabled={genBusy || !selRem.length}
-            onClick={() => { setGenError(null); setGenOk(null); setConfirmGen(true) }}
+            onClick={() => { setGenError(null); setGenOk(null); setGenSinPdf(null); setConfirmGen(true) }}
           >
-            {genBusy ? 'Generando…' : `Generar remisión${selRem.length ? ` (${selRem.length})` : ''}`}
+            {genBusy ? 'Generando…' : selRem.length ? `Generar remisión (${selRem.length})` : 'Generar remisión — marca una OP'}
           </button>
         </div>
         <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', fontSize: 12, color: 'var(--ink-3)' }}>
@@ -397,7 +403,15 @@ function RemisionesProduccion() {
             </span>
           </div>
           {genError && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--danger, #c0392b)' }}>✗ {genError}</div>}
-          {genOk && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--ok, #2e7d32)' }}>✓ Remisión <strong>{genOk}</strong> generada.</div>}
+          {genOk && !genSinPdf && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--ok, #2e7d32)' }}>✓ Remisión <strong>{genOk}</strong> generada.</div>}
+          {genOk && genSinPdf && (
+            <div style={{ marginTop: 8, fontSize: 12, color: 'var(--danger, #c0392b)' }}>
+              Remisión <strong>{genOk}</strong> generada, pero el PDF no se descargó ({genSinPdf}). Descárgalo desde Historial ·{' '}
+              <button className="btn sm" style={{ padding: '2px 8px' }} onClick={() => { setGenOk(null); setGenSinPdf(null); setSubTab('historial') }}>
+                Ir a Historial
+              </button>
+            </div>
+          )}
         </div>
         {loadingRem ? <Skeleton /> : gruposRem.length === 0 ? (
           <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>
@@ -428,11 +442,15 @@ function RemisionesProduccion() {
                             {op.origen === 'registro_libre' && <LibreBadge />}
                           </td>
                           <td style={{ padding: '10px 12px', width: 90, textAlign: 'right' }} onClick={e => e.stopPropagation()}>
+                            {/* Deliberately a quiet text link, not a button: as the row's only
+                                button it read as "send to remisión" and jobs got discarded by
+                                mistake (OP-1619 / OP-1621 in prod). */}
                             <button
-                              className="btn sm"
+                              className="btn sm ghost"
+                              style={{ color: 'var(--ink-3)', textDecoration: 'underline', fontWeight: 400 }}
                               disabled={descartandoRem === op.id}
                               onClick={() => descartarRem(op)}
-                              title="Sacarla de tu cola de remisiones; queda a cargo del administrador"
+                              title="Quitarla de tu lista sin remisionarla (no genera ni envía nada)"
                             >
                               Descartar
                             </button>

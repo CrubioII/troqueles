@@ -77,7 +77,7 @@ class OrdenProduccionAdmin(admin.ModelAdmin):
     list_display = ["numero", "cliente", "referencia", "cantidad", "abono", "creado"]
     list_filter = ["tipo_cliente", "condicion_pago", "tipo_facturacion"]
     search_fields = ["numero", "cliente__nombre", "referencia"]
-    readonly_fields = ["numero", "creado", "modificado"]
+    readonly_fields = ["numero", "creado", "modificado", "remision_descartada_operador_por"]
     inlines = [OpProcesoInline]
     fieldsets = [
         ("General", {"fields": ["numero", "fecha", "cliente", "cotizacion", "referencia", "cantidad", "sobrante", "tipo_cliente"]}),
@@ -85,6 +85,9 @@ class OrdenProduccionAdmin(admin.ModelAdmin):
         ("Liquidación", {"fields": ["margen", "abono", "valor_unitario_override", "valor_total_override", "total_costos_override", "subtotal_override"]}),
         ("Condiciones", {"fields": ["condicion_pago", "condicion_custom", "tipo_facturacion", "observaciones"]}),
         ("Auditoría", {"fields": ["creado", "modificado"], "classes": ["collapse"]}),
+        # Clearing the date puts the OP back in the remisiones queue (undo a
+        # mistaken "Descartar").
+        ("Remisión descartada", {"fields": ["remision_descartada_operador_en", "remision_descartada_operador_por"], "classes": ["collapse"]}),
     ]
 
 

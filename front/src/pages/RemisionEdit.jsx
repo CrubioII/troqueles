@@ -9,6 +9,7 @@ import { RegistroProcesoHistory } from '../components/RegistroProceso'
 import GroupedIntegerInput from '../components/GroupedIntegerInput'
 import { getRemision, updateRemision, liquidarRemision, pdfRemision, getRemisionDesglose, getRemisionesImportables, importarRemisiones, devolverFormatoCuchillas, deleteRemision, getRegistrosProceso, updateRegistroProceso } from '../api'
 import logo from '../assets/logo.png'
+import { saveBlob } from '../lib/download'
 
 // ─────────── Desglose por concepto del troquel ───────────
 // Los valores llegan ya formateados en COP desde el backend (mismos datos que
@@ -736,12 +737,7 @@ export default function RemisionEdit() {
       const filename = (r.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/)?.[1]
       const numero = filename?.match(/Remision_(REM-\d+)/)?.[1]
       if (numero && numero !== rem.numero) setRem(prev => prev && { ...prev, numero })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = filename || `Remision_${numero || rem.numero}${tipo === 'admin' ? '_admin' : ''}.pdf`
-      a.click()
-      URL.revokeObjectURL(url)
+      saveBlob(blob, filename || `Remision_${numero || rem.numero}${tipo === 'admin' ? '_admin' : ''}.pdf`)
     } catch (e) {
       setPdfError('No se pudo generar el PDF')
     } finally {

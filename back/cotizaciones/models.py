@@ -365,6 +365,11 @@ class OrdenProduccion(models.Model):
     # El Operador la descarta de su propia cola de remisionables (no es un
     # delete: la OP sigue intacta, queda a cargo del Admin de ahí en adelante).
     remision_descartada_operador_en = models.DateTimeField(null=True, blank=True)
+    # Who discarded it — without this a mistaken discard can't be traced.
+    remision_descartada_operador_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="remisiones_descartadas",
+    )
 
     creado = models.DateTimeField(auto_now_add=True)
     modificado = models.DateTimeField(auto_now=True)

@@ -126,3 +126,22 @@ class RegistroLibreTestCase(TestCase):
         r = self.c_est.post(f"/api/registros-proceso/{resp.data['id']}/anular/")
         self.assertEqual(r.status_code, 200, r.data)
         self.assertFalse(OrdenProduccion.objects.filter(pk=op_id).exists())
+
+    def test_descartar_registra_quien_y_saca_de_la_cola(self):
+        resp = self.c_est.post(URL, self._payload(), format="json")
+        op_id = resp.data["orden"]
+        self.assertIn(op_id, [r["id"] for r in self._remisionables()])
+
+        r = self.c_gen.post(
+            "/api/ordenes/descartar_remisionable_operador/", {"orden_id": op_id}, format="json",
+        )
+        self.assertEqual(r.status_code, 200, r.data)
+        op = OrdenProduccion.objects.get(pk=op_id)
+        self.assertIsNotNone(op.remision_descartada_operador_en)
+        self.assertEqual(op.remision_descartada_operador_por, self.u_general)
+        self.assertNotIn(op_id, [r["id"] for r in self._remisionables()])
+
+        # Clearing the timestamp (Django admin) is the undo: back in the queue.
+        op.remision_descartada_operador_en = None
+        op.save(update_fields=["remision_descartada_operador_en"])
+        self.assertIn(op_id, [r["id"] for r in self._remisionables()])

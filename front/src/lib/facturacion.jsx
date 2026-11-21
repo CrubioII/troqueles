@@ -1,4 +1,5 @@
 import { fmtCOP } from '../components/core'
+import { saveBlob } from './download'
 
 // Compartido entre Facturación (listas) y FacturaDetalle.
 
@@ -47,12 +48,7 @@ export async function descargar(responsePromise, fallbackName) {
   }
   const blob = await r.blob()
   const filename = (r.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/)?.[1]
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename || fallbackName
-  a.click()
-  URL.revokeObjectURL(url)
+  saveBlob(blob, filename || fallbackName)
 }
 
 export function EstadoPill({ estado }) {
