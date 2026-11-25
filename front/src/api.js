@@ -626,8 +626,18 @@ export const saveTroquelModelo = (id, formData) =>
 export const getFormatosCuchillas = (ordenId) =>
   apiFetch(`${BASE}/formatos-cuchillas/?orden=${ordenId}`).then(json)
 
-export const getFormatosCuchillasTodos = () =>
-  fetchAllPages(`${BASE}/formatos-cuchillas/`)
+// Historial paginado (50 por página en el servidor). Devuelve { count, next, previous, results }.
+const pageQuery = (page, search) => {
+  const qs = new URLSearchParams({ page: String(page || 1) })
+  if (search && search.trim()) qs.set('search', search.trim())
+  return qs.toString()
+}
+
+export const getFormatosCuchillasPagina = (page = 1, search = '') =>
+  apiFetch(`${BASE}/formatos-cuchillas/?${pageQuery(page, search)}`).then(jsonConError)
+
+export const getRemisionesGeneradasOperadorPagina = (page = 1, search = '') =>
+  apiFetch(`${BASE}/ordenes/remisiones_generadas_operador/?${pageQuery(page, search)}`).then(jsonConError)
 
 export const createFormatoCuchillas = (data) =>
   apiFetch(`${BASE}/formatos-cuchillas/`, {

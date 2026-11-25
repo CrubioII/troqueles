@@ -2261,15 +2261,37 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
             ))
             .order_by("-historial_en", "-id")
         )
-        remisiones = list(qs)
         if not roles.puede_remisiones_generales(request.user):
-            remisiones = [
-                rem for rem in remisiones
-                if not any(op.procesos.filter(
-                    proceso_id__in=chain.CHAIN_PROCESOS, active=True
-                ).exists() for op in _remision_operador_ops(rem))
-            ]
-        data = RemisionGeneradaOperadorSerializer(remisiones, many=True, context={"request": request}).data
+            # Sin permiso de remisiones generales: fuera las que incluyan una
+            # OP de la cadena de máquinas (propia o de una consolidada). Se
+            # filtra en SQL para poder paginar.
+            qs = qs.exclude(Exists(OpProceso.objects.filter(
+                orden_id=OuterRef("orden_id"),
+                proceso_id__in=chain.CHAIN_PROCESOS, active=True,
+            ))).exclude(Exists(Remision.objects.filter(
+                consolidada_en_remision_id=OuterRef("pk"),
+                orden__procesos__proceso_id__in=chain.CHAIN_PROCESOS,
+                orden__procesos__active=True,
+            )))
+        search = (request.query_params.get("search") or "").strip()
+        if search:
+            qs = qs.filter(
+                Q(numero__icontains=search)
+                | Q(cliente__nombre__icontains=search)
+                | Q(orden__numero__icontains=search)
+                | Q(orden__referencia__icontains=search)
+                | Q(remisiones_consolidadas__orden__numero__icontains=search)
+                | Q(remisiones_consolidadas__orden__referencia__icontains=search)
+            )
+        ctx = {"request": request}
+        # Paginado (50 por página) solo si se pide `page`: el historial de
+        # Producción General todavía consume la lista completa.
+        if "page" in request.query_params:
+            page = self.paginate_queryset(qs)
+            if page is not None:
+                data = RemisionGeneradaOperadorSerializer(page, many=True, context=ctx).data
+                return self.get_paginated_response(data)
+        data = RemisionGeneradaOperadorSerializer(qs, many=True, context=ctx).data
         return Response(data)
 
     @action(detail=False, methods=["post"], url_path="devolver_remision_operador")
@@ -2661,6 +2683,15 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
         estado = self.request.query_params.get("estado")
         if estado:
             qs = qs.filter(estado=estado)
+        # Historial (Producción › Troqueles): se pagina de 50 en 50, así que
+        # la búsqueda tiene que hacerse aquí y no sobre la página ya cargada.
+        search = (self.request.query_params.get("search") or "").strip()
+        if search:
+            qs = qs.filter(
+                Q(orden__numero__icontains=search)
+                | Q(orden__cliente__nombre__icontains=search)
+                | Q(orden__referencia__icontains=search)
+            )
         return qs
 
     def perform_create(self, serializer):

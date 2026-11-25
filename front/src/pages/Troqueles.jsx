@@ -9,11 +9,11 @@ import {
   NuevaTareaTroquelModal, EstadoFormatoBadge,
 } from '../components/Troquel'
 import {
-  getOrdenesTodas, deleteOrden, getFormatosCuchillas, getFormatosCuchillasTodos, getOrdenesPendientes,
+  getOrdenesTodas, deleteOrden, getFormatosCuchillas, getFormatosCuchillasPagina, getOrdenesPendientes,
   getOrdenProduccion, getTroquelModelo,
   updateFormatoCuchillas, cancelarEnvioFormato,
   getRemisionablesOperador, descartarRemisionableOperador, consolidarRemisionOperador, pdfRemisionOperadorConsolidada,
-  getRemisionesGeneradasOperador, devolverRemisionOperador,
+  getRemisionesGeneradasOperadorPagina, devolverRemisionOperador,
   getRemisionesSolicitadas, setTroquelClientePrioridades,
   getClientes, editarCamposOrden,
 } from '../api'
@@ -23,6 +23,36 @@ import { exactClientMatch } from '../lib/clienteDedup'
 import { saveBlob } from '../lib/download'
 
 const asList = (data) => (Array.isArray(data) ? data : (data?.results || []))
+
+// El historial se pide de a una página (PAGE_SIZE del backend = 50).
+const HIST_PAGE_SIZE = 50
+
+function HistPager({ page, count, loading, onPage }) {
+  const pages = Math.max(1, Math.ceil((count || 0) / HIST_PAGE_SIZE))
+  if (pages <= 1) return null
+  const desde = (page - 1) * HIST_PAGE_SIZE + 1
+  const hasta = Math.min(page * HIST_PAGE_SIZE, count)
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 16px', borderTop: '1px solid var(--line)', fontSize: 12, color: 'var(--ink-3)', flexWrap: 'wrap' }}>
+      <span>{desde}–{hasta} de {count}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <button className="btn sm" disabled={loading || page <= 1} onClick={() => onPage(page - 1)}>← Anterior</button>
+        <span>Página {page} de {pages}</span>
+        <button className="btn sm" disabled={loading || page >= pages} onClick={() => onPage(page + 1)}>Siguiente →</button>
+      </div>
+    </div>
+  )
+}
+
+// Valor con retardo, para no consultar el servidor en cada tecla.
+function useDebounced(value, ms = 350) {
+  const [v, setV] = useState(value)
+  useEffect(() => {
+    const t = setTimeout(() => setV(value), ms)
+    return () => clearTimeout(t)
+  }, [value, ms])
+  return v
+}
 
 // Fecha de subida al sistema formateada + color según antigüedad sin registrar
 // el formato de cuchillas: neutro (0-1 días), ámbar (1-2 días), rojo (3+ días).
@@ -561,9 +591,15 @@ function OperadorTroqueles() {
   const [loadingHistorial, setLoadingHistorial] = useState(false)
   const [editHist, setEditHist] = useState(null)
   const [busquedaHist, setBusquedaHist] = useState('')
+  const [histPage, setHistPage] = useState(1)
+  const [histCount, setHistCount] = useState(0)
+  const histReq = useRef(0)  // descarta respuestas viejas (cambio de página/búsqueda)
   const [histRem, setHistRem] = useState([])
   const [loadingHistRem, setLoadingHistRem] = useState(false)
   const [busquedaHistRem, setBusquedaHistRem] = useState('')
+  const [histRemPage, setHistRemPage] = useState(1)
+  const [histRemCount, setHistRemCount] = useState(0)
+  const histRemReq = useRef(0)
   const [histRemBusy, setHistRemBusy] = useState(null)   // id de remisión en PDF/devolución
   const [histRemError, setHistRemError] = useState(null)
   const [loadHistRemError, setLoadHistRemError] = useState(null)  // fallo al cargar el historial
@@ -591,28 +627,54 @@ function OperadorTroqueles() {
 
   useEffect(() => { loadLista() }, [])
 
-  const loadHistorial = () => {
+  const busquedaHistDeb = useDebounced(busquedaHist)
+  const busquedaHistRemDeb = useDebounced(busquedaHistRem)
+
+  // Una sola página (50) por consulta; la búsqueda se hace en el servidor.
+  const loadHistorial = (page = histPage, search = busquedaHistDeb) => {
+    const req = ++histReq.current
     setLoadingHistorial(true)
-    getFormatosCuchillasTodos()
-      .then(d => setHistorial(asList(d)))
-      .catch(() => setHistorial([]))
-      .finally(() => setLoadingHistorial(false))
+    getFormatosCuchillasPagina(page, search)
+      .then(d => {
+        if (req !== histReq.current) return
+        setHistorial(asList(d))
+        setHistCount(d?.count ?? asList(d).length)
+      })
+      .catch(() => { if (req === histReq.current) { setHistorial([]); setHistCount(0) } })
+      .finally(() => { if (req === histReq.current) setLoadingHistorial(false) })
   }
 
-  const loadHistRem = () => {
+  const loadHistRem = (page = histRemPage, search = busquedaHistRemDeb) => {
+    const req = ++histRemReq.current
     setLoadingHistRem(true)
     setLoadHistRemError(null)
-    getRemisionesGeneradasOperador()
-      .then(d => setHistRem(asList(d)))
-      .catch(e => { setHistRem([]); setLoadHistRemError(e?.message || 'No se pudo cargar el historial') })
-      .finally(() => setLoadingHistRem(false))
+    getRemisionesGeneradasOperadorPagina(page, search)
+      .then(d => {
+        if (req !== histRemReq.current) return
+        setHistRem(asList(d))
+        setHistRemCount(d?.count ?? asList(d).length)
+      })
+      .catch(e => {
+        if (req !== histRemReq.current) return
+        setHistRem([]); setHistRemCount(0)
+        setLoadHistRemError(e?.message || 'No se pudo cargar el historial')
+      })
+      .finally(() => { if (req === histRemReq.current) setLoadingHistRem(false) })
   }
 
+  // Al cambiar la búsqueda se vuelve a la página 1.
+  useEffect(() => { setHistPage(1) }, [busquedaHistDeb])
+  useEffect(() => { setHistRemPage(1) }, [busquedaHistRemDeb])
+
   useEffect(() => {
-    if (tab !== 'historial') return
-    if (histTab === 'formatos') loadHistorial()
-    else loadHistRem()
-  }, [tab, histTab])
+    if (tab !== 'historial' || histTab !== 'formatos') return
+    loadHistorial(histPage, busquedaHistDeb)
+  }, [tab, histTab, histPage, busquedaHistDeb])
+
+  useEffect(() => {
+    if (tab !== 'historial' || histTab !== 'remisiones') return
+    loadHistRem(histRemPage, busquedaHistRemDeb)
+  }, [tab, histTab, histRemPage, busquedaHistRemDeb])
 
   // Un fallo acá no puede verse igual que una cola vacía: mostrar "No hay
   // troqueles pendientes de remisión" cuando en realidad el backend falló es
@@ -678,6 +740,31 @@ function OperadorTroqueles() {
   // No borra nada: solo saca la OP de esta cola. Sigue intacta y a cargo del
   // Admin de ahí en adelante.
   const [descartandoRem, setDescartandoRem] = useState(null)
+
+  // Devolver para corregir: cancela el envío del formato (→ borrador), lo que
+  // borra su remisión pendiente y devuelve la OP a la cola de troqueles; luego
+  // abre la OP para editar el formato de una vez.
+  const [devolviendoRem, setDevolviendoRem] = useState(null)
+  const devolverRem = async (op) => {
+    if (!window.confirm(`¿Devolver ${op.numero} para corregir su formato de cuchillas?\n\nSale de remisiones y vuelve a la cola de troqueles como borrador. Cuando la reenvíes, volverá a aparecer aquí.`)) return
+    setDevolviendoRem(op.id)
+    setGenError(null)
+    try {
+      await cancelarEnvioFormato(op.formato_id)
+      setSelRem(prev => {
+        const next = prev.filter(id => id !== op.id)
+        if (next.length === 0) setSelCliente(null)
+        return next
+      })
+      loadRemisionables()
+      abrir(op)
+    } catch (e) {
+      setGenError(e?.message || 'No se pudo devolver la OP')
+    } finally {
+      setDevolviendoRem(null)
+    }
+  }
+
   const descartarRem = async (op) => {
     if (!window.confirm(`¿Descartar ${op.numero}?\n\nEsto NO genera la remisión ni la envía a nadie: solo la quita de tu lista y ya no podrás remisionarla desde aquí.\n\nPara remisionarla, cancela, marca su casilla y usa «Generar remisión».`)) return
     setDescartandoRem(op.id)
@@ -767,20 +854,6 @@ function OperadorTroqueles() {
     return lista.filter(op => [op.numero, op.cliente_nombre, op.referencia].some(v => norm(v).includes(t)))
   }, [lista, busqueda])
 
-  const historialFiltrado = useMemo(() => {
-    const t = norm(busquedaHist.trim())
-    if (!t) return historial
-    return historial.filter(f => [f.orden_numero, f.cliente_nombre, f.referencia].some(v => norm(v).includes(t)))
-  }, [historial, busquedaHist])
-
-  const histRemFiltrado = useMemo(() => {
-    const t = norm(busquedaHistRem.trim())
-    if (!t) return histRem
-    return histRem.filter(r => [
-      r.numero, r.cliente_nombre,
-      ...(r.ops || []).flatMap(op => [op.numero, op.referencia]),
-    ].some(v => norm(v).includes(t)))
-  }, [histRem, busquedaHistRem])
 
   const loadFormatos = (ordenId) => {
     setLoadingFormatos(true)
@@ -893,10 +966,10 @@ function OperadorTroqueles() {
               <div style={{ padding: 24, textAlign: 'center', color: 'var(--danger, #c0392b)', fontSize: 13 }}>
                 ✗ {loadHistRemError}
                 <div style={{ marginTop: 8 }}>
-                  <button className="btn sm" onClick={loadHistRem}>Reintentar</button>
+                  <button className="btn sm" onClick={() => loadHistRem()}>Reintentar</button>
                 </div>
               </div>
-            ) : histRemFiltrado.length === 0 ? (
+            ) : histRem.length === 0 ? (
               <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>
                 {busquedaHistRem.trim() ? `Sin resultados para «${busquedaHistRem.trim()}»` : 'Todavía no has generado remisiones.'}
               </div>
@@ -915,7 +988,7 @@ function OperadorTroqueles() {
                   </tr>
                 </thead>
                 <tbody>
-                  {histRemFiltrado.map((rem, idx) => {
+                  {histRem.map((rem, idx) => {
                     const def = REMISION_STATUS_DEFS.find(s => s.id === rem.estado)
                     const busy = histRemBusy === rem.id
                     return (
@@ -948,35 +1021,36 @@ function OperadorTroqueles() {
               </table>
               </div>
             )}
+            {!loadHistRemError && (
+              <HistPager page={histRemPage} count={histRemCount} loading={loadingHistRem} onPage={setHistRemPage} />
+            )}
           </Section>
         )}
 
         {tab === 'historial' && !editHist && histTab === 'formatos' && (
           <Section title="Historial de formatos de cuchillas">
-            {!loadingHistorial && historial.length > 0 && (
-              <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)' }}>
-                <div style={{ position: 'relative', maxWidth: 420 }}>
-                  <input
-                    className="input"
-                    placeholder="Buscar por OP, cliente, referencia…"
-                    value={busquedaHist}
-                    onChange={e => setBusquedaHist(e.target.value)}
-                    style={{ paddingLeft: 32 }}
-                  />
-                  <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-3)' }}>
-                    <Icon.Search />
-                  </span>
-                </div>
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)' }}>
+              <div style={{ position: 'relative', maxWidth: 420 }}>
+                <input
+                  className="input"
+                  placeholder="Buscar por OP, cliente, referencia…"
+                  value={busquedaHist}
+                  onChange={e => setBusquedaHist(e.target.value)}
+                  style={{ paddingLeft: 32 }}
+                />
+                <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-3)' }}>
+                  <Icon.Search />
+                </span>
               </div>
-            )}
+            </div>
             {histUnlockError && (
               <div style={{ margin: '0 16px 12px', fontSize: 12, color: 'var(--danger, #c0392b)' }}>{histUnlockError}</div>
             )}
-            {!loadingHistorial && historial.length > 0 && historialFiltrado.length === 0 ? (
-              <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Sin resultados para «{busquedaHist.trim()}»</div>
+            {!loadingHistorial && historial.length === 0 && busquedaHistDeb.trim() ? (
+              <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>Sin resultados para «{busquedaHistDeb.trim()}»</div>
             ) : (
               <FormatosCuchillasHistory
-                formatos={historialFiltrado}
+                formatos={historial}
                 loading={loadingHistorial}
                 compact
                 onEdit={setEditHist}
@@ -986,6 +1060,7 @@ function OperadorTroqueles() {
                 unlockBusyId={histUnlockBusy}
               />
             )}
+            <HistPager page={histPage} count={histCount} loading={loadingHistorial} onPage={setHistPage} />
           </Section>
         )}
 
@@ -1179,7 +1254,18 @@ function OperadorTroqueles() {
                               <td style={{ padding: '10px 12px', width: 90, fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 13 }}>{op.numero}</td>
                               <td style={{ padding: '10px 12px', color: 'var(--ink-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{op.referencia}</td>
                               <td style={{ padding: '10px 12px', width: 70, fontFamily: 'JetBrains Mono, monospace', color: 'var(--ink-2)' }} title="Unidades del producto en la OP — no es la cantidad de troqueles (siempre es 1 por tarea)">{op.cantidad} uds</td>
-                              <td style={{ padding: '10px 12px', width: 90, textAlign: 'right' }} onClick={e => e.stopPropagation()}>
+                              <td style={{ padding: '10px 12px', width: 200, textAlign: 'right', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
+                                {op.formato_id && (
+                                  <button
+                                    className="btn sm"
+                                    style={{ marginRight: 6 }}
+                                    disabled={devolviendoRem === op.id}
+                                    onClick={() => devolverRem(op)}
+                                    title="Sacarla de remisiones y volver a abrir su formato de cuchillas para corregirlo"
+                                  >
+                                    {devolviendoRem === op.id ? 'Devolviendo…' : 'Devolver'}
+                                  </button>
+                                )}
                                 {/* Deliberately a quiet text link, not a button: as the row's only
                                     button it read as "send to remisión" and jobs got discarded by
                                     mistake (OP-1619 / OP-1621 in prod). */}
