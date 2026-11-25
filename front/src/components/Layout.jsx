@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { useGuardedAction, useGuardedNavigate } from '../context/UnsavedChangesContext'
 import { Icon } from './Icons'
 import { CampanaNotificaciones } from './Notificaciones'
-import { puedeEstacion, puedeTroqueles, puedeRemisionesGenerales, puedeFacturacion, soloFacturacion } from '../lib/accesoProduccion'
+import { puedeEstacion, puedeTroqueles, puedeRemisionesGenerales, puedeFacturacion, soloFacturacion, puedeAlgunaRemision } from '../lib/accesoProduccion'
 
 // `estacion`/`troqueles`/`remisionesGenerales`: qué le exige este link al rol
 // de producción del Operador (ver back/cotizaciones/roles.py). Sin ninguno de
@@ -18,7 +18,7 @@ const PRODUCCION_SUBLINKS = [
   { label: 'Barnizadora', path: '/produccion/barnizadora', icon: <Icon.Drop width="15" height="15" />, estacion: 'barnizadora' },
   { label: 'Troqueladora', path: '/produccion/troqueladora', icon: <Icon.Blade width="15" height="15" />, estacion: 'troqueladora' },
   { label: 'Troqueles', path: '/produccion/troqueles', icon: <Icon.Stamp width="15" height="15" />, troqueles: true },
-  { label: 'Producción general', path: '/produccion/general', icon: <Icon.Progress width="15" height="15" />, remisionesGenerales: true },
+  { label: 'Remisiones', path: '/produccion/remisiones', icon: <Icon.Send width="15" height="15" />, remisiones: true },
   { label: 'Órdenes (CRUD)', path: '/ordenes', icon: <Icon.Duplicate width="15" height="15" />, remisionesGenerales: true },
 ]
 
@@ -26,6 +26,7 @@ function puedeLink(link, user) {
   if (link.estacion) return puedeEstacion(user, link.estacion)
   if (link.troqueles) return puedeTroqueles(user)
   if (link.remisionesGenerales) return puedeRemisionesGenerales(user)
+  if (link.remisiones) return puedeAlgunaRemision(user)
   return true
 }
 

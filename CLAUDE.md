@@ -74,7 +74,7 @@ Free station record ("+ Registro libre" in EstacionMaquina.jsx, Impresora/Lamina
   — For jobs the Admin never loaded as an OP. Worker picks or creates the client (components/ClientePicker.jsx — creation goes through the 409 cliente_similar near-duplicate guard), reference, quantity and the station's technical data
   — On "Terminar tarea" asks "¿Esta actividad tiene algún proceso adicional?" listing only the later chain processes (core.jsx `procesosPosteriores`)
   — POST /api/registros-proceso/libre/ (RegistroProcesoViewSet.libre) creates a direct OP with `origen="registro_libre"` (no prices, cantidad = what came out) + its OpProcesos, then reuses the normal record path (`_registrar`)
-  — No extras → OP complete → remisión pendiente → shows in Producción General › Remisiones (es_general / Admin) with the "Registro libre" badge; with extras → OP enters the next station's queue
+  — No extras → OP complete → remisión pendiente → shows in Producción › Remisiones (central page, /produccion/remisiones — es_general / Admin) with the "Registro libre" badge; with extras → OP enters the next station's queue
   — Anular the only record of a free OP deletes that OP too
 
 Operador's remisiones queue (Troqueles.jsx › tab "Remisiones", the pre-generation OP picker — NOT the Historial tab, which stays an unmutable log): each OP has a "Descartar" button

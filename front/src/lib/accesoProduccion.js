@@ -17,6 +17,12 @@ export function puedeRemisionesGenerales(user) {
   return user.role === 'admin' || !!user.remisionesGenerales
 }
 
+// Producción › Remisiones (página central): quien remisiona troqueles o
+// producción. Lo que ve cada uno lo filtra el backend.
+export function puedeAlgunaRemision(user) {
+  return puedeTroqueles(user) || puedeRemisionesGenerales(user)
+}
+
 // Módulo Facturación: la contadora (PerfilOperador.es_contadora) y el Admin.
 export function puedeFacturacion(user) {
   if (!user) return false

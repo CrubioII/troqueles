@@ -1,4 +1,5 @@
 import base64
+import datetime
 import os
 import re
 import threading
@@ -375,6 +376,11 @@ def _error_facturada(*remisiones):
                 "Para cambiarla, contabilidad debe cancelar esa factura primero."
             )
     return None
+
+
+# Remissions created before this moment may be delivered without a
+# generada_en/enviada_en stamp (see remisiones_generadas_operador).
+HISTORIAL_TROQUEL_LEGACY_HASTA = datetime.datetime(2026, 9, 12, tzinfo=datetime.timezone.utc)
 
 
 def _borrar_remision_de_op(op):
@@ -1433,7 +1439,7 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         # se ocultan en el serializer para quien no sea staff; `_solo_op_directa`
         # le cierra al no-staff las OPs que nacieron de una cotización, que son
         # del Admin.
-        if self.action in ("list", "retrieve", "produccion", "buscar", "produccion_pendientes", "enviar_remision", "remision_pdf", "cancelar_remision", "remisionables_operador", "remisionables_produccion", "consolidar_remision_operador", "remision_operador_pdf", "remisiones_generadas_operador", "devolver_remision_operador", "descartar_remisionable_operador", "remisiones_solicitadas", "editar_campos", "create", "update", "partial_update", "next_numero"):
+        if self.action in ("list", "retrieve", "produccion", "buscar", "produccion_pendientes", "enviar_remision", "remision_pdf", "cancelar_remision", "remisionables_operador", "remisionables_produccion", "remisionables_central", "previsualizar_remision_operador", "consolidar_remision_operador", "remision_operador_pdf", "remisiones_generadas_operador", "devolver_remision_operador", "descartar_remisionable_operador", "remisiones_solicitadas", "editar_campos", "create", "update", "partial_update", "next_numero"):
             self._require_rol_produccion(request)
             return
         _require_admin(request)
@@ -1455,6 +1461,9 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         "remisionables_operador", "descartar_remisionable_operador",
         "consolidar_remision_operador", "remision_operador_pdf",
         "remisiones_generadas_operador", "devolver_remision_operador",
+        # Producción › Remisiones (central page): the queue filters production
+        # orders by role itself; the preview runs the same checks as generating.
+        "remisionables_central", "previsualizar_remision_operador",
     }
     # CRUD de la OP en sí (pantalla "Órdenes (CRUD)" y el modal de "+ Nueva
     # tarea de troquel" en Troqueles.jsx): General y Troquelador, no Guillotina
@@ -1502,20 +1511,78 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
             )
 
     def update(self, request, *args, **kwargs):
+        # DRF's partial_update also lands here (update(partial=True)).
         self._solo_op_directa(request)
-        return super().update(request, *args, **kwargs)
+        with transaction.atomic():
+            antes = self._procesos_activos(self.get_object())
+            response = super().update(request, *args, **kwargs)
+            if self._sync_remision_con_trabajo(self.get_object(), antes):
+                # The remission changed under the response: send it fresh.
+                response.data = self.get_serializer(self.get_object()).data
+        return response
 
-    def partial_update(self, request, *args, **kwargs):
-        self._solo_op_directa(request)
-        return super().partial_update(request, *args, **kwargs)
+    @staticmethod
+    def _procesos_activos(op):
+        return {p.proceso_id for p in op.procesos.all() if p.active}
+
+    def _sync_remision_con_trabajo(self, op, antes):
+        """Keep the OP's pending remission in step with new work.
+
+        A finished OP gets a pending remission on its own (`_maybe_crear_remision`).
+        When the client then orders more work on the SAME OP (e.g. a printing
+        job after the die), the OP is reopened: the pending remission is taken
+        back so the OP leaves the remissions queue and goes through production
+        again; once the new work is done the remission is recreated with
+        everything together. If that remission already went out, the work
+        cannot be added silently: it has to be returned from Historial first.
+        Undoing the new work before it is done brings the remission back.
+        Returns True if the remission was removed or recreated.
+        """
+        despues = self._procesos_activos(op)
+        es_trabajo = lambda pid: pid != "otros" and not pid.startswith("otros_")
+        nuevos = {pid for pid in despues - antes if es_trabajo(pid)}
+        rem = Remision.objects.filter(orden=op).first()
+        pendientes_nuevos = [
+            p for p in op.procesos.all()
+            if p.proceso_id in nuevos and p.active and not p.completado
+        ]
+        if pendientes_nuevos and rem is not None:
+            destino = rem.consolidada_en_remision if rem.estado == "consolidada" else rem
+            if destino is not None and destino.estado == "liquidada":
+                raise ValidationError({"procesos": [
+                    f"La remisión {destino.numero} de {op.numero} ya fue liquidada: el trabajo "
+                    "nuevo no se puede agregar a esta OP. Crea una OP nueva para él."
+                ]})
+            if destino is not None and (destino.generada_en or destino.enviada_en):
+                raise ValidationError({"procesos": [
+                    f"La remisión {destino.numero or ''} de {op.numero} ya se generó. Para agregarle "
+                    "trabajo, primero devuélvela desde Producción › Remisiones › Historial."
+                ]})
+            error = _borrar_remision_de_op(op)
+            if error:
+                raise ValidationError({"procesos": [error]})
+            return True
+        if rem is None and {pid for pid in antes - despues if es_trabajo(pid)}:
+            # The new work was removed again before being done: the OP is back
+            # to finished, so its remission comes back too.
+            if any(p.active and p.completado for p in op.procesos.all()):
+                return _maybe_crear_remision(op) is not None
+        return False
 
     def get_queryset(self):
         qs = super().get_queryset()
-        # Las OP ya remisionadas (100% completadas) salen de los LISTADOS de producción,
-        # pero siguen accesibles por detalle (retrieve, troquel_costos, etc.) para que el
+        # Las OP ya remisionadas salen de los LISTADOS de producción, pero siguen
+        # accesibles por detalle (retrieve, troquel_costos, etc.) para que el
         # Admin pueda editar precios aunque ya se haya generado la remisión.
+        # "Remisionada" = su remisión ya salió (generada, enviada, liquidada o
+        # fusionada). Una que solo está pendiente sigue en la lista: la OP aún
+        # puede recibir trabajo nuevo (ver `_sync_remision_con_trabajo`).
         if self.action == "list" and not self.request.query_params.get("incluir_remisionadas"):
-            qs = qs.filter(remision__isnull=True)
+            qs = qs.filter(
+                Q(remision__isnull=True)
+                | Q(remision__estado="pendiente", remision__generada_en__isnull=True,
+                    remision__enviada_en__isnull=True)
+            )
         cliente_id = self.request.query_params.get("cliente")
         if cliente_id:
             qs = qs.filter(cliente_id=cliente_id)
@@ -2073,10 +2140,24 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         el Operador descartó (`descartar_remisionable_operador`) también sale
         de aquí: la OP sigue intacta, queda a cargo del Admin.
         """
-        qs = (
+        data = RemisionableOperadorSerializer(
+            self._qs_remisionables_troquel(), many=True, context={"request": request}
+        ).data
+        return Response(data)
+
+    @staticmethod
+    def _qs_remisionables_troquel():
+        """Pure die tasks ready to remit (see `remisionables_operador`)."""
+        return (
             OrdenProduccion.objects
             .filter(procesos__proceso_id="troquel", procesos__active=True)
-            .exclude(procesos__proceso_id__in=chain.CHAIN_PROCESOS, procesos__active=True)
+            # One subquery so "active" and "chain" apply to the SAME process
+            # row: a multi-valued exclude() matches them on different rows, so
+            # an OP made from the full form (inactive chain rows + active
+            # troquel) dropped out of every queue (OP-0151 local, OP-1485 prod).
+            .exclude(Exists(OpProceso.objects.filter(
+                orden_id=OuterRef("pk"), proceso_id__in=chain.CHAIN_PROCESOS, active=True,
+            )))
             # Solo OP con el formato de cuchillas enviado: sin él no hay consumo
             # que remisionar, y uno devuelto tiene que corregirse y reenviarse
             # antes de volver a entrar en una remisión.
@@ -2090,8 +2171,6 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
             .distinct()
             .order_by("cliente__nombre", F("fecha_entrega").asc(nulls_last=True), "creado")
         )
-        data = RemisionableOperadorSerializer(qs, many=True, context={"request": request}).data
-        return Response(data)
 
     @action(detail=False, methods=["get"], url_path="remisionables_produccion")
     def remisionables_produccion(self, request):
@@ -2101,7 +2180,40 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         process. The latter can be remitted without station records. Pure die
         tasks stay in `remisionables_operador`.
         """
-        qs = (
+        data = RemisionableOperadorSerializer(
+            self._qs_remisionables_produccion(), many=True, context={"request": request}
+        ).data
+        return Response(data)
+
+    @action(detail=False, methods=["get"], url_path="remisionables_central")
+    def remisionables_central(self, request):
+        """GET /api/ordenes/remisionables_central/ — one queue for every exit.
+
+        Producción › Remisiones (central page): pure die tasks plus, for whoever
+        has general remissions (General / Admin), the production orders. Each
+        row carries `tipo` ("troquel" | "produccion") so the screen can say
+        what is being remitted. A Troquelador only gets his die tasks — same
+        boundary `consolidar_remision_operador` enforces.
+        """
+        ctx = {"request": request}
+        filas = [
+            {**fila, "tipo": "troquel"}
+            for fila in RemisionableOperadorSerializer(self._qs_remisionables_troquel(), many=True, context=ctx).data
+        ]
+        if roles.puede_remisiones_generales(request.user):
+            ya = {f["id"] for f in filas}
+            filas += [
+                {**fila, "tipo": "produccion"}
+                for fila in RemisionableOperadorSerializer(self._qs_remisionables_produccion(), many=True, context=ctx).data
+                if fila["id"] not in ya
+            ]
+        filas.sort(key=lambda f: ((f["cliente_nombre"] or "").lower(), f["fecha_entrega"] or "9999", f["id"]))
+        return Response(filas)
+
+    @staticmethod
+    def _qs_remisionables_produccion():
+        """Production orders ready to remit (see `remisionables_produccion`)."""
+        return (
             OrdenProduccion.objects
             .filter(remision_descartada_operador_en__isnull=True)
             .filter(
@@ -2118,8 +2230,6 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
             .distinct()
             .order_by("cliente__nombre", F("fecha_entrega").asc(nulls_last=True), "creado")
         )
-        data = RemisionableOperadorSerializer(qs, many=True, context={"request": request}).data
-        return Response(data)
 
     @action(detail=False, methods=["post"], url_path="consolidar_remision_operador")
     @transaction.atomic
@@ -2134,17 +2244,79 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         La remisión queda marcada como generada: sus OPs salen de la cola del
         Operador y pasan al historial.
         """
+        target, error = self._preparar_remision_operador(request)
+        if error is not None:
+            return error
+        # Se estampa aquí y no al descargar el PDF: `remision_operador_pdf`
+        # también sirve para re-descargar desde el historial.
+        campos = ["generada_en", "generada_por", "modificado"]
+        target.generada_en = timezone.now()
+        target.generada_por = request.user if request.user.is_authenticated else None
+        target.save(update_fields=campos)
+        target.asignar_numero()
+        return Response({"remision_id": target.id, "remision_numero": target.numero})
+
+    @action(detail=False, methods=["post"], url_path="previsualizar_remision_operador")
+    def previsualizar_remision_operador(self, request):
+        """POST /api/ordenes/previsualizar_remision_operador/ — Operador o Admin.
+
+        Body { "orden_ids": [int, ...] }. Exactly what `consolidar_remision_operador`
+        would put in the remisión PDF — client, the number it would take, each
+        die's consumption and each production order's records — without
+        generating anything: the same preparation runs inside a transaction
+        that is always rolled back. Same validations (and errors) as generating.
+        """
+        with transaction.atomic():
+            target, error = self._preparar_remision_operador(request)
+            if error is not None:
+                transaction.set_rollback(True)
+                return error
+            ctx = _remision_operador_pdf_ctx(target)
+            ops = _remision_operador_ops(target)
+            data = {
+                # Same rule as asignar_numero: a remission numbered earlier keeps
+                # its number; otherwise it takes the next one.
+                "numero_estimado": target.numero or Remision.siguiente_numero(),
+                "fecha": target.fecha,
+                "cliente": {
+                    "nombre": target.cliente.nombre,
+                    "nit": target.cliente.nit,
+                    "telefono": target.cliente.telefono,
+                },
+                "direccion": target.direccion,
+                "ciudad": target.ciudad,
+                "ops": [
+                    {
+                        "id": op.id, "numero": op.numero, "referencia": op.referencia,
+                        "tipo": "produccion" if op.procesos.filter(
+                            proceso_id__in=chain.CHAIN_PROCESOS, active=True
+                        ).exists() or _is_direct_finished(op) else "troquel",
+                    }
+                    for op in ops
+                ],
+                "troqueles": ctx["troqueles"],
+                "procesos": ctx["procesos"],
+                "complementary_processes": ctx["complementary_processes"],
+            }
+            transaction.set_rollback(True)
+        return Response(data)
+
+    def _preparar_remision_operador(self, request):
+        """Validate `orden_ids` and build the pending remission they would form
+        (each OP's own remission, merged into the first). Returns
+        (remision, None) or (None, error Response). Shared by generating and
+        previewing so the preview can never drift from the real document."""
         ids = request.data.get("orden_ids", [])
         if not isinstance(ids, list) or not ids:
-            return Response({"error": "Falta orden_ids."}, status=400)
+            return None, Response({"error": "Falta orden_ids."}, status=400)
 
         ops = list(OrdenProduccion.objects.filter(pk__in=ids).select_related("cliente"))
         if len(ops) != len(set(ids)):
-            return Response({"error": "Alguna OP no existe."}, status=404)
+            return None, Response({"error": "Alguna OP no existe."}, status=404)
         self._solo_troquel_puro_para_no_general(request, ops)
         cliente_ids = {op.cliente_id for op in ops}
         if len(cliente_ids) > 1:
-            return Response({"error": "Todas las OP deben ser del mismo cliente."}, status=400)
+            return None, Response({"error": "Todas las OP deben ser del mismo cliente."}, status=400)
 
         # A direct finished order can skip the die form and station records.
         sin_formato = [
@@ -2154,7 +2326,7 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
             and not op.formatos_cuchillas.filter(estado__in=["pendiente", "aprobado"]).exists()
         ]
         if sin_formato:
-            return Response({
+            return None, Response({
                 "error": f"Falta el formato de cuchillas en: {', '.join(sin_formato)}.",
             }, status=409)
 
@@ -2165,7 +2337,7 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
             rem = Remision.objects.filter(orden=op).first()
             if rem is not None:
                 if rem.estado != "pendiente" or rem.generada_en or rem.enviada_en:
-                    return Response({
+                    return None, Response({
                         "error": f"La remisión {rem.numero or 'de esta OP'} ya fue generada o consolidada.",
                     }, status=409)
             else:
@@ -2174,7 +2346,7 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
                 ).exists()
                 has_die = op.procesos.filter(proceso_id="troquel", active=True).exists()
                 if not _is_direct_finished(op) and (has_chain or not has_die):
-                    return Response({
+                    return None, Response({
                         "error": f"La OP {op.numero} aún no está lista para remisionar.",
                     }, status=409)
             remisiones.append(rem)
@@ -2182,21 +2354,14 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         if len(ops) > 1:
             error = _error_facturada(*remisiones)
             if error:
-                return Response({"error": error}, status=409)
+                return None, Response({"error": error}, status=409)
         remisiones = [rem or _crear_remision(op) for op, rem in zip(ops, remisiones)]
 
         target = remisiones[0]
         fuentes = remisiones[1:]
         if fuentes:
             _consolidar_remisiones(target, fuentes)
-        # Se estampa aquí y no al descargar el PDF: `remision_operador_pdf`
-        # también sirve para re-descargar desde el historial.
-        campos = ["generada_en", "generada_por", "modificado"]
-        target.generada_en = timezone.now()
-        target.generada_por = request.user if request.user.is_authenticated else None
-        target.save(update_fields=campos)
-        target.asignar_numero()
-        return Response({"remision_id": target.id, "remision_numero": target.numero})
+        return target, None
 
     @action(detail=False, methods=["post"], url_path="remision_operador_pdf")
     def remision_operador_pdf(self, request):
@@ -2246,6 +2411,13 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
                 | Q(enviada_en__isnull=False)
                 | ~Q(estado="pendiente")
                 | Q(
+                    # Legacy only: before generation was stamped (Sept 2026)
+                    # an approved die could leave its remission pending with
+                    # no stamp even though it was delivered. A newer pending
+                    # one is simply not generated yet: it lives in the queue,
+                    # not here (otherwise its PDF button would number it —
+                    # REM-0083 on localhost).
+                    creado__lt=HISTORIAL_TROQUEL_LEGACY_HASTA,
                     orden__procesos__proceso_id="troquel",
                     orden__procesos__active=True,
                     orden__formatos_cuchillas__estado="aprobado",
@@ -2852,13 +3024,27 @@ class RegistroProcesoViewSet(viewsets.ModelViewSet):
         orden_id = self.request.query_params.get("orden")
         if orden_id:
             qs = qs.filter(orden_id=orden_id)
-        estacion = self.request.query_params.get("estacion")
-        if estacion:
-            if not self.request.user.is_staff and estacion not in roles.estaciones_permitidas(self.request.user):
-                raise PermissionDenied("No tienes acceso a esta estación.")
-            qs = qs.filter(estacion=estacion)
+        # One station or several comma-separated (Guillotina shows its two in
+        # one paginated history).
+        estaciones = [e for e in (self.request.query_params.get("estacion") or "").split(",") if e]
+        if estaciones:
+            if not self.request.user.is_staff:
+                permitidas = roles.estaciones_permitidas(self.request.user)
+                if any(e not in permitidas for e in estaciones):
+                    raise PermissionDenied("No tienes acceso a esta estación.")
+            qs = qs.filter(estacion__in=estaciones)
         if self.request.query_params.get("mias"):
             qs = qs.filter(operador=self.request.user)
+        # The station history is paginated (50 per page), so search runs here
+        # and not over the page already loaded.
+        search = (self.request.query_params.get("search") or "").strip()
+        if search:
+            qs = qs.filter(
+                Q(orden__numero__icontains=search)
+                | Q(orden__cliente__nombre__icontains=search)
+                | Q(orden__referencia__icontains=search)
+                | Q(operador__username__icontains=search)
+            )
         return qs
 
     def create(self, request, *args, **kwargs):

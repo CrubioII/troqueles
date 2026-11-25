@@ -11,6 +11,7 @@ Corre contra la base de datos de test de Django (aislada, se descarta al
 terminar) — no toca db.sqlite3 de desarrollo. Ver back/scripts/test_flujo_roles.py
 para la variante manual que sí deja usuarios/datos reales para inspección.
 """
+import datetime
 from django.contrib.auth import get_user_model
 from django.template.loader import render_to_string
 from django.test import TestCase
@@ -145,6 +146,10 @@ class RolesProduccionTestCase(TestCase):
         remision_legacy.generada_por = None
         remision_legacy.enviada_en = None
         remision_legacy.save(update_fields=["generada_en", "generada_por", "enviada_en", "modificado"])
+        # Legacy = created before generation was stamped (Sept 2026); a newer
+        # unstamped pending remission is just not generated yet.
+        Remision.objects.filter(pk=remision_legacy.pk).update(
+            creado=datetime.datetime(2026, 9, 1, tzinfo=datetime.timezone.utc))
         resp = self.c_troquelador.get("/api/ordenes/remisiones_generadas_operador/")
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(any(rem["id"] == remision_legacy.id for rem in resp.data), resp.data)

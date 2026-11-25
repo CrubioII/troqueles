@@ -709,7 +709,7 @@ export function FormatosCuchillasHistory({ formatos, loading, onEdit, showOrden 
 
   // Vista compacta (historial del operador): un resumen por fila, sin todo el formulario.
   if (compact) {
-    const chdrs = ['OP #', 'Referencia', 'Cliente', 'Fecha / Hora', 'Estado', 'Operador', 'Cuchilla (cm)']
+    const chdrs = ['OP #', 'Referencia', 'Cliente', 'Fecha / Hora', 'Estado', 'Operador']
     if (onEdit || onUnlock) chdrs.push('')
     return (
       <div className="table-scroll">
@@ -723,7 +723,6 @@ export function FormatosCuchillasHistory({ formatos, loading, onEdit, showOrden 
           </thead>
           <tbody>
             {formatos.map((f, idx) => {
-              const totalCuchilla = (Number(f.cuchilla_cm) || 0) + (Number(f.desperdicio_cm) || 0)
               const editable = !!onEdit && canEdit(f)
               const unlockable = !editable && !!onUnlock && canUnlock(f)
               const zebra = idx % 2 ? 'var(--surface-2)' : 'var(--surface)'
@@ -742,7 +741,6 @@ export function FormatosCuchillasHistory({ formatos, loading, onEdit, showOrden 
                   <td style={{ padding: '8px 12px', fontFamily: 'JetBrains Mono, monospace', fontSize: 11, whiteSpace: 'nowrap' }}>{fmtFecha(f.fecha_hora)}</td>
                   <td style={{ padding: '8px 12px' }}><EstadoFormatoBadge estado={f.estado} /></td>
                   <td style={{ padding: '8px 12px', fontWeight: 600, fontSize: 12 }}>{f.operador_username || '—'}</td>
-                  <td style={{ padding: '8px 12px', fontWeight: 700, whiteSpace: 'nowrap' }}>{totalCuchilla > 0 ? fmtNum(totalCuchilla, 2) : '—'}</td>
                   {(onEdit || onUnlock) && (
                     <td style={{ padding: '8px 12px' }}>
                       {editable && <button className="btn sm" onClick={(e) => { e.stopPropagation(); onEdit(f) }}>Editar</button>}

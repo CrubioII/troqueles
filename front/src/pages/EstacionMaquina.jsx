@@ -7,6 +7,7 @@ import { RegistroProcesoForm, RegistroProcesoHistory } from '../components/Regis
 import { getOrdenesEstacion, getRegistrosProceso, setEstacionPrioridades } from '../api'
 import { useSyncPolling } from '../lib/useSyncPolling'
 import { useDragOrder } from '../hooks/useDragOrder'
+import Paginador from '../components/Paginador'
 
 const asList = (data) => (Array.isArray(data) ? data : (data?.results || []))
 
@@ -86,6 +87,9 @@ export default function EstacionMaquina({ estacion, estaciones, embedded = false
   const [historial, setHistorial] = useState([])
   const [loadingHist, setLoadingHist] = useState(false)
   const [busquedaHist, setBusquedaHist] = useState('')
+  const [busquedaHistDeb, setBusquedaHistDeb] = useState('')
+  const [histPage, setHistPage] = useState(1)
+  const [histCount, setHistCount] = useState(0)
   const [aviso, setAviso] = useState(null)      // { tipo, texto } tras registrar
   const [ordenError, setOrdenError] = useState(null)  // fallo al guardar prioridades
   const [libreAbierto, setLibreAbierto] = useState(false)  // "+ Registro libre" form
@@ -98,11 +102,15 @@ export default function EstacionMaquina({ estacion, estaciones, embedded = false
       .finally(() => setLoadingLista(false))
   }
 
-  const loadHistorial = () => {
+  // Paginated on the server (50 per page), newest first, all of this
+  // screen's stations in one list; the search also runs on the server.
+  const loadHistorial = (page = histPage, search = busquedaHistDeb) => {
     setLoadingHist(true)
-    Promise.all(ids.map(id => getRegistrosProceso(`?estacion=${id}`).then(asList)))
-      .then(arrs => setHistorial(arrs.flat().sort((a, b) => new Date(b.fecha_hora) - new Date(a.fecha_hora))))
-      .catch(() => setHistorial([]))
+    const qs = new URLSearchParams({ estacion: ids.join(','), page: String(page) })
+    if (search.trim()) qs.set('search', search.trim())
+    getRegistrosProceso(`?${qs}`)
+      .then(d => { setHistorial(asList(d)); setHistCount(d?.count ?? asList(d).length) })
+      .catch(() => { setHistorial([]); setHistCount(0) })
       .finally(() => setLoadingHist(false))
   }
 
@@ -112,7 +120,15 @@ export default function EstacionMaquina({ estacion, estaciones, embedded = false
     loadLista()
   }, [idsKey])
 
-  useEffect(() => { if (tab === 'historial') loadHistorial() }, [tab, idsKey])
+  useEffect(() => {
+    const t = setTimeout(() => setBusquedaHistDeb(busquedaHist), 350)
+    return () => clearTimeout(t)
+  }, [busquedaHist])
+  useEffect(() => { setHistPage(1) }, [busquedaHistDeb, idsKey])
+  useEffect(() => {
+    if (tab === 'historial') loadHistorial(histPage, busquedaHistDeb)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, idsKey, histPage, busquedaHistDeb])
 
   // Tiempo real: solo mientras se mira la cola, para no pisar lo que se escribe.
   useSyncPolling(
@@ -148,12 +164,6 @@ export default function EstacionMaquina({ estacion, estaciones, embedded = false
   // renumeraría mal las OPs escondidas, así que el arrastre se apaga.
   const drag = useDragOrder(filtradas, guardarOrden, { disabled: filtrando || !isAdmin })
 
-  const histFiltrado = useMemo(() => {
-    const t = norm(busquedaHist.trim())
-    if (!t) return historial
-    return historial.filter(r => [r.orden_numero, r.orden_cliente, r.orden_referencia, r.operador_username]
-      .some(v => norm(v).includes(t)))
-  }, [historial, busquedaHist])
 
   // Tras registrar: la OP sale de esta cola y se avisa a dónde viajó.
   const handleCreated = (data) => {
@@ -361,10 +371,11 @@ export default function EstacionMaquina({ estacion, estaciones, embedded = false
                 }
               >
                 <RegistroProcesoHistory
-                  registros={histFiltrado}
+                  registros={historial}
                   loading={loadingHist}
                   onAnulado={() => { loadHistorial(); loadLista(true) }}
                 />
+                <Paginador page={histPage} count={histCount} loading={loadingHist} onPage={setHistPage} noun="registros" />
               </Section>
             )}
           </>

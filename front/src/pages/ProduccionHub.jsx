@@ -2,14 +2,14 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { ModuleCard, ESTACIONES_CONFIG, ESTACIONES_ORDEN } from '../components/core'
 import { Icon } from '../components/Icons'
-import { puedeEstacion, puedeTroqueles, puedeRemisionesGenerales } from '../lib/accesoProduccion'
+import { puedeEstacion, puedeTroqueles, puedeRemisionesGenerales, puedeAlgunaRemision } from '../lib/accesoProduccion'
 
 // Módulos cuyo acceso depende del rol de producción del Operador (ver
 // back/cotizaciones/roles.py). Lo que no aparece acá (p. ej. 'ordenes') queda
 // visible para cualquier autenticado.
 function puedeModulo(key, user) {
   if (key === 'troqueles') return puedeTroqueles(user)
-  if (key === 'general') return puedeRemisionesGenerales(user)
+  if (key === 'remisiones') return puedeAlgunaRemision(user)
   return puedeEstacion(user, key)
 }
 
@@ -59,14 +59,14 @@ const MODULES = [
     icon: <Icon.Blade />,
   },
   {
-    key: 'general',
-    label: 'Producción General',
-    desc: 'Progreso de todas las órdenes de producción según sus procesos activos completados.',
+    key: 'remisiones',
+    label: 'Remisiones',
+    desc: 'Salidas de troqueles y producción en un solo lugar: revisa lo que va en el PDF y genera la remisión por cliente.',
     action: 'Entrar',
-    path: '/produccion/general',
-    color: '#2E7D5B',
-    soft: '#DCEFE3',
-    icon: <Icon.Progress />,
+    path: '/produccion/remisiones',
+    color: '#1F5F8B',
+    soft: '#DCEAF5',
+    icon: <Icon.Send />,
   },
 ]
 

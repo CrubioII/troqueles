@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Icon } from '../components/Icons'
 import { getRemisiones } from '../api'
+import Paginador from '../components/Paginador'
 import { useSyncPolling } from '../lib/useSyncPolling'
 
 const TAB_DEFS = [
@@ -65,11 +66,12 @@ export default function Remisiones() {
   const [fechaDesde, setFechaDesde] = useState('')
   const [fechaHasta, setFechaHasta] = useState('')
   const [count, setCount] = useState(0)
+  const [page, setPage] = useState(1)
   const debounceRef = useRef(null)
   const paramsRef = useRef('')
 
-  const buildParams = (estado, s, desde, hasta) => {
-    const parts = [`estado=${estado}`]
+  const buildParams = (estado, s, desde, hasta, pagina = 1) => {
+    const parts = [`estado=${estado}`, `page=${pagina}`]
     if (s) parts.push(`search=${encodeURIComponent(s)}`)
     if (estado === 'liquidada') {
       if (desde) parts.push(`fecha_after=${desde}`)
@@ -94,14 +96,22 @@ export default function Remisiones() {
   }
 
   useEffect(() => {
-    load(buildParams(tab, search, fechaDesde, fechaHasta), true)
+    setPage(1)
+    load(buildParams(tab, search, fechaDesde, fechaHasta, 1), true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab])
 
   useSyncPolling({ remisiones: () => load(paramsRef.current) })
 
+  // A new filter starts again from page 1.
   const reapply = (s = search, desde = fechaDesde, hasta = fechaHasta) => {
-    load(buildParams(tab, s, desde, hasta))
+    setPage(1)
+    load(buildParams(tab, s, desde, hasta, 1))
+  }
+
+  const goPage = (p) => {
+    setPage(p)
+    load(buildParams(tab, search, fechaDesde, fechaHasta, p))
   }
 
   const handleSearch = (v) => {
@@ -281,6 +291,9 @@ export default function Remisiones() {
                 </tbody>
               </table>
             </div>
+          )}
+          {!loading && !error && (
+            <Paginador page={page} count={count} loading={refreshing} onPage={goPage} noun="remisiones" />
           )}
         </div>
       </div>

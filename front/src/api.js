@@ -524,6 +524,20 @@ export const consolidarRemisionOperador = (ordenIds) =>
     body: JSON.stringify({ orden_ids: ordenIds }),
   }).then(jsonConCodigo)
 
+// Producción › Remisiones (página central): troqueles + producción en una sola
+// cola, cada fila con `tipo` ('troquel' | 'produccion').
+export const getRemisionablesCentral = () =>
+  apiFetch(`${BASE}/ordenes/remisionables_central/`).then(jsonConError)
+
+// Lo que llevaría el PDF de la remisión de estas OPs, sin generar nada.
+// Mismos errores que consolidarRemisionOperador.
+export const previsualizarRemisionOperador = (ordenIds) =>
+  apiFetch(`${BASE}/ordenes/previsualizar_remision_operador/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ orden_ids: ordenIds }),
+  }).then(jsonConCodigo)
+
 // Descarga el PDF de remisión del Operador (consumo en cm + firma del cliente).
 // Devuelve el Response crudo: el caller decide entre blob (ok) y json de error.
 export const pdfRemisionOperadorConsolidada = (remisionId) =>

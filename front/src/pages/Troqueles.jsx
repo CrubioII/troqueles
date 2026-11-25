@@ -21,28 +21,10 @@ import { useSyncPolling } from '../lib/useSyncPolling'
 import { useDragOrder } from '../hooks/useDragOrder'
 import { exactClientMatch } from '../lib/clienteDedup'
 import { saveBlob } from '../lib/download'
+import Paginador from '../components/Paginador'
 
 const asList = (data) => (Array.isArray(data) ? data : (data?.results || []))
 
-// El historial se pide de a una página (PAGE_SIZE del backend = 50).
-const HIST_PAGE_SIZE = 50
-
-function HistPager({ page, count, loading, onPage }) {
-  const pages = Math.max(1, Math.ceil((count || 0) / HIST_PAGE_SIZE))
-  if (pages <= 1) return null
-  const desde = (page - 1) * HIST_PAGE_SIZE + 1
-  const hasta = Math.min(page * HIST_PAGE_SIZE, count)
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 16px', borderTop: '1px solid var(--line)', fontSize: 12, color: 'var(--ink-3)', flexWrap: 'wrap' }}>
-      <span>{desde}–{hasta} de {count}</span>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <button className="btn sm" disabled={loading || page <= 1} onClick={() => onPage(page - 1)}>← Anterior</button>
-        <span>Página {page} de {pages}</span>
-        <button className="btn sm" disabled={loading || page >= pages} onClick={() => onPage(page + 1)}>Siguiente →</button>
-      </div>
-    </div>
-  )
-}
 
 // Valor con retardo, para no consultar el servidor en cada tecla.
 function useDebounced(value, ms = 350) {
@@ -570,6 +552,7 @@ function OperadorOpDatos({ orden, onSaved }) {
 
 function OperadorTroqueles() {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const [tab, setTab] = useState('pendientes')
   const [showNueva, setShowNueva] = useState(false)   // modal Nueva tarea de troquel
   const [lista, setLista] = useState([])
@@ -1022,7 +1005,7 @@ function OperadorTroqueles() {
               </div>
             )}
             {!loadHistRemError && (
-              <HistPager page={histRemPage} count={histRemCount} loading={loadingHistRem} onPage={setHistRemPage} />
+              <Paginador page={histRemPage} count={histRemCount} loading={loadingHistRem} onPage={setHistRemPage} noun="remisiones" />
             )}
           </Section>
         )}
@@ -1060,7 +1043,7 @@ function OperadorTroqueles() {
                 unlockBusyId={histUnlockBusy}
               />
             )}
-            <HistPager page={histPage} count={histCount} loading={loadingHistorial} onPage={setHistPage} />
+            <Paginador page={histPage} count={histCount} loading={loadingHistorial} onPage={setHistPage} noun="formatos" />
           </Section>
         )}
 
@@ -1148,6 +1131,12 @@ function OperadorTroqueles() {
           </Section>
         )}
 
+        {tab === 'remisiones' && (
+          <div style={{ marginBottom: 12, padding: '10px 14px', borderRadius: 8, background: 'var(--accent-soft, #eef4fd)', border: '1px solid var(--line)', fontSize: 13, display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', justifyContent: 'space-between' }}>
+            <span>Ahora puedes remisionar <strong>troqueles y producción juntos</strong>, con vista previa del PDF, en la página central de Remisiones.</span>
+            <button className="btn sm primary" onClick={() => navigate('/produccion/remisiones')}>Ir a Remisiones</button>
+          </div>
+        )}
         {tab === 'remisiones' && (
           <Section
             title="Remisiones — selecciona troqueles de un cliente"

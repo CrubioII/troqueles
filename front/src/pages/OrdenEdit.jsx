@@ -205,8 +205,10 @@ export default function OrdenEdit() {
         ...prev,
         id: result.id,
         numero: result.numero || prev.numero,
-        remisionId: result.remision_id || prev.remisionId || null,
-        remisionGenerada: !!result.remision_generada || prev.remisionGenerada,
+        // Adding work to a finished OP takes its pending remission back (and
+        // undoing it brings it back): trust the server's value, null included.
+        remisionId: 'remision_id' in result ? result.remision_id : (prev.remisionId || null),
+        remisionGenerada: 'remision_generada' in result ? !!result.remision_generada : prev.remisionGenerada,
       }))
       return result.id
     } catch (e) {
@@ -371,6 +373,22 @@ export default function OrdenEdit() {
             {isAdmin
               ? 'Solo la liquidación (abono) es editable.'
               : 'Esta OP la administra el administrador; acá es solo de consulta.'}
+          </span>
+        </div>
+      )}
+
+      {!locked && !isNew && d.remisionId && (
+        <div className="banner-readonly" style={{ margin: '14px 24px 0', background: d.remisionGenerada ? undefined : 'var(--accent-soft, #eef4fd)' }}>
+          <Icon.Info />
+          <span>
+            {d.remisionGenerada ? (
+              <>La remisión de esta OP <strong>ya se generó</strong>. Para agregarle un trabajo nuevo, primero devuélvela desde
+                {' '}<strong>Producción › Remisiones › Historial</strong>; si ya fue liquidada, crea una OP nueva para ese trabajo.</>
+            ) : (
+              <>Esta OP está <strong>lista para remisionar</strong>. Si le agregas un proceso nuevo (por ejemplo, impresión),
+                sale de la lista de remisiones y pasa a producción; cuando el trabajo nuevo se termine, vuelve a
+                {' '}<strong>Producción › Remisiones</strong> para generar una sola remisión con todo.</>
+            )}
           </span>
         </div>
       )}

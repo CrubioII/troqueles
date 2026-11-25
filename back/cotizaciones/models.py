@@ -820,6 +820,18 @@ class Remision(models.Model):
     class Meta:
         ordering = ["-creado"]
 
+    @staticmethod
+    def siguiente_numero():
+        """The REM- number the next issued remission would take (after the
+        highest one issued). Also shown in the remisión preview before it is
+        generated — it can still change if someone else issues one first."""
+        issued = [
+            int(number[4:]) for number in Remision.objects
+            .filter(numero__startswith="REM-").values_list("numero", flat=True)
+            if number[4:].isdigit()
+        ]
+        return f"REM-{max(issued, default=0) + 1:04d}"
+
     def asignar_numero(self):
         """Give this remission its REM- number the first time it is issued
         (Operador generates it, a PDF is produced, or it is sent/liquidated).
@@ -834,13 +846,7 @@ class Remision(models.Model):
             return self.numero
         with transaction.atomic():
             for _ in range(100):
-                issued = [
-                    int(number[4:]) for number in Remision.objects
-                    .filter(numero__startswith="REM-").values_list("numero", flat=True)
-                    if number[4:].isdigit()
-                ]
-                next_number = max(issued, default=0) + 1
-                candidate = f"REM-{next_number:04d}"
+                candidate = Remision.siguiente_numero()
                 try:
                     with transaction.atomic():
                         Remision.objects.filter(pk=self.pk).update(numero=candidate)

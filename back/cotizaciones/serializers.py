@@ -916,11 +916,20 @@ class RemisionableOperadorSerializer(serializers.ModelSerializer):
     cliente_nombre = serializers.CharField(source="cliente.nombre", read_only=True, default="")
     remision_numero = serializers.SerializerMethodField()
     remision_estado = serializers.SerializerMethodField()
+    # Sent formato the queue's "Devolver" button pulls back (cancelar_envio).
+    formato_id = serializers.SerializerMethodField()
 
     class Meta:
         model = OrdenProduccion
         fields = ["id", "numero", "referencia", "cantidad", "fecha_entrega", "origen",
-                  "cliente_id", "cliente_nombre", "remision_numero", "remision_estado"]
+                  "cliente_id", "cliente_nombre", "remision_numero", "remision_estado",
+                  "formato_id"]
+
+    def get_formato_id(self, obj):
+        return (
+            obj.formatos_cuchillas.filter(estado__in=["pendiente", "aprobado"])
+            .order_by("-fecha_hora", "-id").values_list("id", flat=True).first()
+        )
 
     def _remision(self, obj):
         # Prefetch-friendly: OneToOne related_name="remision"

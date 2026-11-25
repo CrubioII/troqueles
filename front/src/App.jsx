@@ -17,12 +17,12 @@ import ProduccionHub from './pages/ProduccionHub'
 import Troqueles from './pages/Troqueles'
 import TroquelGestion from './pages/TroquelGestion'
 import Guillotina from './pages/Guillotina'
-import ProduccionGeneral from './pages/ProduccionGeneral'
+import RemisionesCentral from './pages/RemisionesCentral'
 import EstacionMaquina from './pages/EstacionMaquina'
 import Login from './pages/Login'
 import Facturacion from './pages/Facturacion'
 import FacturaDetalle from './pages/FacturaDetalle'
-import { puedeEstacion, puedeTroqueles, puedeRemisionesGenerales, puedeFacturacion, soloFacturacion } from './lib/accesoProduccion'
+import { puedeEstacion, puedeTroqueles, puedeRemisionesGenerales, puedeAlgunaRemision, puedeFacturacion, soloFacturacion } from './lib/accesoProduccion'
 
 function ProtectedRoute({ children }) {
   const { user, ready } = useAuth()
@@ -82,7 +82,9 @@ function AppRoutes() {
         {/* Guillotina: página centralizada — cadena (corte inicial + corte final de
             las OPs) y registro libre (cortes sueltos sin OP), en un solo lugar. */}
         <Route path="/produccion/guillotina" element={<RolRoute check={u => puedeEstacion(u, 'guillotina')}><Guillotina /></RolRoute>} />
-        <Route path="/produccion/general" element={<RolRoute check={puedeRemisionesGenerales}><ProduccionGeneral /></RolRoute>} />
+        <Route path="/produccion/remisiones" element={<RolRoute check={puedeAlgunaRemision}><RemisionesCentral /></RolRoute>} />
+        {/* Producción General was replaced by the central Remisiones page. */}
+        <Route path="/produccion/general" element={<Navigate to="/produccion/remisiones" replace />} />
       </Route>
     </Routes>
   )
