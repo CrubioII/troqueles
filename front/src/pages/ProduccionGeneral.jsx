@@ -6,7 +6,9 @@ import {
   getOrdenes, getOrden, toggleProcesoCompletado,
   getRemisionablesProduccion, consolidarRemisionOperador, pdfRemisionOperadorConsolidada,
   getRemisionesGeneradasOperador, devolverRemisionOperador, descartarRemisionableOperador,
+  getRegistrosProceso,
 } from '../api'
+import { RegistroProcesoHistory } from '../components/RegistroProceso'
 import { useSyncPolling } from '../lib/useSyncPolling'
 import { useAuth } from '../context/AuthContext'
 import { saveBlob } from '../lib/download'
@@ -163,6 +165,62 @@ function ExpandedDetail({ ordId, onProgresoChange, isAdmin }) {
   )
 }
 
+// Read-only view of what the plant operators wrote on an OP (station records:
+// quantities, technical data, observations), so the production lead can check
+// it before generating the remisión — no PDF, no side effects.
+function RegistrosOpModal({ op, onClose }) {
+  const [registros, setRegistros] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    getRegistrosProceso(`?orden=${op.id}&ordering=fecha_hora`)
+      .then(d => setRegistros(asList(d)))
+      .catch(e => setError(e?.message || 'No se pudieron cargar los registros'))
+      .finally(() => setLoading(false))
+  }, [op.id])
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 9999,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{ background: 'var(--surface)', borderRadius: 12, maxWidth: 980, width: '100%', maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}
+      >
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 700 }}>
+              <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{op.numero}</span> · Registros de planta
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>
+              {op.cliente_nombre || '—'}{op.referencia ? ` · ${op.referencia}` : ''}
+            </div>
+          </div>
+          <button className="btn sm" onClick={onClose}>Cerrar</button>
+        </div>
+        <div style={{ overflow: 'auto' }}>
+          {error ? (
+            <div style={{ padding: 24, color: 'var(--danger, #c0392b)', fontSize: 13 }}>✗ {error}</div>
+          ) : (
+            <RegistroProcesoHistory registros={registros} loading={loading} showOrden={false} />
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function ConfirmarRemisionModal({ cantidad, cliente, busy, error, onClose, onConfirm }) {
   return (
     <div style={{
@@ -215,6 +273,7 @@ function RemisionesProduccion() {
   const [histError, setHistError] = useState(null)
   const [busquedaHist, setBusquedaHist] = useState('')
   const [descartandoRem, setDescartandoRem] = useState(null)
+  const [verRegistros, setVerRegistros] = useState(null)
 
   const loadRemisionables = (silent = false) => {
     if (!silent) setLoadingRem(true)
@@ -441,7 +500,15 @@ function RemisionesProduccion() {
                             {op.referencia}
                             {op.origen === 'registro_libre' && <LibreBadge />}
                           </td>
-                          <td style={{ padding: '10px 12px', width: 90, textAlign: 'right' }} onClick={e => e.stopPropagation()}>
+                          <td style={{ padding: '10px 12px', width: 220, textAlign: 'right', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
+                            <button
+                              className="btn sm"
+                              style={{ marginRight: 6 }}
+                              onClick={() => setVerRegistros(op)}
+                              title="Ver lo que escribieron los operarios en esta OP (no genera nada)"
+                            >
+                              Ver registros
+                            </button>
                             {/* Deliberately a quiet text link, not a button: as the row's only
                                 button it read as "send to remisión" and jobs got discarded by
                                 mistake (OP-1619 / OP-1621 in prod). */}
@@ -535,6 +602,8 @@ function RemisionesProduccion() {
         )}
       </div>
       )}
+
+      {verRegistros && <RegistrosOpModal op={verRegistros} onClose={() => setVerRegistros(null)} />}
 
       {confirmGen && (
         <ConfirmarRemisionModal
