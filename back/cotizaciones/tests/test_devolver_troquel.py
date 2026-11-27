@@ -1,6 +1,7 @@
 """Ways a sent die (troquel) task goes back for correction.
 
-  - Operador: "Cancelar envío y corregir" (formatos-cuchillas/{id}/cancelar_envio/)
+  - Jefe de producción: "Cancelar envío y corregir" (formatos-cuchillas/{id}/cancelar_envio/)
+    — a plain Operador gets 403, not even over his own formato
   - Operador: Historial › Remisiones › Devolver (ordenes/devolver_remision_operador/)
   - Admin:    "Devolver al operador" on the remisión (formatos-cuchillas/{id}/devolver/)
 """
@@ -25,6 +26,15 @@ class DevolverTroquelTestCase(TestCase):
         self.cliente = Cliente.objects.create(nombre="Cliente Devolver", email="c@test.com")
         self.c_admin = _api(self.admin)
         self.c_op = _api(self.op_user)
+        self.jefe = User.objects.create_user("jefe_dev", password="x")
+        PerfilOperador.objects.create(user=self.jefe, es_jefe_produccion=True)
+        self.c_jefe = _api(self.jefe)
+
+    def _cancelar_envio(self, formato_id):
+        # The Operador who sent it can no longer touch it; the jefe can.
+        resp = self.c_op.post(f"/api/formatos-cuchillas/{formato_id}/cancelar_envio/")
+        self.assertEqual(resp.status_code, 403, resp.data)
+        return self.c_jefe.post(f"/api/formatos-cuchillas/{formato_id}/cancelar_envio/")
 
     def _op_troquel_enviada(self, ref="TQ-DEV"):
         resp = self.c_op.post("/api/ordenes/", {
@@ -48,9 +58,9 @@ class DevolverTroquelTestCase(TestCase):
         self.assertFalse(Remision.objects.filter(orden=op).exists())
         self.assertIn(FormatoCuchillas.objects.get(pk=formato_id).estado, estados)
 
-    def test_operador_cancela_envio(self):
+    def test_jefe_cancela_envio(self):
         op_id, formato_id = self._op_troquel_enviada()
-        resp = self.c_op.post(f"/api/formatos-cuchillas/{formato_id}/cancelar_envio/")
+        resp = self._cancelar_envio(formato_id)
         self.assertEqual(resp.status_code, 200, resp.data)
         self._assert_reabierta(op_id, formato_id, {"borrador"})
 
@@ -60,7 +70,7 @@ class DevolverTroquelTestCase(TestCase):
         self.assertEqual(resp.status_code, 200, resp.data)
         self._assert_reabierta(op_id, formato_id, {"devuelto"})
 
-    def test_operador_devuelve_remision_generada_y_luego_cancela_envio(self):
+    def test_operador_devuelve_remision_generada_y_jefe_cancela_envio(self):
         op_id, formato_id = self._op_troquel_enviada()
         resp = self.c_op.post("/api/ordenes/consolidar_remision_operador/", {"orden_ids": [op_id]}, format="json")
         self.assertEqual(resp.status_code, 200, resp.data)
@@ -68,16 +78,16 @@ class DevolverTroquelTestCase(TestCase):
         self.assertTrue(resp.data["remision_numero"])
         resp = self.c_op.post("/api/ordenes/devolver_remision_operador/", {"remision_id": rem_id}, format="json")
         self.assertEqual(resp.status_code, 200, resp.data)
-        resp = self.c_op.post(f"/api/formatos-cuchillas/{formato_id}/cancelar_envio/")
+        resp = self._cancelar_envio(formato_id)
         self.assertEqual(resp.status_code, 200, resp.data)
         self._assert_reabierta(op_id, formato_id, {"borrador"})
 
-    def test_operador_cancela_envio_de_remision_generada(self):
-        """Generated (numbered) but not liquidated: the operator can still pull it back."""
+    def test_jefe_cancela_envio_de_remision_generada(self):
+        """Generated (numbered) but not liquidated: the jefe can still pull it back."""
         op_id, formato_id = self._op_troquel_enviada()
         resp = self.c_op.post("/api/ordenes/consolidar_remision_operador/", {"orden_ids": [op_id]}, format="json")
         self.assertEqual(resp.status_code, 200, resp.data)
-        resp = self.c_op.post(f"/api/formatos-cuchillas/{formato_id}/cancelar_envio/")
+        resp = self._cancelar_envio(formato_id)
         self.assertEqual(resp.status_code, 200, resp.data)
         self._assert_reabierta(op_id, formato_id, {"borrador"})
 
@@ -87,7 +97,7 @@ class DevolverTroquelTestCase(TestCase):
         cola = self.c_op.get("/api/ordenes/remisionables_operador/").data
         fila = next(o for o in cola if o["id"] == op_id)
         self.assertEqual(fila["formato_id"], formato_id)
-        resp = self.c_op.post(f"/api/formatos-cuchillas/{fila['formato_id']}/cancelar_envio/")
+        resp = self._cancelar_envio(fila["formato_id"])
         self.assertEqual(resp.status_code, 200, resp.data)
         cola = self.c_op.get("/api/ordenes/remisionables_operador/").data
         self.assertFalse(any(o["id"] == op_id for o in cola))

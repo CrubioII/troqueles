@@ -15,6 +15,11 @@ tiene uno solo, pero nada impide combinarlos):
   es_estaciones   → Impresora, Laminadora, Barnizadora, Troqueladora.
   es_guillotina   → Guillotina (corte inicial + corte final).
   es_contadora    → módulo Facturación únicamente (no es un rol de producción).
+  es_jefe_produccion → un nivel por debajo del Admin: todo lo de es_general y,
+                     además, es el ÚNICO Operador que puede corregir lo que
+                     enviaron los demás (editar/anular registros de estación,
+                     retirar un formato de cuchillas enviado). Los demás
+                     Operadores no pueden tocar un envío una vez hecho.
 """
 
 ROLES_A_ESTACIONES = {
@@ -22,6 +27,7 @@ ROLES_A_ESTACIONES = {
     "es_estaciones": {"impresora", "laminadora", "barnizadora", "troqueladora"},
     "es_guillotina": {"guillotina", "guillotina_final"},
     "es_troquelador": set(),
+    "es_jefe_produccion": {"guillotina", "guillotina_final", "impresora", "laminadora", "barnizadora", "troqueladora"},
 }
 
 CAMPOS_ROL = list(ROLES_A_ESTACIONES)
@@ -53,7 +59,7 @@ def puede_troqueles(user):
     if user.is_staff:
         return True
     perfil = _perfil(user)
-    return bool(perfil and (perfil.es_general or perfil.es_troquelador))
+    return bool(perfil and (perfil.es_general or perfil.es_troquelador or perfil.es_jefe_produccion))
 
 
 def puede_remisiones_generales(user):
@@ -61,7 +67,23 @@ def puede_remisiones_generales(user):
     if user.is_staff:
         return True
     perfil = _perfil(user)
-    return bool(perfil and perfil.es_general)
+    return bool(perfil and (perfil.es_general or perfil.es_jefe_produccion))
+
+
+def es_jefe_produccion(user):
+    perfil = _perfil(user)
+    return bool(perfil and perfil.es_jefe_produccion)
+
+
+def puede_corregir_registros(user):
+    """Edit/undo what users already submitted (station records, sent formatos).
+
+    Only the Admin and the jefe de producción — never a plain Operador, not
+    even over his own submissions.
+    """
+    if not getattr(user, "is_authenticated", False):
+        return False
+    return bool(user.is_staff or es_jefe_produccion(user))
 
 
 def puede_facturacion(user):

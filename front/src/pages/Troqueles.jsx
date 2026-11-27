@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { puedeCorregirRegistros } from '../lib/accesoProduccion'
 import { ProgressBar, REMISION_STATUS_DEFS, SaveStatus } from '../components/core'
 import { Icon } from '../components/Icons'
 import { useAutosave } from '../hooks/useAutosave'
@@ -552,6 +553,9 @@ function OperadorOpDatos({ orden, onSaved }) {
 
 function OperadorTroqueles() {
   const { user } = useAuth()
+  // Retirar un formato ya enviado (cancelar envío / devolver / desbloquear) es
+  // corregir un envío: solo el jefe de producción o el Admin.
+  const corrige = puedeCorregirRegistros(user)
   const navigate = useNavigate()
   const [tab, setTab] = useState('pendientes')
   const [showNueva, setShowNueva] = useState(false)   // modal Nueva tarea de troquel
@@ -888,7 +892,7 @@ function OperadorTroqueles() {
 
   if (!orden) {
     const puedeEditar = (f) => f.estado !== 'aprobado' && esMio(f)
-    const puedeDesbloquear = (f) => f.estado === 'aprobado' && esMio(f)
+    const puedeDesbloquear = (f) => f.estado === 'aprobado' && corrige
     return (
       <>
         <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
@@ -1244,7 +1248,7 @@ function OperadorTroqueles() {
                               <td style={{ padding: '10px 12px', color: 'var(--ink-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{op.referencia}</td>
                               <td style={{ padding: '10px 12px', width: 70, fontFamily: 'JetBrains Mono, monospace', color: 'var(--ink-2)' }} title="Unidades del producto en la OP — no es la cantidad de troqueles (siempre es 1 por tarea)">{op.cantidad} uds</td>
                               <td style={{ padding: '10px 12px', width: 200, textAlign: 'right', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
-                                {op.formato_id && (
+                                {op.formato_id && corrige && (
                                   <button
                                     className="btn sm"
                                     style={{ marginRight: 6 }}
@@ -1330,14 +1334,14 @@ function OperadorTroqueles() {
             <div style={{ marginTop: 16, padding: '12px 16px', borderRadius: 8, background: 'var(--warn-soft, #fef6e7)', border: '1px solid var(--warn, #e0a800)', fontSize: 13, color: 'var(--ink-2)' }}>
               <div>
                 ⏳ El formato de cuchillas fue enviado y está <strong>esperando revisión del administrador</strong>.
-                Si necesitas corregirlo, cancela el envío para volver a editarlo.
+                {corrige ? ' Si necesitas corregirlo, cancela el envío para volver a editarlo.' : ' Si necesitas un cambio, pídeselo al jefe de producción.'}
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
+              {corrige && <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
                 <button className="btn sm" disabled={cancelando} onClick={() => cancelarEnvio(formatos[0].id)}>
                   {cancelando ? 'Cancelando…' : 'Cancelar envío'}
                 </button>
                 {cancelError && <span style={{ fontSize: 12, color: 'var(--danger, #c0392b)' }}>{cancelError}</span>}
-              </div>
+              </div>}
             </div>
           )}
 
@@ -1381,11 +1385,11 @@ function OperadorTroqueles() {
             <div style={{ marginTop: 16, padding: '12px 16px', borderRadius: 8, background: 'var(--warn-soft, #fef6e7)', border: '1px solid var(--warn, #e0a800)', fontSize: 13, color: 'var(--ink-2)' }}>
               <div>
                 ✅ El formato de cuchillas quedó <strong>registrado</strong> y el troquel está terminado.
-                {esMio(formatos[0])
-                  ? ' Si te equivocaste, cancela el envío ahora para volver a editarlo; una vez el administrador liquide la remisión ya no se puede.'
-                  : ' Si necesitas un cambio, contacta al administrador.'}
+                {corrige
+                  ? ' Si hay un error, cancela el envío para volver a editarlo; una vez el administrador liquide la remisión ya no se puede.'
+                  : ' Si necesitas un cambio, pídeselo al jefe de producción.'}
               </div>
-              {esMio(formatos[0]) && (
+              {corrige && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
                   <button className="btn sm" disabled={cancelando} onClick={() => cancelarEnvio(formatos[0].id)}>
                     {cancelando ? 'Cancelando…' : 'Cancelar envío y corregir'}

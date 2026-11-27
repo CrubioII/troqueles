@@ -124,6 +124,10 @@ class RegistroLibreTestCase(TestCase):
         resp = self.c_est.post(URL, self._payload(), format="json")
         op_id = resp.data["orden"]
         r = self.c_est.post(f"/api/registros-proceso/{resp.data['id']}/anular/")
+        self.assertEqual(r.status_code, 403, r.data)  # only the jefe corrects
+        jefe = User.objects.create_user("jefe_libre", password="x")
+        PerfilOperador.objects.create(user=jefe, es_jefe_produccion=True)
+        r = _api(jefe).post(f"/api/registros-proceso/{resp.data['id']}/anular/")
         self.assertEqual(r.status_code, 200, r.data)
         self.assertFalse(OrdenProduccion.objects.filter(pk=op_id).exists())
 

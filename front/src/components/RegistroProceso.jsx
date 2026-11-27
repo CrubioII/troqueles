@@ -4,7 +4,9 @@ import {
   ESTACIONES_CONFIG, TAMANOS_REGISTRO, TIPOS_LAMINADO_REGISTRO, TIPOS_METALIZADO_REGISTRO, TIPOS_TRABAJO_REGISTRO,
   PROCESO_LABELS, procesosPosteriores,
 } from './core'
-import { createRegistroProceso, createRegistroLibre, anularRegistroProceso } from '../api'
+import { createRegistroProceso, createRegistroLibre, anularRegistroProceso, updateRegistroProceso } from '../api'
+import { useAuth } from '../context/AuthContext'
+import { puedeCorregirRegistros } from '../lib/accesoProduccion'
 import GroupedIntegerInput from './GroupedIntegerInput'
 import ClientePicker from './ClientePicker'
 
@@ -515,9 +517,14 @@ export function RegistroProcesoForm({ estacion, orden, onCreated, libre = false 
 
 // ────────── Historial de registros ──────────
 //
-// `onAnulado`: si se pasa, aparece la columna de deshacer. Bajo bloqueo duro un
-// error de tecleo dejaría la OP atascada, así que el operador puede anular.
+// `onAnulado`: si se pasa, la pantalla admite correcciones y se llama tras
+// anular o editar un registro para recargar. Corregir lo enviado es solo del
+// jefe de producción (y el Admin): al Operador normal no se le muestran los
+// botones y el backend le responde 403.
 export function RegistroProcesoHistory({ registros, loading, showOrden = true, onAnulado, showCosto = false, onCostoChange }) {
+  const { user } = useAuth()
+  const corrige = !!onAnulado && puedeCorregirRegistros(user)
+  const [editando, setEditando] = useState(null)
   const [anulando, setAnulando] = useState(null)
   const [confirmAnular, setConfirmAnular] = useState(null)
   const [error, setError] = useState(null)
@@ -558,7 +565,7 @@ export function RegistroProcesoHistory({ registros, loading, showOrden = true, o
         'Fecha / Hora',
         ...(showOrden ? ['OP #', 'Cliente'] : []),
         'Proceso', 'Cantidad', 'Tamaño', 'Detalle', 'Operador',
-        ...(onAnulado ? [''] : []),
+        ...(corrige ? [''] : []),
       ]
 
   const detalle = (r) => {
@@ -676,8 +683,16 @@ export function RegistroProcesoHistory({ registros, loading, showOrden = true, o
                     </td>
                     <td style={{ padding: '10px 12px', fontSize: 12, color: 'var(--ink-2)' }}>{detalle(r)}</td>
                     <td style={{ padding: '10px 12px', color: 'var(--ink-2)', fontSize: 12 }}>{r.operador_username || '—'}</td>
-                    {onAnulado && (
-                      <td style={{ padding: '10px 12px' }}>
+                    {corrige && (
+                      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
+                        <button
+                          type="button"
+                          className="btn"
+                          style={{ fontSize: 11, padding: '4px 8px', marginRight: 6 }}
+                          onClick={() => { setError(null); setEditando(r) }}
+                        >
+                          Editar
+                        </button>
                         <button
                           type="button"
                           className={'btn' + (confirmAnular === r.id ? ' danger' : '')}
@@ -696,6 +711,135 @@ export function RegistroProcesoHistory({ registros, loading, showOrden = true, o
           </tbody>
         </table>
       </div>
+      {editando && (
+        <EditarRegistroModal
+          registro={editando}
+          onClose={() => setEditando(null)}
+          onSaved={() => { setEditando(null); onAnulado && onAnulado(editando.id) }}
+        />
+      )}
     </>
+  )
+}
+
+// ────────── Corrección de un registro ya enviado (jefe de producción) ──────────
+//
+// Solo los datos de trabajo que tecleó el Operador; la OP, la estación y el
+// proceso no se mueven (para eso: anular y volver a registrar).
+function EditarRegistroModal({ registro, onClose, onSaved }) {
+  const campos = ESTACIONES_CONFIG[registro.estacion]?.campos || []
+  const [d, setD] = useState(() => {
+    const base = {}
+    for (const k of Object.keys(EMPTY)) base[k] = registro[k] ?? EMPTY[k]
+    return base
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
+  const set = (k) => (e) => {
+    const v = e?.target ? (e.target.type === 'checkbox' ? e.target.checked : e.target.value) : e
+    setD(prev => ({ ...prev, [k]: v }))
+  }
+
+  const guardar = async () => {
+    const cantidad = Number(d.cantidad_realizada)
+    if (!Number.isFinite(cantidad) || cantidad < 0) { setError('Cantidad inválida'); return }
+    setSaving(true)
+    setError(null)
+    try {
+      await updateRegistroProceso(registro.id, {
+        ...d,
+        cantidad_realizada: cantidad,
+        tiro_colores_num: Number(d.tiro_colores_num) || 0,
+        retiro_colores_num: Number(d.retiro_colores_num) || 0,
+      })
+      onSaved()
+    } catch (e) {
+      setError(e.message || 'No se pudo guardar')
+      setSaving(false)
+    }
+  }
+
+  const select = (k, opts, placeholder = '—') => (
+    <select className="input" value={d[k] || ''} onChange={set(k)}>
+      <option value="">{placeholder}</option>
+      {opts.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+    </select>
+  )
+  const lado = (prefix, label, conColores) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, minWidth: 70 }}>
+        <input type="checkbox" checked={!!d[`${prefix}_active`]} onChange={set(`${prefix}_active`)} /> {label}
+      </label>
+      {conColores && d[`${prefix}_active`] && (
+        <>
+          <input className="input" type="number" min="0" style={{ width: 70 }} value={d[`${prefix}_colores_num`]} onChange={set(`${prefix}_colores_num`)} title="Número de tintas" />
+          <input className="input" style={{ flex: 1, minWidth: 120 }} placeholder="Tintas (desc.)" value={d[`${prefix}_colores_desc`]} onChange={set(`${prefix}_colores_desc`)} />
+        </>
+      )}
+    </div>
+  )
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 9999,
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+    }}>
+      <div style={{ background: 'var(--surface)', borderRadius: 12, maxWidth: 520, width: '100%', maxHeight: '90vh', overflowY: 'auto', padding: 24, boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
+        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Corregir registro</div>
+        <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 16 }}>
+          {registro.orden_numero} · {registro.proceso_label} · registrado por {registro.operador_username || '—'} el {fmtFecha(registro.fecha_hora)}
+        </div>
+        <div style={{ display: 'grid', gap: 12 }}>
+          <Field label="Cantidad realizada">
+            <GroupedIntegerInput className="input" value={d.cantidad_realizada} onChange={set('cantidad_realizada')} />
+          </Field>
+          {campos.includes('tamano') && (
+            <Field label="Tamaño">
+              {select('tamano', TAMANOS_REGISTRO)}
+              {d.tamano === 'otro' && <input className="input" style={{ marginTop: 6 }} placeholder="¿Cuál?" value={d.tamano_otro} onChange={set('tamano_otro')} />}
+            </Field>
+          )}
+          {campos.includes('colores') && (
+            <Field label="Tintas">
+              {lado('tiro', 'Tiro', true)}
+              {lado('retiro', 'Retiro', true)}
+            </Field>
+          )}
+          {campos.includes('laminado') && (
+            <Field label="Laminado">
+              {select('tipo_laminado', TIPOS_LAMINADO_REGISTRO)}
+              {d.tipo_laminado === 'metalizado' && (
+                <div style={{ marginTop: 6 }}>{select('tipo_metalizado', TIPOS_METALIZADO_REGISTRO, 'Color…')}</div>
+              )}
+              {d.tipo_laminado === 'metalizado' && d.tipo_metalizado === 'otros' && (
+                <input className="input" style={{ marginTop: 6 }} placeholder="¿Cuál?" value={d.tipo_metalizado_otro} onChange={set('tipo_metalizado_otro')} />
+              )}
+            </Field>
+          )}
+          {campos.includes('lado') && (
+            <Field label="Lado">
+              {lado('tiro', 'Tiro', false)}
+              {lado('retiro', 'Retiro', false)}
+            </Field>
+          )}
+          {campos.includes('tipoTrabajo') && (
+            <Field label="Tipo de trabajo">
+              {select('tipo_trabajo', TIPOS_TRABAJO_REGISTRO)}
+              {d.tipo_trabajo === 'otro' && <input className="input" style={{ marginTop: 6 }} placeholder="¿Cuál?" value={d.tipo_trabajo_otro} onChange={set('tipo_trabajo_otro')} />}
+            </Field>
+          )}
+          <Field label="Observaciones">
+            <textarea className="input" rows={2} value={d.observaciones} onChange={set('observaciones')} />
+          </Field>
+        </div>
+        {error && <div style={{ marginTop: 12, color: 'var(--danger, #c0392b)', fontSize: 12 }}>{error}</div>}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
+          <button className="btn" type="button" onClick={onClose} disabled={saving}>Cancelar</button>
+          <button className="btn primary" type="button" onClick={guardar} disabled={saving}>
+            {saving ? 'Guardando…' : 'Guardar corrección'}
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }

@@ -23,6 +23,15 @@ export function puedeAlgunaRemision(user) {
   return puedeTroqueles(user) || puedeRemisionesGenerales(user)
 }
 
+// Corregir (editar/anular) lo que otro usuario ya envió — registros de
+// estación, formatos de cuchillas enviados: solo el jefe de producción
+// (PerfilOperador.es_jefe_produccion) y el Admin. El Operador normal no puede
+// tocar un envío una vez hecho, ni siquiera el suyo.
+export function puedeCorregirRegistros(user) {
+  if (!user) return false
+  return user.role === 'admin' || !!user.corregirRegistros
+}
+
 // Módulo Facturación: la contadora (PerfilOperador.es_contadora) y el Admin.
 export function puedeFacturacion(user) {
   if (!user) return false

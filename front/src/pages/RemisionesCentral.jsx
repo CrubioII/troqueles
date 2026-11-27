@@ -11,7 +11,7 @@ import {
 import { useAuth } from '../context/AuthContext'
 import { useSyncPolling } from '../lib/useSyncPolling'
 import { saveBlob } from '../lib/download'
-import { puedeRemisionesGenerales } from '../lib/accesoProduccion'
+import { puedeRemisionesGenerales, puedeCorregirRegistros } from '../lib/accesoProduccion'
 
 // Producción › Remisiones: one page for every exit — die tasks (Troqueles) and
 // the rest of the production (it replaced Producción General). Same rules:
@@ -595,7 +595,7 @@ export default function RemisionesCentral() {
                         </div>
                         <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginLeft: 'auto' }} onClick={e => e.stopPropagation()}>
                           <button className="btn sm" onClick={() => setVerOp(op)} title="Ver lo que esta OP aporta a la remisión (no genera nada)">Ver registros</button>
-                          {op.tipo === 'troquel' && op.formato_id && (
+                          {op.tipo === 'troquel' && op.formato_id && puedeCorregirRegistros(user) && (
                             <button className="btn sm" disabled={accionBusy === op.id} onClick={() => devolver(op)} title="Devolver el formato de cuchillas para corregirlo">
                               Devolver
                             </button>

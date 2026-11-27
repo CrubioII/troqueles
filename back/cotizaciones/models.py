@@ -957,6 +957,11 @@ class PerfilOperador(models.Model):
     es_guillotina = models.BooleanField("Guillotina", default=False)
     # Not a production role: the accountant only works in the Facturación module.
     es_contadora = models.BooleanField("Contadora (módulo Facturación)", default=False)
+    # One level below the Admin: the only Operador who can correct (edit/undo)
+    # what other users submitted at the stations. Implies es_general access.
+    es_jefe_produccion = models.BooleanField(
+        "Jefe de producción (corrige los registros de los demás)", default=False,
+    )
 
     def __str__(self):
         return f"Perfil de {self.user.username}"

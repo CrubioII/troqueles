@@ -585,7 +585,9 @@ export const createRegistroLibre = (data) =>
 export const anularRegistroProceso = (id) =>
   apiFetch(`${BASE}/registros-proceso/${id}/anular/`, { method: 'POST' }).then(jsonConError)
 
-// Admin-only: fija el monto a cobrar por un registro puntual de la cadena.
+// Admin: fija el monto a cobrar por un registro puntual de la cadena.
+// Jefe de producción: corrige los datos de trabajo de un registro ya enviado
+// (el backend ignora orden/estación/proceso y el dinero para él).
 export const updateRegistroProceso = (id, data) =>
   apiFetch(`${BASE}/registros-proceso/${id}/`, {
     method: 'PATCH',

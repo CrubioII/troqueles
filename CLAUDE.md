@@ -64,7 +64,8 @@ Sequential chain of machine stations that a PO's processes flow through, one sta
 RegistroProceso model (back/cotizaciones/models.py): append-only log, one row per Operador submission at a station
   — Saving a row marks the matching OpProceso completed=True; the PO then automatically advances to the next station's queue (no Admin action needed)
   — Snapshots cantidad_esperada at submit time since the Admin can edit the PO later
-  — API: /api/registros-proceso/ (RegistroProcesoViewSet, back/cotizaciones/views.py) — list/create open to any authenticated user (Operador), edit/delete admin-only
+  — API: /api/registros-proceso/ (RegistroProcesoViewSet, back/cotizaciones/views.py) — list/create open to any authenticated user (Operador); raw delete admin-only
+  — Correcting a submission (PATCH a record's work data, POST .../anular/, cancelar_envio of a sent formato de cuchillas) is ONLY for the jefe de producción (`PerfilOperador.es_jefe_produccion`, one level below Admin, implies es_general access) and the Admin — a plain Operador gets 403 even on his own records. Helper: roles.puede_corregir_registros / front lib/accesoProduccion.js puedeCorregirRegistros (token claim `corregir_registros`). The jefe can't move a record to another OP/station/process nor touch monto_cobrado
   — GET /api/ordenes/?estacion={id} — a station's queue
   — Queue visibility is never toggled: every PO/process created enters its station's queue directly (there is no `visible_operador` flag — removed in migration 0046)
   — Queue order = `OpProceso.prioridad` (1 = first, null last). Reordered by dragging rows in the UI (`front/src/hooks/useDragOrder.js`), persisted via POST /api/ordenes/procesos/{proceso_id}/prioridades/ or /api/ordenes/estaciones/{estacion_id}/prioridades/ (body `{orden_ids: [...]}`) — admin-only (403 for Operador); the Operador's queue screens (EstacionMaquina.jsx, Troqueles.jsx) render read-only order, no drag handle or priority buttons

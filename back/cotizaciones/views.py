@@ -129,6 +129,13 @@ def _require_admin(request):
         raise PermissionDenied("Solo administradores pueden realizar esta acción.")
 
 
+def _require_corregir_registros(request):
+    if not roles.puede_corregir_registros(request.user):
+        raise PermissionDenied(
+            "Solo el jefe de producción o el administrador pueden corregir registros ya enviados."
+        )
+
+
 def _require_estacion(request, estacion_id):
     if estacion_id not in roles.estaciones_permitidas(request.user):
         raise PermissionDenied("No tienes acceso a esta estación.")
@@ -2548,9 +2555,9 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
 class RegistroMaquinaViewSet(viewsets.ModelViewSet):
     """Registros de ejecución por máquina (troquel, guillotina).
 
-    fecha_hora y operador se estampan server-side. Editar/eliminar
-    registros existentes requiere admin; listar/crear es para cualquier
-    usuario autenticado.
+    fecha_hora y operador se estampan server-side. Editar un registro ya
+    enviado: Admin o jefe de producción; eliminar: Admin. Listar/crear es
+    para cualquier usuario autenticado.
     """
 
     queryset = RegistroMaquina.objects.select_related("orden", "orden__cliente", "operador")
@@ -2579,11 +2586,11 @@ class RegistroMaquinaViewSet(viewsets.ModelViewSet):
         serializer.save(operador=user)
 
     def update(self, request, *args, **kwargs):
-        _require_admin(request)
+        _require_corregir_registros(request)
         return super().update(request, *args, **kwargs)
 
     def partial_update(self, request, *args, **kwargs):
-        _require_admin(request)
+        _require_corregir_registros(request)
         return super().partial_update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
@@ -2943,13 +2950,15 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="cancelar_envio")
     def cancelar_envio(self, request, pk=None):
-        """POST /api/formatos-cuchillas/{id}/cancelar_envio/ — cualquier Operador
-        retira un formato enviado (por cualquier operador) para volver a editarlo
-        (→ borrador).
+        """POST /api/formatos-cuchillas/{id}/cancelar_envio/ — el jefe de
+        producción (o el Admin) retira un formato enviado para volver a editarlo
+        (→ borrador). Un Operador normal no puede tocar un formato ya enviado,
+        ni siquiera el suyo.
 
         Deshace el cierre del troquel: borra la remisión que se creó al enviarlo
         y devuelve la OP a su cola. Si el Admin ya la liquidó, 409.
         """
+        _require_corregir_registros(request)
         formato = self.get_object()
         if formato.estado in ("borrador", "devuelto"):
             return Response({"error": "Este formato no está enviado."}, status=409)
@@ -3009,7 +3018,9 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
 class RegistroProcesoViewSet(viewsets.ModelViewSet):
     """Registros de las máquinas de la cadena (impresora → … → troqueladora).
 
-    Listar/crear: cualquier autenticado (Operador). Editar/eliminar: admin.
+    Listar/crear: cualquier autenticado (Operador). Corregir (editar/anular) un
+    registro ya enviado: solo el jefe de producción o el Admin — el Operador no
+    puede tocar ni los suyos. Eliminar en crudo: admin.
     Crear un registro cierra el OpProceso correspondiente y la OP pasa sola a la
     cola de la estación siguiente.
     """
@@ -3244,27 +3255,12 @@ class RegistroProcesoViewSet(viewsets.ModelViewSet):
     def anular(self, request, pk=None):
         """POST /api/registros-proceso/{id}/anular/ — deshace un registro.
 
-        Bajo bloqueo duro un error de tecleo dejaría la OP atascada en la
-        estación siguiente, así que el Operador puede deshacer lo suyo mientras
-        ninguna estación posterior haya registrado ya sobre esta OP.
+        Solo el jefe de producción o el Admin: si un Operador se equivoca, es
+        el jefe quien lo corrige (el Operador no puede deshacer ni lo suyo).
         """
+        _require_corregir_registros(request)
         registro = self.get_object()
         op = registro.orden
-        es_admin = request.user.is_staff
-        if not es_admin and registro.operador_id != request.user.id:
-            return Response({"error": "Solo puedes anular tus propios registros."}, status=403)
-
-        orden_estacion = chain.ESTACION_POR_ID[registro.estacion]["orden"]
-        hay_posterior = any(
-            chain.ESTACION_POR_ID[r.estacion]["orden"] > orden_estacion
-            for r in op.registros_proceso.all()
-            if r.estacion in chain.ESTACION_POR_ID
-        )
-        if hay_posterior and not es_admin:
-            return Response(
-                {"error": "Ya se registró una estación posterior; pide al administrador que lo corrija."},
-                status=409,
-            )
 
         with transaction.atomic():
             error = _borrar_remision_de_op(op)
@@ -3280,21 +3276,54 @@ class RegistroProcesoViewSet(viewsets.ModelViewSet):
                 op.delete()
         return Response({"ok": True})
 
+    # What the jefe de producción may correct on a submitted record: the work
+    # data the Operador typed. Which OP/station/process it belongs to is fixed
+    # (to move it, anular and register again); money stays Admin-only.
+    CAMPOS_CORREGIBLES = {
+        "cantidad_realizada", "tamano", "tamano_otro",
+        "tiro_active", "tiro_colores_num", "tiro_colores_desc",
+        "retiro_active", "retiro_colores_num", "retiro_colores_desc",
+        "tipo_laminado", "tipo_metalizado", "tipo_metalizado_otro",
+        "tipo_trabajo", "tipo_trabajo_otro", "observaciones",
+    }
+
     def update(self, request, *args, **kwargs):
-        _require_admin(request)
-        op = self.get_object().orden
-        response = super().update(request, *args, **kwargs)
-        if "monto_cobrado" in request.data:
-            _sync_remision_item_op(op)
-        return response
+        return self._corregir(request, partial=False)
 
     def partial_update(self, request, *args, **kwargs):
-        _require_admin(request)
-        op = self.get_object().orden
-        response = super().partial_update(request, *args, **kwargs)
-        if "monto_cobrado" in request.data:
+        return self._corregir(request, partial=True)
+
+    def _corregir(self, request, partial):
+        _require_corregir_registros(request)
+        registro = self.get_object()
+        op = registro.orden
+        if request.user.is_staff:
+            data = request.data
+        else:
+            data = {k: v for k, v in request.data.items() if k in self.CAMPOS_CORREGIBLES}
+            partial = True
+        serializer = self.get_serializer(registro, data=data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        extra = {}
+        if "cantidad_realizada" in serializer.validated_data:
+            realizada = int(serializer.validated_data.get("cantidad_realizada") or 0)
+            extra["faltante"] = realizada < (int(op.cantidad or 0) - int(op.sobrante or 0))
+        with transaction.atomic():
+            registro = serializer.save(**extra)
+            if extra and not registro.faltante:
+                # Corrected up to the required quantity: the shortage alert is stale.
+                Notificacion.objects.filter(registro=registro, tipo="cantidad_faltante").delete()
+            if (
+                "cantidad_realizada" in serializer.validated_data
+                and op.origen == "registro_libre"
+                and op.registros_proceso.order_by("fecha_hora", "id").first() == registro
+            ):
+                # A free OP's quantity is what came out of its first record.
+                op.cantidad = registro.cantidad_realizada
+                op.save(update_fields=["cantidad"])
+        if "monto_cobrado" in data:
             _sync_remision_item_op(op)
-        return response
+        return Response(self.get_serializer(registro).data)
 
     def destroy(self, request, *args, **kwargs):
         _require_admin(request)

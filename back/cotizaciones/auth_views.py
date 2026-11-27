@@ -15,6 +15,7 @@ def _claims_rol(user):
         "troqueles": roles.puede_troqueles(user),
         "remisiones_generales": roles.puede_remisiones_generales(user),
         "facturacion": roles.puede_facturacion(user),
+        "corregir_registros": roles.puede_corregir_registros(user),
     }
 
 

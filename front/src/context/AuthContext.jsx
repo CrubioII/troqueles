@@ -30,6 +30,7 @@ function userFromClaims(data) {
     troqueles: !!data.troqueles,
     remisionesGenerales: !!data.remisiones_generales,
     facturacion: !!data.facturacion,
+    corregirRegistros: !!data.corregir_registros,
   }
 }
 
