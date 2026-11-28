@@ -397,10 +397,15 @@ export const updateRemision = (id, data) =>
     body: JSON.stringify(data),
   }).then(json)
 
-// Borra la remisión (Admin): deshace una liquidación equivocada y devuelve sus
-// OPs a la cola de remisiones del Operador. 409 si está consolidada en otra.
-export const deleteRemision = (id) =>
-  apiFetch(`${BASE}/remisiones/${id}/`, { method: 'DELETE' }).then(jsonConError)
+// Anula la remisión (Admin): nunca se borra, conserva su número REM- (el
+// consecutivo no pierde ninguno) y sus OPs vuelven a la cola de remisiones.
+// 409 si está consolidada en otra o en una factura activa.
+export const anularRemision = (id, motivo) =>
+  apiFetch(`${BASE}/remisiones/${id}/anular/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ motivo: motivo || '' }),
+  }).then(jsonConError)
 
 // Desglose por concepto del troquel (mismos datos que van al PDF y al correo,
 // ya formateados en COP)

@@ -998,9 +998,16 @@ class RemisionSerializer(serializers.ModelSerializer):
     cliente_email = serializers.EmailField(source="cliente.email", read_only=True)
     cliente_telefono = serializers.CharField(source="cliente.telefono", read_only=True, default='')
     cliente_nit = serializers.CharField(source="cliente.nit", read_only=True, default='')
-    orden_numero = serializers.CharField(source="orden.numero", read_only=True, default="")
+    # A voided remission no longer holds its OP (`orden` is null): show the one it had.
+    orden_numero = serializers.SerializerMethodField()
     consolidada_en_numero = serializers.CharField(
         source="consolidada_en_remision.numero", read_only=True, default="")
+    anulada_por_username = serializers.CharField(
+        source="anulada_por.username", read_only=True, default="")
+
+    def get_orden_numero(self, obj):
+        op = obj.op_referencia
+        return op.numero if op else ""
 
     class Meta:
         model = Remision
@@ -1011,15 +1018,20 @@ class RemisionSerializer(serializers.ModelSerializer):
             "direccion", "ciudad", "observaciones", "mostrar_valores", "tiene_troquel",
             "estado", "enviada_en", "liquidada_en",
             "consolidada_en", "consolidada_en_remision", "consolidada_en_numero",
+            "anulada_en", "anulada_por_username", "anulacion_motivo",
             "creado", "modificado",
             "items",
         ]
         read_only_fields = ["id", "numero", "orden", "cliente", "estado",
                             "enviada_en", "liquidada_en",
                             "consolidada_en", "consolidada_en_remision", "consolidada_en_numero",
+                            "anulada_en", "anulacion_motivo",
                             "creado", "modificado"]
 
     def update(self, instance, validated_data):
+        if instance.estado == "anulada":
+            raise serializers.ValidationError(
+                {"estado": [f"La remisión {instance.numero} está anulada; no se puede modificar."]})
         items_data = validated_data.pop("items", None)
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
@@ -1034,7 +1046,7 @@ class RemisionSerializer(serializers.ModelSerializer):
 
 class RemisionListSerializer(serializers.ModelSerializer):
     cliente_nombre = serializers.CharField(source="cliente.nombre", read_only=True)
-    orden_numero = serializers.CharField(source="orden.numero", read_only=True, default="")
+    orden_numero = serializers.SerializerMethodField()
     # What the remission covers: its own OP plus the ones merged into it. Uses
     # the prefetched relations (RemisionViewSet.queryset), so .all() — never
     # .filter() — to stay at a fixed number of queries.
@@ -1047,11 +1059,17 @@ class RemisionListSerializer(serializers.ModelSerializer):
         model = Remision
         fields = ["id", "numero", "fecha", "cliente_nombre", "orden_numero",
                   "referencias", "num_productos", "num_troqueles", "num_procesos",
-                  "estado", "mostrar_valores", "tiene_troquel", "creado", "modificado"]
+                  "estado", "mostrar_valores", "tiene_troquel", "creado", "modificado",
+                  "anulada_en", "anulacion_motivo"]
+
+    def get_orden_numero(self, obj):
+        op = obj.op_referencia
+        return op.numero if op else ""
 
     @staticmethod
     def _ops(obj):
-        ops = [obj.orden] if obj.orden_id else []
+        op = obj.op_referencia
+        ops = [op] if op else []
         ops += [src.orden for src in obj.remisiones_consolidadas.all() if src.orden_id]
         return ops
 

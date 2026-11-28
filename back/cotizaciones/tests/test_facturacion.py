@@ -47,23 +47,30 @@ class FacturacionTests(TestCase):
     def pendientes(self, **params):
         return self.api.get("/api/facturas/pendientes/", params).data["results"]
 
-    def test_remissions_are_pending_as_soon_as_they_exist(self):
-        # The Admin's liquidation is not required: a remission is billable
-        # from the moment it exists. Merged ones are billed in their target.
+    def test_remissions_are_pending_once_issued(self):
+        # The Admin's liquidation is not required: a remission is billable as
+        # soon as it is issued (has its REM- number). Merged ones are billed
+        # in their target; unissued ones wait for production and are only counted.
         liquidada = self.make_remision()
-        pendiente = self.make_remision(estado="pendiente", issue=False)
+        pendiente = self.make_remision(estado="pendiente")
+        sin_emitir = self.make_remision(estado="pendiente", issue=False)
         self.make_remision(estado="consolidada", issue=False)
-        rows = self.pendientes()
-        self.assertEqual([r["id"] for r in rows], [liquidada.id, pendiente.id])
-        self.assertEqual(rows[0]["total"], "1000")
-        self.assertEqual(rows[0]["referencias"], ["Caja kraft"])
-        self.assertIsNone(rows[1]["numero"])
+        data = self.api.get("/api/facturas/pendientes/").data
+        rows = data["results"]
+        # Newest consecutive first.
+        self.assertEqual([r["id"] for r in rows], [pendiente.id, liquidada.id])
+        self.assertEqual([r["numero"] for r in rows], ["REM-0002", "REM-0001"])
+        self.assertEqual(rows[1]["total"], "1000")
+        self.assertEqual(rows[1]["referencias"], ["Caja kraft"])
+        self.assertEqual(data["sin_emitir"], 1)
+        # An unissued remission cannot be invoiced either.
+        self.assertEqual(self.facturar([sin_emitir]).status_code, 409)
+        # Once production issues it, it shows up with the next number.
+        sin_emitir.asignar_numero()
+        self.assertEqual(self.pendientes()[0]["numero"], "REM-0003")
 
-        self.assertEqual(self.facturar([liquidada, pendiente]).status_code, 201)
+        self.assertEqual(self.facturar([liquidada, pendiente, sin_emitir]).status_code, 201)
         self.assertEqual(self.pendientes(), [])
-        # Invoicing issues the remission's REM- number.
-        pendiente.refresh_from_db()
-        self.assertTrue(pendiente.numero)
 
     def test_invoiced_remission_cannot_be_deleted_or_merged(self):
         admin = get_user_model().objects.create_user("fact_admin2", is_staff=True)

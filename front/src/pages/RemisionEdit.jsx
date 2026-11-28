@@ -7,7 +7,7 @@ import { useAutosave } from '../hooks/useAutosave'
 import { TroquelCostos } from '../components/Troquel'
 import { RegistroProcesoHistory } from '../components/RegistroProceso'
 import GroupedIntegerInput from '../components/GroupedIntegerInput'
-import { getRemision, updateRemision, liquidarRemision, pdfRemision, getRemisionDesglose, getRemisionesImportables, importarRemisiones, devolverFormatoCuchillas, deleteRemision, getRegistrosProceso, updateRegistroProceso } from '../api'
+import { getRemision, updateRemision, liquidarRemision, pdfRemision, getRemisionDesglose, getRemisionesImportables, importarRemisiones, devolverFormatoCuchillas, anularRemision, getRegistrosProceso, updateRegistroProceso } from '../api'
 import logo from '../assets/logo.png'
 import { saveBlob } from '../lib/download'
 
@@ -268,37 +268,55 @@ function UnsavedWarningModal({ busy, onVolver, onGuardarYLiquidar }) {
   )
 }
 
-// ─────────── Modal: eliminar la remisión ───────────
-// Deshace una liquidación equivocada. El comprobante desaparece y sus OPs
-// vuelven a la cola de remisiones del operador para poder rehacerla.
-function EliminarModal({ rem, liquidada, agrupadas, busy, error, onClose, onConfirm }) {
+// ─────────── Modal: anular la remisión ───────────
+// Una remisión nunca se borra: se anula. Conserva su número (el consecutivo no
+// pierde ninguno) y sus OPs vuelven a la cola de remisiones para rehacerla.
+function AnularModal({ rem, liquidada, agrupadas, busy, error, motivo, onMotivo, onClose, onConfirm }) {
+  const emitida = !!rem.numero
   return createPortal(
     <div className="cot-modal-backdrop" onClick={e => { if (e.target === e.currentTarget && !busy) onClose() }}>
       <div className="cot-modal" style={{ maxWidth: 460 }}>
         <div className="cot-modal-header">
-          <div className="brand"><div className="biz">Eliminar remisión</div></div>
+          <div className="brand"><div className="biz">Anular remisión</div></div>
           <button className="btn cot-modal-close" style={{ padding: '4px 8px', fontSize: 13 }} onClick={onClose} disabled={busy}>
             <Icon.X /> Cerrar
           </button>
         </div>
         <div className="cot-modal-body">
           <div style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5, marginBottom: 12 }}>
-            Se eliminará la remisión <strong className="mono">{rem.numero || 'sin emitir'}</strong> de{' '}
-            <strong>{rem.cliente_nombre}</strong> con todos sus ítems. <strong>Esta acción no se
-            puede deshacer.</strong> Sus OPs vuelven a la cola de remisiones del operador, que podrá
-            generarla de nuevo.
+            {emitida ? (
+              <>
+                La remisión <strong className="mono">{rem.numero}</strong> de <strong>{rem.cliente_nombre}</strong>{' '}
+                quedará <strong>anulada</strong>: conserva su número en el consecutivo y queda en
+                Remisiones › Anuladas. <strong>No se puede reactivar.</strong> Sus OPs vuelven a la cola
+                de remisiones y la nueva remisión tomará el siguiente número.
+              </>
+            ) : (
+              <>
+                Esta remisión de <strong>{rem.cliente_nombre}</strong> aún no se ha emitido (no tiene
+                número), así que se descarta sin afectar el consecutivo. Sus OPs vuelven a la cola de
+                remisiones.
+              </>
+            )}
           </div>
           {liquidada && (
             <div className="note" style={{ fontSize: 12, marginBottom: 12 }}>
               <Icon.Info /> Esta remisión ya se liquidó y se envió por correo al cliente y a
-              contaduría. Borrarla aquí <strong>no deshace ese correo</strong>.
+              contaduría. Anularla aquí <strong>no deshace ese correo</strong>.
             </div>
           )}
           {agrupadas && (
             <div className="note" style={{ fontSize: 12, marginBottom: 12 }}>
-              <Icon.Info /> Agrupa varios troqueles: al eliminarla, cada OP recupera su propia
+              <Icon.Info /> Agrupa varios troqueles: al anularla, cada OP recupera su propia
               remisión pendiente.
             </div>
+          )}
+          {emitida && (
+            <label style={{ fontSize: 12, display: 'block' }}>
+              <div style={{ color: 'var(--ink-3)', marginBottom: 4 }}>Motivo de la anulación</div>
+              <textarea className="input" rows={2} value={motivo} onChange={e => onMotivo(e.target.value)}
+                placeholder="Ej. precio errado, se rehace con otra cantidad…" disabled={busy} />
+            </label>
           )}
         </div>
         <div className="cot-modal-actions">
@@ -310,7 +328,7 @@ function EliminarModal({ rem, liquidada, agrupadas, busy, error, onClose, onConf
               onClick={onConfirm}
               disabled={busy}
             >
-              <Icon.Trash /> {busy ? 'Eliminando…' : 'Eliminar definitivamente'}
+              <Icon.X /> {busy ? 'Anulando…' : (emitida ? 'Anular remisión' : 'Descartar')}
             </button>
           </div>
           {error && <span style={{ fontSize: 12, color: 'var(--danger)', width: '100%', textAlign: 'right' }}>✗ {error}</span>}
@@ -541,7 +559,8 @@ export default function RemisionEdit() {
   const [motivo, setMotivo] = useState('')
   const [devBusy, setDevBusy] = useState(false)
   const [devError, setDevError] = useState(null)
-  const [borrando, setBorrando] = useState(false)    // modal de eliminación abierto
+  const [borrando, setBorrando] = useState(false)    // modal de anulación abierto
+  const [motivoAnular, setMotivoAnular] = useState('')
   const [delBusy, setDelBusy] = useState(false)
   const [delError, setDelError] = useState(null)
   const [registros, setRegistros] = useState([])
@@ -569,6 +588,7 @@ export default function RemisionEdit() {
   const editable = rem?.estado === 'pendiente'
   const liquidada = rem?.estado === 'liquidada'
   const consolidada = rem?.estado === 'consolidada'
+  const anulada = rem?.estado === 'anulada'
   const total = items.reduce((s, it) => s + (Number(it.valor_total) || 0), 0)
   const totalCantidad = items.reduce((s, it) => s + (Number(it.cantidad) || 0), 0)
 
@@ -690,7 +710,7 @@ export default function RemisionEdit() {
   const updateItem = (i, field, value) => setItems(prev => prev.map((it, idx) => idx === i ? { ...it, [field]: value } : it))
   const removeItem = (i) => setItems(prev => prev.filter((_, idx) => idx !== i))
 
-  // Devolver el troquel borra la remisión de esa OP. Si es la que se está viendo,
+  // Devolver el troquel retira la remisión de esa OP (anulada si ya tenía número). Si es la que se está viendo,
   // ya no hay nada que mostrar; si sobrevive (agrupaba otras OPs), se recarga.
   const handleDevolver = async () => {
     setDevBusy(true)
@@ -707,14 +727,20 @@ export default function RemisionEdit() {
     }
   }
 
-  const handleEliminar = async () => {
+  const handleAnular = async () => {
     setDelBusy(true)
     setDelError(null)
     try {
-      await deleteRemision(id)
-      navigate('/remisiones', { replace: true })
+      const res = await anularRemision(id, motivoAnular)
+      if (res.anulada) {
+        setBorrando(false)
+        const fresh = await getRemision(id)
+        hydrate(fresh)
+      } else {
+        navigate('/remisiones', { replace: true })
+      }
     } catch (e) {
-      setDelError(e.message || 'No se pudo eliminar la remisión')
+      setDelError(e.message || 'No se pudo anular la remisión')
     } finally {
       setDelBusy(false)
     }
@@ -770,6 +796,15 @@ export default function RemisionEdit() {
         {liquidada && (
           <div className="note" style={{ marginBottom: 16 }}>
             <Icon.Info /> Esta remisión ya fue liquidada y enviada{rem.enviada_en ? ` (${new Date(rem.enviada_en).toLocaleString('es-CO')})` : ''}. Está en el historial.
+          </div>
+        )}
+
+        {anulada && (
+          <div className="note" style={{ marginBottom: 16, color: 'var(--danger)' }}>
+            <Icon.Info /> Remisión anulada
+            {rem.anulada_en ? ` el ${new Date(rem.anulada_en).toLocaleString('es-CO')}` : ''}
+            {rem.anulada_por_username ? ` por ${rem.anulada_por_username}` : ''}
+            {rem.anulacion_motivo ? ` · ${rem.anulacion_motivo}` : ''}. Conserva su número en el consecutivo; no se puede modificar.
           </div>
         )}
 
@@ -924,14 +959,14 @@ export default function RemisionEdit() {
             </button>
           )}
           {editable && <SaveStatus status={saveStatus} onRetry={retrySave} />}
-          {!consolidada && (
+          {!consolidada && !anulada && (
             <button
               className="btn"
               style={{ color: 'var(--danger)', marginRight: 'auto' }}
-              onClick={() => { setDelError(null); setBorrando(true) }}
-              title="Elimina la remisión y devuelve sus OPs a la cola del operador"
+              onClick={() => { setDelError(null); setMotivoAnular(''); setBorrando(true) }}
+              title="Anula la remisión (conserva su número) y devuelve sus OPs a la cola del operador"
             >
-              <Icon.Trash /> Eliminar remisión
+              <Icon.X /> Anular remisión
             </button>
           )}
           <button className="btn" onClick={() => handlePdf('cliente')} disabled={!!dlPdf} title="PDF que recibe el cliente (sin valores por ítem)">
@@ -969,14 +1004,16 @@ export default function RemisionEdit() {
       )}
 
       {borrando && (
-        <EliminarModal
+        <AnularModal
           rem={rem}
           liquidada={liquidada}
           agrupadas={(desglose?.troqueles?.length || 0) > 1}
           busy={delBusy}
           error={delError}
+          motivo={motivoAnular}
+          onMotivo={setMotivoAnular}
           onClose={() => setBorrando(false)}
-          onConfirm={handleEliminar}
+          onConfirm={handleAnular}
         />
       )}
 

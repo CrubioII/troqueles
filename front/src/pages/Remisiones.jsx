@@ -8,6 +8,8 @@ import { useSyncPolling } from '../lib/useSyncPolling'
 const TAB_DEFS = [
   { id: 'pendiente', label: 'Activas' },
   { id: 'liquidada', label: 'Historial' },
+  // Never deleted: a voided remission keeps its REM- number and lives here.
+  { id: 'anulada', label: 'Anuladas' },
 ]
 
 function displayRemisionNumbers(rem) {
@@ -222,7 +224,9 @@ export default function Remisiones() {
               <div style={{ fontSize: 12 }}>
                 {tab === 'pendiente'
                   ? 'Las OP que lleguen al 100% aparecerán aquí automáticamente.'
-                  : 'Aún no hay remisiones liquidadas.'}
+                  : tab === 'anulada'
+                    ? 'Las remisiones anuladas quedan aquí con su número: el consecutivo no pierde ninguno.'
+                    : 'Aún no hay remisiones liquidadas.'}
               </div>
             </div>
           ) : (

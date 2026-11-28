@@ -89,15 +89,27 @@ def _active_invoice_exists():
     )
 
 
-def _pendientes_qs():
+def _sin_facturar_qs():
+    # Merged ones are billed inside their target remission.
     return (
-        # Merged ones are billed inside their target remission.
         Remision.objects.filter(estado__in=("pendiente", "liquidada"))
         .annotate(facturada=_active_invoice_exists())
         .filter(facturada=False)
+    )
+
+
+def _pendientes_qs():
+    """Billable remissions: only issued ones (with their REM- number). A
+    remission auto-created when its OP hits 100% has no number until
+    production generates it, and it may still be merged into another one or
+    undone — billing it then would invoice a document that does not exist yet
+    and break the order of the consecutive. Newest number first."""
+    return (
+        _sin_facturar_qs()
+        .exclude(numero__isnull=True).exclude(numero="")
         .select_related("cliente", "orden")
         .prefetch_related(*REMISION_PREFETCH)
-        .order_by("fecha", "id")
+        .order_by("-numero", "-id")
     )
 
 
@@ -445,12 +457,15 @@ class FacturaViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"], url_path="pendientes")
     def pendientes(self, request):
-        """GET /api/facturas/pendientes/ — remissions (pending or liquidated, not
-        merged) with no active invoice."""
+        """GET /api/facturas/pendientes/ — issued remissions (pending or
+        liquidated, not merged) with no active invoice."""
         rems = list(_pendientes_qs())
+        sin_emitir = _sin_facturar_qs().filter(Q(numero__isnull=True) | Q(numero="")).count()
         return Response({
             "results": RemisionPendienteSerializer(rems, many=True).data,
             "total": _fmt_money(sum(_remision_total(r) for r in rems)),
+            # Waiting for production to generate them; they show up once numbered.
+            "sin_emitir": sin_emitir,
         })
 
     @action(detail=False, methods=["get"], url_path="siguiente_numero")

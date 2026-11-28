@@ -254,6 +254,7 @@ export const REMISION_STATUS_DEFS = [
   { id: 'pendiente', label: 'Pendiente',  cls: 'sent' },
   { id: 'liquidada', label: 'Liquidada',  cls: 'approved' },
   { id: 'consolidada', label: 'Consolidada', cls: 'draft' },
+  { id: 'anulada', label: 'Anulada', cls: 'rejected' },
 ]
 
 // ============ OP: condiciones de pago (ids = backend) ============

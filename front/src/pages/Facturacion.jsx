@@ -11,8 +11,8 @@ import {
   updateFactura, pdfRemisionFacturacion,
 } from '../api'
 
-// Módulo de la contadora. Pendientes = remisiones (en cuanto existen, sin
-// esperar la liquidación del Admin) que no tienen factura;
+// Módulo de la contadora. Pendientes = remisiones ya emitidas (con su número
+// REM-, sin esperar la liquidación del Admin) que no tienen factura;
 // al registrar el N° de factura y su total pasan al Historial, donde lleva el
 // estado (por cobrar / pagada / cancelada). Ver back/cotizaciones/facturacion_views.py.
 
@@ -52,6 +52,87 @@ const th = (align = 'left') => ({
   textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap',
 })
 const td = { padding: '11px 14px', verticalAlign: 'top' }
+
+// ─────────────── Orden de las columnas ───────────────
+
+// Número del consecutivo como entero (REM-0757 → 757) para que el orden no
+// dependa del texto (REM-9999 < REM-10000).
+const numDe = (v) => {
+  const d = String(v ?? '').replace(/\D/g, '')
+  return d ? Number(d) : null
+}
+const textoDe = (v) => (v || '').toString().trim()
+const cmpTexto = (a, b) => textoDe(a).localeCompare(textoDe(b), 'es', { sensitivity: 'base', numeric: true })
+const cmpNum = (a, b) => (a ?? -Infinity) - (b ?? -Infinity)
+
+// Por columna: cómo se compara (ascendente). El desempate siempre es el consecutivo.
+const ORDEN_PENDIENTES = {
+  fecha: (a, b) => cmpTexto(a.fecha, b.fecha),
+  numero: (a, b) => cmpNum(numDe(a.numero), numDe(b.numero)),
+  cliente: (a, b) => cmpTexto(a.cliente_nombre, b.cliente_nombre),
+  referencia: (a, b) => cmpTexto(a.referencias?.[0], b.referencias?.[0]),
+  trabajo: (a, b) => cmpTexto(a.trabajos?.map(t => NOMBRE_TRABAJO[t] || t).join(), b.trabajos?.map(t => NOMBRE_TRABAJO[t] || t).join()),
+  valor: (a, b) => Number(a.total || 0) - Number(b.total || 0),
+}
+const ORDEN_HISTORIAL = {
+  numero: (a, b) => cmpNum(a.numero, b.numero),
+  fecha: (a, b) => cmpTexto(a.fecha, b.fecha),
+  cliente: (a, b) => cmpTexto(a.cliente_nombre, b.cliente_nombre),
+  referencia: (a, b) => cmpTexto(a.referencias?.[0], b.referencias?.[0]),
+  trabajo: (a, b) => cmpTexto(a.trabajos?.map(t => NOMBRE_TRABAJO[t] || t).join(), b.trabajos?.map(t => NOMBRE_TRABAJO[t] || t).join()),
+  remisiones: (a, b) => cmpNum(numDe(a.remisiones?.[0]?.numero), numDe(b.remisiones?.[0]?.numero)),
+  total: (a, b) => Number(a.total || 0) - Number(b.total || 0),
+  estado: (a, b) => cmpTexto(ESTADO_POR_ID[a.estado]?.label, ESTADO_POR_ID[b.estado]?.label),
+}
+// Lo más reciente arriba por defecto.
+const ORDEN_DEFECTO = { campo: 'numero', dir: 'desc' }
+
+function ordenar(rows, orden, comparadores) {
+  const cmp = comparadores[orden.campo] || comparadores.numero
+  const signo = orden.dir === 'asc' ? 1 : -1
+  return [...rows].sort((a, b) => (cmp(a, b) || comparadores.numero(a, b)) * signo)
+}
+
+// La contadora elige el orden y se recuerda en este navegador (por pestaña).
+function useOrden(clave) {
+  const [orden, setOrden] = useState(() => {
+    try {
+      const guardado = JSON.parse(localStorage.getItem(clave))
+      if (guardado?.campo && (guardado.dir === 'asc' || guardado.dir === 'desc')) return guardado
+    } catch { /* sin almacenamiento: orden por defecto */ }
+    return ORDEN_DEFECTO
+  })
+  const cambiar = (campo) => setOrden(prev => {
+    // Misma columna: invierte. Otra: textos A→Z, números/fechas lo más reciente o mayor primero.
+    const dirInicial = ['cliente', 'referencia', 'trabajo', 'estado'].includes(campo) ? 'asc' : 'desc'
+    const next = prev.campo === campo
+      ? { campo, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+      : { campo, dir: dirInicial }
+    try { localStorage.setItem(clave, JSON.stringify(next)) } catch { /* ignore */ }
+    return next
+  })
+  return [orden, cambiar]
+}
+
+function ThOrden({ campo, orden, onOrden, align = 'left', children }) {
+  const activo = orden.campo === campo
+  const flecha = activo ? (orden.dir === 'asc' ? '▲' : '▼') : '↕'
+  return (
+    <th style={th(align)} aria-sort={activo ? (orden.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+      <button
+        type="button" onClick={() => onOrden(campo)}
+        title={activo ? (orden.dir === 'asc' ? 'Orden ascendente · clic para invertir' : 'Orden descendente · clic para invertir') : 'Ordenar por esta columna'}
+        style={{
+          all: 'unset', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5,
+          color: activo ? 'var(--ink)' : 'inherit', font: 'inherit', letterSpacing: 'inherit', textTransform: 'inherit',
+        }}
+      >
+        {children}
+        <span aria-hidden="true" style={{ fontSize: 9, opacity: activo ? 1 : 0.45 }}>{flecha}</span>
+      </button>
+    </th>
+  )
+}
 
 function Referencias({ refs }) {
   if (!refs?.length) return <span style={{ color: 'var(--ink-3)' }}>—</span>
@@ -292,7 +373,7 @@ function FacturaModal({ modo, remisiones, factura, onClose, onSaved }) {
 
 // ─────────────── Pendientes ───────────────
 
-function PendientesTabla({ rows, seleccion, setSeleccion, onPdf, pdfId }) {
+function PendientesTabla({ rows, seleccion, setSeleccion, onPdf, pdfId, orden, onOrden }) {
   const clienteSel = rows.find(r => seleccion.has(r.id))?.cliente_id
   const toggle = (r) => setSeleccion(prev => {
     const next = new Set(prev)
@@ -305,12 +386,12 @@ function PendientesTabla({ rows, seleccion, setSeleccion, onPdf, pdfId }) {
       <thead>
         <tr style={{ background: 'var(--surface-2)', borderBottom: '1px solid var(--border)' }}>
           <th style={{ ...th(), width: 1 }} />
-          <th style={th()}>Fecha</th>
-          <th style={th()}>Remisión</th>
-          <th style={th()}>Cliente</th>
-          <th style={th()}>Referencia</th>
-          <th style={th()}>Trabajo realizado</th>
-          <th style={th('right')}>Valor</th>
+          <ThOrden campo="fecha" orden={orden} onOrden={onOrden}>Fecha</ThOrden>
+          <ThOrden campo="numero" orden={orden} onOrden={onOrden}>Remisión</ThOrden>
+          <ThOrden campo="cliente" orden={orden} onOrden={onOrden}>Cliente</ThOrden>
+          <ThOrden campo="referencia" orden={orden} onOrden={onOrden}>Referencia</ThOrden>
+          <ThOrden campo="trabajo" orden={orden} onOrden={onOrden}>Trabajo realizado</ThOrden>
+          <ThOrden campo="valor" orden={orden} onOrden={onOrden} align="right">Valor</ThOrden>
           <th style={{ ...th(), width: 1 }} />
         </tr>
       </thead>
@@ -333,9 +414,7 @@ function PendientesTabla({ rows, seleccion, setSeleccion, onPdf, pdfId }) {
               </td>
               <td style={{ ...td, whiteSpace: 'nowrap', color: 'var(--ink-3)', fontSize: 12 }}>{fmtFecha(r.fecha)}</td>
               <td style={{ ...td, whiteSpace: 'nowrap' }}>
-                {r.numero
-                  ? <span className="mono" style={{ fontWeight: 600, color: 'var(--accent)', fontSize: 12 }}>{r.numero}</span>
-                  : <span title="Aún no se ha emitido; toma su número al facturarla" style={{ fontSize: 12, color: 'var(--ink-3)' }}>Sin emitir</span>}
+                <span className="mono" style={{ fontWeight: 600, color: 'var(--accent)', fontSize: 12 }}>{r.numero}</span>
                 {r.orden_numero && <div className="mono" style={{ fontSize: 11, color: 'var(--ink-3)' }}>{r.orden_numero}</div>}
               </td>
               <td style={{ ...td, fontWeight: 500 }}>{r.cliente_nombre}</td>
@@ -359,19 +438,19 @@ function PendientesTabla({ rows, seleccion, setSeleccion, onPdf, pdfId }) {
 
 // Como en Remisiones: toda la fila abre la factura (/facturacion/:id), donde
 // se ve el desglose completo y se edita. El estado se cambia también aquí.
-function HistorialTabla({ rows, onEstado, onAbrir, busyId }) {
+function HistorialTabla({ rows, onEstado, onAbrir, busyId, orden, onOrden }) {
   return (
     <table style={{ width: '100%', minWidth: 900, borderCollapse: 'collapse', fontSize: 13 }}>
       <thead>
         <tr style={{ background: 'var(--surface-2)', borderBottom: '1px solid var(--border)' }}>
-          <th style={th()}>Factura</th>
-          <th style={th()}>Fecha</th>
-          <th style={th()}>Cliente</th>
-          <th style={th()}>Referencia</th>
-          <th style={th()}>Trabajo realizado</th>
-          <th style={th()}>Remisiones</th>
-          <th style={th('right')}>Total</th>
-          <th style={th()}>Estado</th>
+          <ThOrden campo="numero" orden={orden} onOrden={onOrden}>Factura</ThOrden>
+          <ThOrden campo="fecha" orden={orden} onOrden={onOrden}>Fecha</ThOrden>
+          <ThOrden campo="cliente" orden={orden} onOrden={onOrden}>Cliente</ThOrden>
+          <ThOrden campo="referencia" orden={orden} onOrden={onOrden}>Referencia</ThOrden>
+          <ThOrden campo="trabajo" orden={orden} onOrden={onOrden}>Trabajo realizado</ThOrden>
+          <ThOrden campo="remisiones" orden={orden} onOrden={onOrden}>Remisiones</ThOrden>
+          <ThOrden campo="total" orden={orden} onOrden={onOrden} align="right">Total</ThOrden>
+          <ThOrden campo="estado" orden={orden} onOrden={onOrden}>Estado</ThOrden>
           <th style={{ ...th(), width: 1 }} />
         </tr>
       </thead>
@@ -471,6 +550,8 @@ export default function Facturacion() {
   const [clientes, setClientes] = useState([])
   const debounceRef = useRef(null)
   const reqRef = useRef(0)
+  const [ordenPend, setOrdenPend] = useOrden('facturacion.orden.pendientes')
+  const [ordenHist, setOrdenHist] = useOrden('facturacion.orden.historial')
 
   // Texto con debounce; selects y fechas aplican igual de rápido (350 ms).
   useEffect(() => {
@@ -515,9 +596,12 @@ export default function Facturacion() {
 
   const actual = data[tab]
   const texto = busqueda.trim().toLowerCase()
-  const rows = (actual?.results || []).filter(r => tab !== 'pendientes' || !texto || [
+  const filtradas = (actual?.results || []).filter(r => tab !== 'pendientes' || !texto || [
     r.cliente_nombre, r.numero, r.orden_numero, ...(r.referencias || []),
   ].some(v => (v || '').toLowerCase().includes(texto)))
+  const rows = tab === 'pendientes'
+    ? ordenar(filtradas, ordenPend, ORDEN_PENDIENTES)
+    : ordenar(filtradas, ordenHist, ORDEN_HISTORIAL)
   const seleccionadas = (data.pendientes?.results || []).filter(r => seleccion.has(r.id))
   const totalSel = seleccionadas.reduce((s, r) => s + Number(r.total || 0), 0)
 
@@ -577,9 +661,16 @@ export default function Facturacion() {
             <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: 'var(--ink)' }}>
               {tab === 'pendientes' ? 'Remisiones por facturar' : 'Historial de facturas'}
             </h1>
-            {actual && tab === 'historial' && (
+            {actual && (
               <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>
-                {count} {count === 1 ? 'factura' : 'facturas'}
+                {tab === 'historial'
+                  ? `${count} ${count === 1 ? 'factura' : 'facturas'}`
+                  : `${count} ${count === 1 ? 'remisión' : 'remisiones'}`}
+                {tab === 'pendientes' && actual.sin_emitir > 0 && (
+                  <span title="Producción aún no ha generado estas remisiones, así que no tienen consecutivo. Aparecen aquí con su número REM- en cuanto se generen.">
+                    {' · '}{actual.sin_emitir} {actual.sin_emitir === 1 ? 'espera' : 'esperan'} que producción la{actual.sin_emitir === 1 ? '' : 's'} emita
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -649,17 +740,21 @@ export default function Facturacion() {
               </div>
               <div style={{ fontSize: 12 }}>
                 {tab === 'pendientes'
-                  ? (texto ? 'Ninguna remisión pendiente coincide con la búsqueda.' : 'Las remisiones aparecen aquí en cuanto quedan listas para remisión.')
+                  ? (texto ? 'Ninguna remisión pendiente coincide con la búsqueda.' : 'Las remisiones aparecen aquí en cuanto producción las emite (con su número REM-).')
                   : 'Las facturas que registres en Pendientes quedan aquí.'}
               </div>
             </div>
           ) : (
             <div className="table-scroll">
               {tab === 'pendientes' ? (
-                <PendientesTabla rows={rows} seleccion={seleccion} setSeleccion={setSeleccion} onPdf={bajarPdf} pdfId={pdfId} />
+                <PendientesTabla
+                  rows={rows} seleccion={seleccion} setSeleccion={setSeleccion} onPdf={bajarPdf} pdfId={pdfId}
+                  orden={ordenPend} onOrden={setOrdenPend}
+                />
               ) : (
                 <HistorialTabla
                   rows={rows} onEstado={cambiarEstado} onAbrir={f => navigate(`/facturacion/${f.id}`)} busyId={busyId}
+                  orden={ordenHist} onOrden={setOrdenHist}
                 />
               )}
             </div>

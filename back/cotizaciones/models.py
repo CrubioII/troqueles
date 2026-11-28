@@ -3,6 +3,7 @@ import unicodedata
 
 from django.conf import settings
 from django.db import IntegrityError, models, transaction
+from django.utils import timezone
 
 
 def normalizar_nombre_cliente(nombre):
@@ -783,13 +784,29 @@ class Remision(models.Model):
         ("pendiente", "Pendiente"),
         ("liquidada", "Liquidada"),
         ("consolidada", "Consolidada"),
+        # Never deleted once numbered: undoing it voids it and keeps its REM-
+        # number so the consecutive never loses one (see `anular`).
+        ("anulada", "Anulada"),
     ]
 
     numero = models.CharField(max_length=20, unique=True, blank=True, null=True)
     fecha = models.DateField()
+    # Null only on a voided remission: it frees its OP so the OP can get a new
+    # one, and keeps the reference in `orden_anulada`.
     orden = models.OneToOneField(
-        OrdenProduccion, on_delete=models.PROTECT, related_name="remision"
+        OrdenProduccion, on_delete=models.PROTECT, related_name="remision",
+        null=True, blank=True,
     )
+    orden_anulada = models.ForeignKey(
+        OrdenProduccion, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="remisiones_anuladas",
+    )
+    anulada_en = models.DateTimeField(null=True, blank=True)
+    anulada_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="remisiones_anuladas",
+    )
+    anulacion_motivo = models.TextField(blank=True, default="")
     cliente = models.ForeignKey(Cliente, on_delete=models.PROTECT, related_name="remisiones")
     # Snapshot editable de datos del cliente impresos en el comprobante
     direccion = models.CharField(max_length=300, blank=True, default="")
@@ -860,6 +877,29 @@ class Remision(models.Model):
                 except IntegrityError:
                     continue
         raise IntegrityError("Could not allocate a remission number")
+
+    @property
+    def op_referencia(self):
+        """The OP this remission belongs (or belonged, if voided) to."""
+        return self.orden if self.orden_id else self.orden_anulada
+
+    def anular(self, user=None, motivo=""):
+        """Void an issued remission instead of deleting it: it keeps its REM-
+        number (so the consecutive never skips), its items and its client, and
+        releases its OP so a new remission can be made for it. The caller undoes
+        any merge first (an anulada never groups others)."""
+        self.orden_anulada_id = self.orden_id or self.orden_anulada_id
+        self.orden = None
+        self.estado = "anulada"
+        self.anulada_en = timezone.now()
+        self.anulada_por = user if getattr(user, "is_authenticated", False) else None
+        self.anulacion_motivo = (motivo or "").strip()
+        self.consolidada_en = None
+        self.consolidada_en_remision = None
+        self.save(update_fields=[
+            "orden", "orden_anulada", "estado", "anulada_en", "anulada_por",
+            "anulacion_motivo", "consolidada_en", "consolidada_en_remision", "modificado",
+        ])
 
     def factura_activa(self):
         """The non-cancelled invoice that covers this remission, if any. While

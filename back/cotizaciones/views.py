@@ -390,9 +390,29 @@ def _error_facturada(*remisiones):
 HISTORIAL_TROQUEL_LEGACY_HASTA = datetime.datetime(2026, 9, 12, tzinfo=datetime.timezone.utc)
 
 
-def _borrar_remision_de_op(op):
-    """Elimina la remisión pendiente de la OP para que su troquel pueda volver a
-    la cola del Operador. Devuelve un mensaje de error si ya no se puede deshacer.
+def _retirar_remision(rem, user=None, motivo=""):
+    """Undo a remission without ever losing a consecutive number.
+
+    Issued (has its REM- number) → it is voided (`Remision.anular`): it keeps
+    the number, the items and the client, and frees its OP. Never issued (the
+    automatic draft created when the OP hits 100%) → there is no number to
+    lose, so the draft is simply discarded. If it grouped others, they get
+    their own remission back first.
+    """
+    with transaction.atomic():
+        if rem.remisiones_consolidadas.exists():
+            _desconsolidar_remision(rem)
+        if rem.numero:
+            rem.anular(user, motivo)
+        else:
+            rem.items.all().delete()
+            rem.delete()
+
+
+def _borrar_remision_de_op(op, user=None, motivo=""):
+    """Retira la remisión pendiente de la OP para que su troquel pueda volver a
+    la cola del Operador (anulándola si ya tenía número, ver _retirar_remision).
+    Devuelve un mensaje de error si ya no se puede deshacer.
 
     Si la remisión vive fusionada dentro de otra, solo se le sacan sus ítems (las
     demás OPs conservan la suya); si es ella la que consolidó a otras, se
@@ -421,10 +441,7 @@ def _borrar_remision_de_op(op):
     with transaction.atomic():
         if destino is not None and destino.pk != rem.pk:
             destino.items.filter(op=op).delete()
-        if rem.remisiones_consolidadas.exists():
-            _desconsolidar_remision(rem)
-        rem.items.all().delete()
-        rem.delete()
+        _retirar_remision(rem, user, motivo)
     return None
 
 
@@ -607,11 +624,12 @@ def _consolidar_remisiones(target, fuentes, now=None):
                     op_id=it.op_id or f.orden_id,
                 )
                 next_orden += 1
+            # An issued source keeps its REM- number (shown as merged into the
+            # target): clearing it would lose a consecutive.
             f.estado = "consolidada"
-            f.numero = None
             f.consolidada_en = now
             f.consolidada_en_remision = target
-            f.save(update_fields=["numero", "estado", "consolidada_en", "consolidada_en_remision", "modificado"])
+            f.save(update_fields=["estado", "consolidada_en", "consolidada_en_remision", "modificado"])
     target.refresh_from_db()
     return target
 
@@ -1565,7 +1583,8 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
                     f"La remisión {destino.numero or ''} de {op.numero} ya se generó. Para agregarle "
                     "trabajo, primero devuélvela desde Producción › Remisiones › Historial."
                 ]})
-            error = _borrar_remision_de_op(op)
+            error = _borrar_remision_de_op(
+                op, self.request.user, "Se agregó trabajo nuevo a la OP")
             if error:
                 raise ValidationError({"procesos": [error]})
             return True
@@ -2126,7 +2145,7 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
         error = _error_facturada(rem)
         if error:
             return Response({"error": error}, status=409)
-        rem.delete()  # cascada: borra también sus RemisionItem
+        _retirar_remision(rem, request.user, "Cancelada desde la cola de remisiones")
         return Response({"ok": True})
 
     @action(detail=False, methods=["get"], url_path="remisionables_operador")
@@ -2430,6 +2449,8 @@ class OrdenProduccionViewSet(viewsets.ModelViewSet):
                     orden__formatos_cuchillas__estado="aprobado",
                 )
             )
+            # A voided one is no longer a delivery: Admin keeps it in Anuladas.
+            .exclude(estado="anulada")
             .select_related("cliente", "orden", "generada_por")
             .prefetch_related("remisiones_consolidadas__orden")
             .distinct()
@@ -2603,14 +2624,14 @@ class RemisionViewSet(viewsets.ModelViewSet):
 
     Se autogeneran al completar una OP (estado=pendiente). El dueño edita los
     ítems y al liquidar se envía por correo (cliente + contaduría) y pasa al
-    historial (estado=liquidada). No se crean desde la API; sí se pueden borrar
-    (DELETE) para deshacer una liquidación equivocada.
+    historial (estado=liquidada). No se crean desde la API ni se borran nunca:
+    para deshacer una se anula (conserva su número, ver `anular`).
     El Operador envía remisiones por su propia vía:
     OrdenProduccionViewSet.enviar_remision (solo PDF cliente).
     """
 
-    queryset = Remision.objects.select_related("cliente", "orden").prefetch_related(
-        "items", "orden__procesos",
+    queryset = Remision.objects.select_related("cliente", "orden", "orden_anulada", "anulada_por").prefetch_related(
+        "items", "orden__procesos", "orden_anulada__procesos",
         "remisiones_consolidadas__orden__procesos",
     )
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
@@ -2644,40 +2665,49 @@ class RemisionViewSet(viewsets.ModelViewSet):
         return qs
 
     def destroy(self, request, *args, **kwargs):
-        """DELETE /api/remisiones/{id}/ — borra la remisión (solo Admin, via initial).
+        """DELETE /api/remisiones/{id}/ — kept for old bundles: it no longer
+        deletes anything, it voids the remission exactly like `anular`."""
+        return self._anular(request)
 
-        Deshace una liquidación equivocada: el comprobante desaparece y sus OPs
-        vuelven a la cola de remisiones del Operador para poder rehacerlo. El
-        correo ya enviado, obviamente, no se deshace.
+    @action(detail=True, methods=["post"], url_path="anular")
+    def anular(self, request, pk=None):
+        """POST /api/remisiones/{id}/anular/ — Body { motivo } (solo Admin).
 
-        Si agrupaba otras remisiones, primero se desconsolidan (cada OP recupera
-        la suya, en pendiente). Una remisión consolidada dentro de otra no se
-        borra por su cuenta: sus ítems se cobran en el destino, así que hay que
-        borrar (o devolver) esa otra.
+        Una remisión nunca se elimina: se anula. Conserva su número REM- (el
+        consecutivo no pierde ninguno), sus ítems y el cliente, queda en
+        Remisiones › Anuladas, y sus OPs vuelven a la cola de remisiones para
+        rehacerla con un número nuevo. El correo ya enviado no se deshace.
+
+        Si agrupaba otras, primero se desconsolidan (cada OP recupera la suya).
+        Una consolidada dentro de otra no se anula sola: se anula (o devuelve)
+        la que la agrupa. Tampoco una que está en una factura activa.
         """
+        return self._anular(request)
+
+    def _anular(self, request):
         rem = self.get_object()
+        if rem.estado == "anulada":
+            return Response({"error": f"La remisión {rem.numero} ya está anulada."}, status=409)
         if rem.estado == "consolidada":
             destino = rem.consolidada_en_remision
             return Response({
                 "error": (
-                    f"La remisión {rem.numero} está consolidada dentro de "
+                    f"La remisión {rem.numero or ''} está consolidada dentro de "
                     f"{destino.numero if destino else 'otra remisión'}; "
-                    "elimina esa remisión."
+                    "anula esa remisión."
                 ),
             }, status=409)
         error = _error_facturada(rem)
         if error:
             return Response({"error": error}, status=409)
+        motivo = (request.data.get("motivo") if hasattr(request, "data") else "") or ""
         numero = rem.numero
         with transaction.atomic():
-            if rem.remisiones_consolidadas.exists():
-                _desconsolidar_remision(rem)
             if rem.orden_id:
                 OrdenProduccion.objects.filter(pk=rem.orden_id).update(
                     remision_solicitada_en=None, remision_solicitada_por=None)
-            rem.items.all().delete()
-            rem.delete()
-        return Response({"ok": True, "numero": numero}, status=200)
+            _retirar_remision(rem, request.user, motivo or "Anulada por el administrador")
+        return Response({"ok": True, "numero": numero, "anulada": bool(numero)}, status=200)
 
     @action(detail=True, methods=["post"], url_path="pdf")
     def generar_pdf(self, request, pk=None):
@@ -2963,7 +2993,8 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
         if formato.estado in ("borrador", "devuelto"):
             return Response({"error": "Este formato no está enviado."}, status=409)
         if formato.orden_id:
-            error = _borrar_remision_de_op(formato.orden)
+            error = _borrar_remision_de_op(
+                formato.orden, request.user, "Se devolvió el envío del formato de cuchillas")
             if error:
                 return Response({"error": error}, status=409)
             formato.orden.procesos.filter(proceso_id="troquel").update(
@@ -2993,7 +3024,9 @@ class FormatoCuchillasViewSet(viewsets.ModelViewSet):
         if formato.orden_id:
             rem = Remision.objects.filter(orden=formato.orden).first()
             rem_id = rem.id if rem else None
-            error = _borrar_remision_de_op(formato.orden)
+            error = _borrar_remision_de_op(
+                formato.orden, request.user,
+                f"Formato de cuchillas devuelto al operador: {request.data.get('motivo') or ''}".rstrip(": "))
             if error:
                 return Response({"error": error}, status=409)
         _reabrir_troquel(formato, request.data.get("motivo"), revisor=request.user)
@@ -3279,7 +3312,7 @@ class RegistroProcesoViewSet(viewsets.ModelViewSet):
         op = registro.orden
 
         with transaction.atomic():
-            error = _borrar_remision_de_op(op)
+            error = _borrar_remision_de_op(op, request.user, "Se anuló un registro de producción de la OP")
             if error:
                 return Response({"error": error}, status=409)
             op.procesos.filter(proceso_id=registro.proceso_id).update(
