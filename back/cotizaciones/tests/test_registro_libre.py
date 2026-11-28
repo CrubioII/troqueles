@@ -149,3 +149,83 @@ class RegistroLibreTestCase(TestCase):
         op.remision_descartada_operador_en = None
         op.save(update_fields=["remision_descartada_operador_en"])
         self.assertIn(op_id, [r["id"] for r in self._remisionables()])
+
+
+class RegistroLibreMaterialGuillotinaTestCase(TestCase):
+    """Troqueladora asks size + work type + material; plant workers
+    (es_estaciones) also run Guillotina, with its own free record."""
+
+    def setUp(self):
+        self.u_est = User.objects.create_user("op_est_mat", password="x")
+        PerfilOperador.objects.create(user=self.u_est, es_estaciones=True)
+        self.cliente = Cliente.objects.create(nombre="Cliente Material", email="m@test.com")
+        self.c_est = _api(self.u_est)
+
+    def _payload(self, **extra):
+        data = {
+            "estacion": "troqueladora",
+            "proceso_id": "troquelado",
+            "cliente": self.cliente.id,
+            "referencia": "Caja ponqué",
+            "cantidad_realizada": 2180,
+            "tamano": "otro",
+            "tamano_otro": "70x100",
+            "tipo_trabajo": "troquelado",
+            "material": "Acetato",
+        }
+        data.update(extra)
+        return data
+
+    def test_troqueladora_guarda_tamano_y_material(self):
+        resp = self.c_est.post(URL, self._payload(), format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertEqual(resp.data["material"], "Acetato")
+        self.assertEqual(resp.data["tamano_otro"], "70x100")
+        listado = self.c_est.get(f"/api/registros-proceso/?orden={resp.data['orden']}").data
+        filas = listado if isinstance(listado, list) else listado["results"]
+        self.assertEqual(filas[0]["material"], "Acetato")
+
+    def test_material_y_tamano_son_opcionales(self):
+        resp = self.c_est.post(
+            URL, self._payload(material="", tamano="", tamano_otro=""), format="json",
+        )
+        self.assertEqual(resp.status_code, 201, resp.data)
+
+    def test_troqueladora_sin_tipo_trabajo_pide_recargar(self):
+        # What an old bundle (quantity-only form) sends: refused, nothing created.
+        antes = OrdenProduccion.objects.count()
+        resp = self.c_est.post(URL, self._payload(tipo_trabajo="", material="", tamano=""), format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data["code"], "app_desactualizada")
+        self.assertEqual(OrdenProduccion.objects.count(), antes)
+
+    def test_estaciones_registra_corte_inicial_libre(self):
+        resp = self.c_est.post(URL, self._payload(
+            estacion="guillotina", proceso_id="corteInicial", tipo_trabajo="",
+            material="Cartulina", procesos_adicionales=["impresion"],
+        ), format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        op = OrdenProduccion.objects.get(pk=resp.data["orden"])
+        self.assertTrue(op.corte_inicial_active)
+        self.assertFalse(op.corte_final_active)
+        self.assertEqual(resp.data["siguiente_estacion"]["id"], "impresora")
+
+    def test_estaciones_registra_corte_final_libre(self):
+        resp = self.c_est.post(URL, self._payload(
+            estacion="guillotina_final", proceso_id="corteFinal", tipo_trabajo="",
+        ), format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        op = OrdenProduccion.objects.get(pk=resp.data["orden"])
+        self.assertTrue(op.corte_final_active)
+        self.assertIsNone(resp.data["siguiente_estacion"])
+        self.assertTrue(Remision.objects.filter(orden=op).exists())
+
+    def test_estaciones_ve_la_cola_de_guillotina(self):
+        for estacion in ("guillotina", "guillotina_final"):
+            resp = self.c_est.get(f"/api/ordenes/produccion_pendientes/?estacion={estacion}")
+            self.assertEqual(resp.status_code, 200)
+
+    def test_libre_ignora_dinero_del_operador(self):
+        resp = self.c_est.post(URL, self._payload(monto_cobrado="99999"), format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertIn(resp.data.get("monto_cobrado"), (None, "0", "0.00", 0))

@@ -12,7 +12,8 @@ tiene uno solo, pero nada impide combinarlos):
                      no remisiones de producción de cadena ni la estación
                      'troqueladora' (esa es la máquina que trocela, no quien
                      fabrica el molde).
-  es_estaciones   → Impresora, Laminadora, Barnizadora, Troqueladora.
+  es_estaciones   → Impresora, Laminadora, Barnizadora, Troqueladora y
+                     Guillotina (los operadores de planta también cortan).
   es_guillotina   → Guillotina (corte inicial + corte final).
   es_contadora    → módulo Facturación únicamente (no es un rol de producción).
   es_jefe_produccion → un nivel por debajo del Admin: todo lo de es_general y,
@@ -24,7 +25,7 @@ tiene uno solo, pero nada impide combinarlos):
 
 ROLES_A_ESTACIONES = {
     "es_general": {"guillotina", "guillotina_final", "impresora", "laminadora", "barnizadora", "troqueladora"},
-    "es_estaciones": {"impresora", "laminadora", "barnizadora", "troqueladora"},
+    "es_estaciones": {"guillotina", "guillotina_final", "impresora", "laminadora", "barnizadora", "troqueladora"},
     "es_guillotina": {"guillotina", "guillotina_final"},
     "es_troquelador": set(),
     "es_jefe_produccion": {"guillotina", "guillotina_final", "impresora", "laminadora", "barnizadora", "troqueladora"},

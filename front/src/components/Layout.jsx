@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { useGuardedAction, useGuardedNavigate } from '../context/UnsavedChangesContext'
 import { Icon } from './Icons'
 import { CampanaNotificaciones } from './Notificaciones'
+import { useNuevaVersion } from '../lib/useNuevaVersion'
 import { puedeEstacion, puedeTroqueles, puedeRemisionesGenerales, puedeFacturacion, soloFacturacion, puedeAlgunaRemision } from '../lib/accesoProduccion'
 
 // `estacion`/`troqueles`/`remisionesGenerales`: qué le exige este link al rol
@@ -163,6 +164,7 @@ function DrawerLink({ link, currentPath, onNavigate, sub }) {
 export default function Layout() {
   const { user, logout } = useAuth()
   const guardedAction = useGuardedAction()
+  const hayNuevaVersion = useNuevaVersion()
   // Cerrar sesión también saca al usuario de un formulario a medio llenar
   const salir = () => guardedAction(logout)
   const location = useLocation()
@@ -320,6 +322,16 @@ export default function Layout() {
           </div>
         </div>
 
+        {hayNuevaVersion && (
+          <div role="status" style={{
+            margin: '8px 16px 0', padding: '10px 14px', borderRadius: 8, fontSize: 13,
+            background: 'var(--warn-soft, #fef6e7)', color: 'var(--ink-1)',
+            display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap',
+          }}>
+            <span>Hay una versión nueva de la aplicación. Actualiza para ver todos los campos.</span>
+            <button className="btn accent" type="button" onClick={() => window.location.reload()}>Actualizar</button>
+          </div>
+        )}
         <Outlet />
       </div>
 

@@ -2,10 +2,11 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { fmtNum, fmtCOP } from '../components/core'
 import { Icon } from '../components/Icons'
-import { RegistroMaquinaForm, RegistroMaquinaHistory } from '../components/RegistroMaquina'
+import { RegistroMaquinaHistory } from '../components/RegistroMaquina'
 import { getRegistrosMaquina } from '../api'
 import { useSyncPolling } from '../lib/useSyncPolling'
 import EstacionMaquina from './EstacionMaquina'
+import { useAuth } from '../context/AuthContext'
 
 const BLOQUE_HORAS = 4
 
@@ -37,8 +38,11 @@ function agruparPorBloque(registros) {
   return Array.from(grupos.values()).sort((a, b) => b.timestamp - a.timestamp)
 }
 
-// Cortes sueltos que no vienen de una OP: descripción y costo cobrado a mano.
-function RegistroLibre() {
+// Legacy loose cuts (RegistroMaquina): description + cost typed by hand.
+// Replaced by the station free record (the "+ Registro libre" button of the
+// chain, which creates an OP and never touches money); kept read-only and
+// Admin-only so the old cuts and their costs aren't lost.
+function CortesAntiguos() {
   const [registros, setRegistros] = useState([])
   const [loadingRegistros, setLoadingRegistros] = useState(true)
 
@@ -58,8 +62,6 @@ function RegistroLibre() {
 
   return (
     <div style={{ marginTop: 4 }}>
-      <RegistroMaquinaForm maquina="guillotina" onCreated={() => loadRegistros(true)} />
-
       {loadingRegistros ? (
         <div className="section" style={{ marginTop: 16, padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>
           Cargando…
@@ -90,10 +92,13 @@ function RegistroLibre() {
   )
 }
 
-// Página centralizada de Guillotina: cadena (corte inicial + corte final de
-// las OPs) y registro libre (cortes sueltos sin OP), en un solo lugar.
+// Página centralizada de Guillotina: corte inicial + corte final de las OPs en
+// una sola cola, con su "+ Registro libre" para cortes sin OP. El Admin ve
+// además la pestaña de cortes sueltos antiguos (con costo).
 export default function Guillotina() {
   const navigate = useNavigate()
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
   const [tab, setTab] = useState('cadena')
 
   return (
@@ -110,8 +115,9 @@ export default function Guillotina() {
       </div>
 
       <div style={{ maxWidth: 1200, margin: '0 auto', padding: 'clamp(12px, 4vw, 28px) clamp(12px, 4vw, 24px)', width: '100%' }}>
+        {isAdmin && (
         <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
-          {[['cadena', 'Cadena (OPs)'], ['libre', 'Registro libre']].map(([id, label]) => (
+          {[['cadena', 'Cadena (OPs)'], ['antiguos', 'Cortes sueltos (antiguos)']].map(([id, label]) => (
             <button
               key={id}
               className={'btn' + (tab === id ? ' primary' : '')}
@@ -121,11 +127,12 @@ export default function Guillotina() {
             </button>
           ))}
         </div>
+        )}
 
-        {tab === 'cadena' ? (
+        {tab === 'cadena' || !isAdmin ? (
           <EstacionMaquina estaciones={['guillotina', 'guillotina_final']} embedded />
         ) : (
-          <RegistroLibre />
+          <CortesAntiguos />
         )}
       </div>
     </div>

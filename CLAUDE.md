@@ -77,6 +77,11 @@ Free station record ("+ Registro libre" in EstacionMaquina.jsx, Impresora/Lamina
   — POST /api/registros-proceso/libre/ (RegistroProcesoViewSet.libre) creates a direct OP with `origen="registro_libre"` (no prices, cantidad = what came out) + its OpProcesos, then reuses the normal record path (`_registrar`)
   — No extras → OP complete → remisión pendiente → shows in Producción › Remisiones (central page, /produccion/remisiones — es_general / Admin) with the "Registro libre" badge; with extras → OP enters the next station's queue
   — Anular the only record of a free OP deletes that OP too
+  — Guillotina (corte inicial / corte final, one combined screen) has the same "+ Registro libre" with a "¿Qué corte es?" picker; the old RegistroMaquina loose-cut form (it asked the Operador for a cost) is gone — its history is an Admin-only tab
+  — Troqueladora and Guillotina also record `RegistroProceso.material` (free text, optional). A Troqueladora free record without tipo_trabajo gets 400 `app_desactualizada` (sign of a stale bundle)
+  — es_estaciones includes Guillotina (plant workers cut too). Station claims live in the JWT: a role change shows in the nav after re-login
+
+Stale bundles: the build publishes /version.json; lib/useNuevaVersion.js (mounted in Layout) shows an "Actualizar" banner and reloads on the next route change when a newer build is out — plant tablets keep the SPA open for days
 
 Operador's remisiones queue (Troqueles.jsx › tab "Remisiones", the pre-generation OP picker — NOT the Historial tab, which stays an unmutable log): each OP has a "Descartar" button
   — `OrdenProduccion.remision_descartada_operador_en` — not a delete: the OP stays intact with its formato de cuchillas aprobado, it just drops out of the Operador's `remisionables_operador` queue; the Admin keeps managing it same as always (unaffected by this flag)

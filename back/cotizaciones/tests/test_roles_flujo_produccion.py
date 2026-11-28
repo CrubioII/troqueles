@@ -91,7 +91,6 @@ class RolesProduccionTestCase(TestCase):
             (self.c_guillotina, "laminadora", "laminado"),
             (self.c_guillotina, "barnizadora", "uvTotal"),
             (self.c_guillotina, "troqueladora", "troquelado"),
-            (self.c_estaciones, "guillotina", "corteInicial"),
             (self.c_troquelador, "guillotina", "corteInicial"),
             (self.c_troquelador, "impresora", "impresion"),
             (self.c_troquelador, "laminadora", "laminado"),

@@ -3226,6 +3226,21 @@ class RegistroProcesoViewSet(viewsets.ModelViewSet):
                 return Response(
                     {"error": f"'{pid}' no es un proceso posterior a {est['label']}."}, status=400,
                 )
+        # Troqueladora's form always asks for the work type. A free record
+        # without it comes from a screen still running an old version of the
+        # app (it only asked for the quantity): refuse it so the worker reloads
+        # instead of saving a record with no size, work type or material.
+        if estacion_id == "troqueladora" and not str(data.get("tipo_trabajo") or "").strip():
+            return Response(
+                {
+                    "code": "app_desactualizada",
+                    "error": (
+                        "Falta el tipo de trabajo. Si no ves ese campo, recarga la página "
+                        "(tu pantalla tiene una versión vieja de la aplicación)."
+                    ),
+                },
+                status=400,
+            )
 
         with transaction.atomic():
             op = OrdenProduccion.objects.create(
@@ -3235,7 +3250,8 @@ class RegistroProcesoViewSet(viewsets.ModelViewSet):
                 cantidad=cantidad,
                 tipo_cliente=cliente.tipo or "final",
                 origen="registro_libre",
-                corte_final_active="corteFinal" in adicionales,
+                corte_inicial_active=proceso_id == "corteInicial",
+                corte_final_active="corteFinal" in [proceso_id, *adicionales],
             )
             for pid in [proceso_id, *adicionales]:
                 OpProceso.objects.create(orden=op, proceso_id=pid, active=True)
@@ -3284,7 +3300,7 @@ class RegistroProcesoViewSet(viewsets.ModelViewSet):
         "tiro_active", "tiro_colores_num", "tiro_colores_desc",
         "retiro_active", "retiro_colores_num", "retiro_colores_desc",
         "tipo_laminado", "tipo_metalizado", "tipo_metalizado_otro",
-        "tipo_trabajo", "tipo_trabajo_otro", "observaciones",
+        "tipo_trabajo", "tipo_trabajo_otro", "material", "observaciones",
     }
 
     def update(self, request, *args, **kwargs):

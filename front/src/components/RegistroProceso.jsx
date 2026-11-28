@@ -42,6 +42,7 @@ const EMPTY = {
   retiro_active: false, retiro_colores_num: 0, retiro_colores_desc: '',
   tipo_laminado: '', tipo_metalizado: '', tipo_metalizado_otro: '',
   tipo_trabajo: '', tipo_trabajo_otro: '',
+  material: '',
   observaciones: '',
 }
 
@@ -393,6 +394,19 @@ export function RegistroProcesoForm({ estacion, orden, onCreated, libre = false 
         </FieldGroup>
       )}
 
+      {cfg.campos.includes('material') && (
+        <FieldGroup title="Material (opcional)">
+          <Field label="Tipo de material">
+            <input
+              className="input"
+              placeholder="Ej. Acetato, cartulina, colaminado…"
+              value={form.material}
+              onChange={e => set('material', e.target.value)}
+            />
+          </Field>
+        </FieldGroup>
+      )}
+
       {cfg.campos.includes('lado') && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>Marca tiro, retiro o ambos — no pueden quedar los dos sin marcar.</span>
@@ -591,6 +605,7 @@ export function RegistroProcesoHistory({ registros, loading, showOrden = true, o
     if (r.tipo_trabajo) {
       partes.push(r.tipo_trabajo === 'otro' ? (r.tipo_trabajo_otro || 'Otro') : (r.tipo_trabajo_label || r.tipo_trabajo))
     }
+    if (r.material) partes.push(`Material: ${r.material}`)
     if (r.observaciones) partes.push(r.observaciones)
     return partes.join(' · ') || '—'
   }
@@ -826,6 +841,11 @@ function EditarRegistroModal({ registro, onClose, onSaved }) {
             <Field label="Tipo de trabajo">
               {select('tipo_trabajo', TIPOS_TRABAJO_REGISTRO)}
               {d.tipo_trabajo === 'otro' && <input className="input" style={{ marginTop: 6 }} placeholder="¿Cuál?" value={d.tipo_trabajo_otro} onChange={set('tipo_trabajo_otro')} />}
+            </Field>
+          )}
+          {campos.includes('material') && (
+            <Field label="Material">
+              <input className="input" placeholder="Ej. Acetato, cartulina…" value={d.material} onChange={set('material')} />
             </Field>
           )}
           <Field label="Observaciones">

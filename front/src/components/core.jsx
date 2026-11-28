@@ -79,8 +79,8 @@ export const TIPOS_METALIZADO_REGISTRO = [
 export const ESTACIONES_CONFIG = {
   guillotina: {
     label: 'Guillotina · Corte inicial', ruta: '/produccion/guillotina/inicial',
-    desc: 'Corte previo a la cadena: la OP pasa por acá antes de Impresora. Solo registra cuántas unidades salieron cortadas.',
-    color: '#6B5B95', soft: '#EAE6F2', campos: [],
+    desc: 'Corte previo a la cadena: la OP pasa por acá antes de Impresora. Registra lo que salió cortado, el tamaño y el material.',
+    color: '#6B5B95', soft: '#EAE6F2', campos: ['tamano', 'material'],
     procesos: ['corteInicial'],
   },
   impresora: {
@@ -103,14 +103,14 @@ export const ESTACIONES_CONFIG = {
   },
   troqueladora: {
     label: 'Troqueladora', ruta: '/produccion/troqueladora',
-    desc: 'Último proceso: registra la cantidad que sale de la máquina, el tamaño y el tipo de trabajo.',
-    color: '#2E7D5B', soft: '#DCEFE3', campos: ['tamano', 'tipoTrabajo'],
+    desc: 'Último proceso: registra la cantidad que sale de la máquina, el tamaño, el tipo de trabajo y el material.',
+    color: '#2E7D5B', soft: '#DCEFE3', campos: ['tamano', 'tipoTrabajo', 'material'],
     procesos: ['troquelado'],
   },
   guillotina_final: {
     label: 'Guillotina · Corte final', ruta: '/produccion/guillotina/final',
-    desc: 'Corte de cierre: la OP pasa por acá después de Troqueladora. Solo registra cuántas unidades terminadas salieron.',
-    color: '#6B5B95', soft: '#EAE6F2', campos: [],
+    desc: 'Corte de cierre: la OP pasa por acá después de Troqueladora. Registra lo que salió terminado, el tamaño y el material.',
+    color: '#6B5B95', soft: '#EAE6F2', campos: ['tamano', 'material'],
     procesos: ['corteFinal'],
   },
   // Config de presentación para la página centralizada de Guillotina (pestaña

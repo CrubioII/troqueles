@@ -585,6 +585,11 @@ class RegistroProceso(models.Model):
     )
     tipo_trabajo_otro = models.CharField(max_length=120, blank=True, default="")
 
+    # Material worked (acetato, cartulina, colaminado…), free text and optional.
+    # Troqueladora and Guillotina ask for it; before it existed workers typed it
+    # into observaciones.
+    material = models.CharField(max_length=120, blank=True, default="")
+
     observaciones = models.TextField(blank=True, default="")
     operador = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
@@ -952,7 +957,7 @@ class PerfilOperador(models.Model):
     es_general = models.BooleanField("Acceso general (producción + remisión)", default=False)
     es_troquelador = models.BooleanField("Troquelador (módulo Troqueles)", default=False)
     es_estaciones = models.BooleanField(
-        "Estaciones (Impresora, Laminadora, Barnizadora, Troqueladora)", default=False,
+        "Estaciones (Guillotina, Impresora, Laminadora, Barnizadora, Troqueladora)", default=False,
     )
     es_guillotina = models.BooleanField("Guillotina", default=False)
     # Not a production role: the accountant only works in the Facturación module.

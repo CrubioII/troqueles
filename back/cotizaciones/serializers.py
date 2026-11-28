@@ -800,7 +800,7 @@ class RegistroProcesoSerializer(serializers.ModelSerializer):
             "tiro_active", "tiro_colores_num", "tiro_colores_desc",
             "retiro_active", "retiro_colores_num", "retiro_colores_desc",
             "tipo_laminado", "tipo_metalizado", "tipo_metalizado_otro",
-            "tipo_trabajo", "tipo_trabajo_label", "tipo_trabajo_otro", "observaciones",
+            "tipo_trabajo", "tipo_trabajo_label", "tipo_trabajo_otro", "material", "observaciones",
             "operador", "operador_username", "fecha_hora", "monto_cobrado",
         ]
         read_only_fields = ["cantidad_esperada", "faltante", "operador", "fecha_hora"]

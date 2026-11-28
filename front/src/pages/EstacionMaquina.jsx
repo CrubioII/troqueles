@@ -93,6 +93,8 @@ export default function EstacionMaquina({ estacion, estaciones, embedded = false
   const [aviso, setAviso] = useState(null)      // { tipo, texto } tras registrar
   const [ordenError, setOrdenError] = useState(null)  // fallo al guardar prioridades
   const [libreAbierto, setLibreAbierto] = useState(false)  // "+ Registro libre" form
+  // Combined screen (Guillotina): which of its stations the free record is for.
+  const [libreEstacion, setLibreEstacion] = useState(ids[0])
 
   const loadLista = (silent = false) => {
     if (!silent) setLoadingLista(true)
@@ -117,6 +119,7 @@ export default function EstacionMaquina({ estacion, estaciones, embedded = false
   // Al cambiar de estación (misma pantalla, otra ruta) se reinicia todo.
   useEffect(() => {
     setTab('pendientes'); setOrden(null); setBusqueda(''); setAviso(null); setLibreAbierto(false)
+    setLibreEstacion(ids[0])
     loadLista()
   }, [idsKey])
 
@@ -220,7 +223,27 @@ export default function EstacionMaquina({ estacion, estaciones, embedded = false
                 Para trabajos que no tienen OP cargada. Indica el cliente, la referencia y lo que salió;
                 al terminar se te preguntará si el trabajo sigue a otra máquina.
               </div>
-              <RegistroProcesoForm libre estacion={estacion} onCreated={handleLibreCreated} />
+              {combinado && (
+                <div style={{ padding: '10px 16px 0', display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-3)', marginRight: 4 }}>¿Qué corte es?</span>
+                  {ids.map(id => (
+                    <button
+                      key={id}
+                      type="button"
+                      className={'btn' + (libreEstacion === id ? ' primary' : '')}
+                      onClick={() => setLibreEstacion(id)}
+                    >
+                      {TIPO_CORTE_LABEL[id] || ESTACIONES_CONFIG[id]?.label || id}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <RegistroProcesoForm
+                key={combinado ? libreEstacion : estacion}
+                libre
+                estacion={combinado ? libreEstacion : estacion}
+                onCreated={handleLibreCreated}
+              />
             </Section>
           </>
         ) : orden ? (
@@ -250,15 +273,13 @@ export default function EstacionMaquina({ estacion, estaciones, embedded = false
                   {id === 'pendientes' && lista.length > 0 ? ` (${lista.length})` : ''}
                 </button>
               ))}
-              {!combinado && (
-                <button
-                  className="btn accent"
-                  style={{ marginLeft: 'auto' }}
-                  onClick={() => { setLibreAbierto(true); setAviso(null) }}
-                >
-                  + Registro libre
-                </button>
-              )}
+              <button
+                className="btn accent"
+                style={{ marginLeft: 'auto' }}
+                onClick={() => { setLibreAbierto(true); setAviso(null) }}
+              >
+                + Registro libre
+              </button>
             </div>
 
             {tab === 'pendientes' ? (
